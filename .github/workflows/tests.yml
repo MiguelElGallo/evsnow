@@ -86,7 +86,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: VEUKA/evsnow
+          slug: MiguelElGallo/evsnow
           files: ./coverage.xml
           flags: unittests
           name: codecov-umbrella
