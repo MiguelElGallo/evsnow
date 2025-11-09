@@ -8,6 +8,7 @@ Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkp
 
 ![alt text](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
 
+See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
 
 ## Installation
 
