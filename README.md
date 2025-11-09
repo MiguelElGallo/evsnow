@@ -1,8 +1,8 @@
 # evsnow
 
-[![Tests](https://github.com/VEUKA/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/VEUKA/evsnow/actions/workflows/tests.yml)
-[![CI/CD Pipeline](https://github.com/VEUKA/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/VEUKA/evsnow/actions/workflows/ci-cd.yml)
-[![codecov](https://codecov.io/gh/VEUKA/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/VEUKA/evsnow)
+[![Tests](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml)
+[![CI/CD Pipeline](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml)
+[![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
 
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
@@ -10,7 +10,7 @@ Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkp
 
 ```bash
 # Clone the repository
-git clone https://github.com/VEUKA/evsnow.git
+git clone https://github.com/MiguelElGallo/evsnow.git
 cd evsnow
 
 # Install dependencies
