@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+.env.smart
+.env.test
+AZURE_OPENAI_PROGRESS.md
+snowflake/

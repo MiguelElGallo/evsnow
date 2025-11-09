@@ -1,0 +1,14 @@
+name: Copilot Setup Steps
+on: workflow_dispatch
+
+env:
+  COPILOT_AGENT_FIREWALL_DISABLED: true
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Setup Copilot with unrestricted internet access
+        run: echo "Copilot agent firewall disabled - full internet access enabled"

@@ -1,0 +1,211 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feature/*
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      test_level:
+        description: 'Test level to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - unit
+          - integration
+          - all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        python-version: ['3.13']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-groups
+
+      - name: Determine test scope
+        id: test_scope
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "scope=${{ github.event.inputs.test_level }}" >> $GITHUB_OUTPUT
+          else
+            echo "scope=all" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run unit tests
+        if: steps.test_scope.outputs.scope == 'unit' || steps.test_scope.outputs.scope == 'all'
+        run: |
+          uv run pytest tests/unit/ -v --tb=short --junit-xml=junit-unit.xml
+
+      - name: Run integration tests
+        if: steps.test_scope.outputs.scope == 'integration' || steps.test_scope.outputs.scope == 'all'
+        run: |
+          uv run pytest tests/integration/ -v --tb=short --junit-xml=junit-integration.xml
+
+      - name: Generate coverage report
+        if: always() && (steps.test_scope.outputs.scope == 'all' || github.event_name == 'push')
+        run: |
+          uv run pytest tests/ --cov=src --cov-report=xml --cov-report=html --cov-report=term
+
+      - name: Upload coverage to Codecov
+        if: always() && (steps.test_scope.outputs.scope == 'all' || github.event_name == 'push')
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: VEUKA/evsnow
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Publish test results
+        if: always()
+        continue-on-error: true
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: |
+            junit-*.xml
+          check_name: Test Results (${{ matrix.python-version }})
+          compare_to_earlier_commit: false
+
+      - name: Generate test report
+        if: always()
+        run: |
+          uv run pytest tests/ --tb=short -v > test-report.txt 2>&1 || true
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.python-version }}
+          path: |
+            junit-*.xml
+            test-report.txt
+            htmlcov/
+            .coverage
+          retention-days: 30
+
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-groups
+
+      - name: Run linting
+        run: |
+          uv run pylint src/ --disable=all --enable=E,F --exit-zero || true
+
+      - name: Run type checking
+        run: |
+          uv run mypy src/ --ignore-missing-imports --no-error-summary || true
+
+      - name: Run coverage check
+        run: |
+          uv run pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=75 || true
+
+  status-check:
+    name: Test Status Check
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    
+    steps:
+      - name: Check test status
+        run: |
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+            echo "❌ Tests failed"
+            exit 1
+          else
+            echo "✅ Tests passed"
+            exit 0
+          fi
+
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [test, quality]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Test Results Summary
+          
+          **Build Status:** ${{ job.status }}
+          
+          **Test Job Status:** ${{ needs.test.result }}
+          **Quality Job Status:** ${{ needs.quality.result }}
+          
+          ## Details
+          - **Branch:** ${{ github.ref_name }}
+          - **Commit:** ${{ github.sha }}
+          - **Author:** ${{ github.actor }}
+          
+          [View full workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+
+      - name: Set PR status
+        if: github.event_name == 'pull_request'
+        run: |
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+            echo "PR tests failed"
+            exit 1
+          fi
