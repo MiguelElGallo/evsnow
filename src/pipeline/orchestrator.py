@@ -490,7 +490,7 @@ class PipelineOrchestrator:
 
         # Use asyncio's add_signal_handler for proper async signal handling
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
+            loop.add_signal_handler(sig, lambda s: signal_handler(s), sig)
 
 
 async def run_pipeline(config: EvSnowConfig, retry_manager: Any | None = None) -> None:
