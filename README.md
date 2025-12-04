@@ -3,17 +3,13 @@
 [![Tests](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml)
 [![CI/CD Pipeline](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml)
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
-It is 
-
-
-
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
 ![alt text](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
 
 See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
 
-## Installation
+## Install
 
 ```bash
 # Clone the repository
@@ -24,22 +20,20 @@ cd evsnow
 uv sync
 ```
 
-## Configuration
+## Configure
 
-1. **Copy the example environment file:**
+1) Copy and edit the environment file
 
 ```bash
 cp .env.example .env
 ```
 
-2. **Edit `.env` with your credentials:**
+Then set your values in `.env`. The pipeline needs:
+- Azure Event Hub namespace, topics, and consumer groups
+- Snowflake key-pair auth details and role
+- Topic → table mappings
 
-The pipeline needs three things configured:
-- **Azure Event Hub**: Your namespace and topic names
-- **Snowflake**: Connection details with key-pair authentication
-- **Table Mapping**: Which Event Hub topics go to which Snowflake tables
-
-### Required Settings
+Key settings (example):
 
 ```bash
 # Azure Event Hub
@@ -69,7 +63,7 @@ SNOWFLAKE_1_TABLE=events_table
 SNOWFLAKE_1_BATCH=100
 ```
 
-### Snowflake Authentication Setup
+### Snowflake authentication
 
 Generate RSA key pair for authentication:
 
@@ -81,7 +75,7 @@ Generate RSA key pair for authentication:
 # See SNOWFLAKE_QUICKSTART.md for detailed instructions
 ```
 
-### Azure Authentication
+### Azure authentication
 
 The pipeline uses `DefaultAzureCredential`. Make sure you're logged in:
 
@@ -96,7 +90,7 @@ AZURE_EVENTHUB_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
 EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
 ```
 
-## Usage
+## Use
 
 ```bash
 # Validate configuration
@@ -112,7 +106,7 @@ uv run evsnow status
 uv run evsnow run --dry-run
 ```
 
-## Optional Features
+## Optional features
 
 ### Smart Retry (LLM-Powered)
 
@@ -165,11 +159,11 @@ SNOWFLAKE_SCHEMA_NAME=PUBLIC
 # Create PIPE in Snowflake (see setup_snowpipe_streaming.sql)
 ```
 
-## Configuration Reference
+## Configuration reference
 
 See [`.env.example`](./.env.example) for all available configuration options with detailed comments.
 
-## Documentation
+## Docs
 
 - [Snowflake Quick Start](./SNOWFLAKE_QUICKSTART.md) - Setup guide for Snowflake
 - [Troubleshooting](./TROUBLESHOOTING.md) - Common issues and solutions
