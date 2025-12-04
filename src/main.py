@@ -279,10 +279,12 @@ def validate_config(
                 target_db = os.getenv("TARGET_DB")
                 target_schema = os.getenv("TARGET_SCHEMA")
                 target_table = os.getenv("TARGET_TABLE")
+                use_hybrid_table = config.use_hybrid_table
 
                 if target_db and target_schema and target_table:
+                    table_type = "hybrid table" if use_hybrid_table else "table"
                     console.print(
-                        f"\n[bold blue]Verifying control table:[/bold blue] {target_db}.{target_schema}.{target_table}"
+                        f"\n[bold blue]Verifying control {table_type}:[/bold blue] {target_db}.{target_schema}.{target_table}"
                     )
 
                     # Use Snowflake control table
@@ -294,6 +296,7 @@ def validate_config(
                             target_schema=target_schema,
                             target_table=target_table,
                             config=config.snowflake_connection,
+                            use_hybrid_table=use_hybrid_table,
                         ):
                             console.print(
                                 "[green]✓ Snowflake control table verified/created successfully[/green]"
@@ -324,7 +327,9 @@ def validate_config(
         table.add_column("Count", justify="right", style="magenta")
 
         table.add_row("Event Hubs", str(validation_results["event_hubs_count"]))
-        table.add_row("Snowflake Configs", str(validation_results.get("snowflake_configs_count", 0)))
+        table.add_row(
+            "Snowflake Configs", str(validation_results.get("snowflake_configs_count", 0))
+        )
         table.add_row("Mappings", str(validation_results["mappings_count"]))
 
         console.print(table)
@@ -502,9 +507,7 @@ def run(
             console.print("   • Check your .env file configuration")
             console.print("   • Verify EventHub namespace and connection settings")
             console.print("   • Ensure Snowflake token is valid")
-            console.print(
-                "   • Run: [bold]evsnow validate-config[/bold] to check configuration"
-            )
+            console.print("   • Run: [bold]evsnow validate-config[/bold] to check configuration")
             console.print(
                 "   • Run: [bold]evsnow validate-config --show-rbac[/bold] for permission guidance"
             )
@@ -551,7 +554,6 @@ def _show_detailed_config(config: EvSnowConfig) -> None:
     if config.mappings:
         console.print("\n[bold cyan]Event Hub ↔ Snowflake Mappings:[/bold cyan]")
         for i, mapping in enumerate(config.mappings, 1):
-
             table = Table(title=f"Mapping {i}")
             table.add_column("Property", style="cyan")
             table.add_column("Value", style="white")
