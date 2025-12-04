@@ -334,12 +334,17 @@ def create_control_table(
     target_schema: str,
     target_table: str,
     config: SnowflakeConnectionConfig | None = None,
+    use_hybrid_table: bool = True,
 ) -> bool:
     """
-    Create the INGESTION_STATUS control table as a Snowflake HYBRID TABLE for checkpoint management.
+    Create the INGESTION_STATUS control table for checkpoint management.
 
-    Hybrid tables provide OLTP capabilities with row-level locking and primary key constraints,
-    making them ideal for frequent checkpoint updates from multiple EventHub partitions.
+    By default, creates a Snowflake HYBRID TABLE which provides OLTP capabilities
+    with row-level locking and primary key constraints, ideal for frequent checkpoint
+    updates from multiple EventHub partitions.
+
+    For trial accounts where Hybrid Tables are not available, set use_hybrid_table=False
+    to create a regular table instead.
 
     This table tracks EventHub consumption progress per partition using a composite primary key
     to ensure uniqueness and efficient upsert operations.
@@ -349,6 +354,8 @@ def create_control_table(
         target_schema: Target schema name
         target_table: Target table name (typically "INGESTION_STATUS")
         config: Optional Snowflake connection configuration
+        use_hybrid_table: If True, create a Hybrid Table (default). If False, create a regular table.
+                          Set to False for Snowflake trial accounts.
 
     Returns:
         True if table was created or already exists
@@ -363,7 +370,8 @@ def create_control_table(
         if config is None:
             config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
 
-        logger.info(f"Creating control table: {target_db}.{target_schema}.{target_table}")
+        table_type = "HYBRID TABLE" if use_hybrid_table else "TABLE"
+        logger.info(f"Creating control table ({table_type}): {target_db}.{target_schema}.{target_table}")
 
         conn = get_connection(config)
 
@@ -384,23 +392,40 @@ def create_control_table(
             schema_ddl = f"CREATE SCHEMA IF NOT EXISTS {target_db}.{target_schema}"
             cursor.execute(schema_ddl)
 
-            # Create control table as HYBRID TABLE with improved schema for per-partition checkpoints
-            # Hybrid tables provide OLTP capabilities with row-level locking, perfect for frequent checkpoint updates
-            # Reference: https://docs.snowflake.com/en/user-guide/tables-hybrid
-            table_ddl = f"""
-                CREATE HYBRID TABLE IF NOT EXISTS {target_db}.{target_schema}.{target_table} (
-                    TS_INSERTED TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP(),
-                    EVENTHUB_NAMESPACE VARCHAR(500),
-                    EVENTHUB VARCHAR(200),
-                    TARGET_DB VARCHAR(200),
-                    TARGET_SCHEMA VARCHAR(200),
-                    TARGET_TABLE VARCHAR(200),
-                    WATERLEVEL NUMBER(38, 0),
-                    PARTITION_ID VARCHAR(50) NOT NULL,
-                    METADATA VARIANT,
-                    PRIMARY KEY (EVENTHUB_NAMESPACE, EVENTHUB, TARGET_DB, TARGET_SCHEMA, TARGET_TABLE, PARTITION_ID)
-                )
-            """
+            if use_hybrid_table:
+                # Create control table as HYBRID TABLE with improved schema for per-partition checkpoints
+                # Hybrid tables provide OLTP capabilities with row-level locking, perfect for frequent checkpoint updates
+                # Reference: https://docs.snowflake.com/en/user-guide/tables-hybrid
+                table_ddl = f"""
+                    CREATE HYBRID TABLE IF NOT EXISTS {target_db}.{target_schema}.{target_table} (
+                        TS_INSERTED TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP(),
+                        EVENTHUB_NAMESPACE VARCHAR(500),
+                        EVENTHUB VARCHAR(200),
+                        TARGET_DB VARCHAR(200),
+                        TARGET_SCHEMA VARCHAR(200),
+                        TARGET_TABLE VARCHAR(200),
+                        WATERLEVEL NUMBER(38, 0),
+                        PARTITION_ID VARCHAR(50) NOT NULL,
+                        METADATA VARIANT,
+                        PRIMARY KEY (EVENTHUB_NAMESPACE, EVENTHUB, TARGET_DB, TARGET_SCHEMA, TARGET_TABLE, PARTITION_ID)
+                    )
+                """
+            else:
+                # Create regular table for trial accounts or environments without Hybrid Table support
+                # Note: Regular tables don't have row-level locking, but MERGE operations still work
+                table_ddl = f"""
+                    CREATE TABLE IF NOT EXISTS {target_db}.{target_schema}.{target_table} (
+                        TS_INSERTED TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP(),
+                        EVENTHUB_NAMESPACE VARCHAR(500),
+                        EVENTHUB VARCHAR(200),
+                        TARGET_DB VARCHAR(200),
+                        TARGET_SCHEMA VARCHAR(200),
+                        TARGET_TABLE VARCHAR(200),
+                        WATERLEVEL NUMBER(38, 0),
+                        PARTITION_ID VARCHAR(50) NOT NULL,
+                        METADATA VARIANT
+                    )
+                """
             cursor.execute(table_ddl)
 
             logger.info(

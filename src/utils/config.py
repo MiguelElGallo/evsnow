@@ -438,6 +438,11 @@ class EvSnowConfig(BaseSettings):
         default="INGESTION_STATUS",
         description="Control table name for checkpoints",
     )
+    use_hybrid_table: bool = Field(
+        default=False,
+        validation_alias="USE_HYBRID_TABLE",
+        description="Use Hybrid Table for control table (requires paid Snowflake account)",
+    )
 
     # Configuration storage
     event_hubs: dict[str, EventHubConfig] = Field(default_factory=dict)

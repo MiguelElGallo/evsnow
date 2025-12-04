@@ -279,10 +279,12 @@ def validate_config(
                 target_db = os.getenv("TARGET_DB")
                 target_schema = os.getenv("TARGET_SCHEMA")
                 target_table = os.getenv("TARGET_TABLE")
+                use_hybrid_table = config.use_hybrid_table
 
                 if target_db and target_schema and target_table:
+                    table_type = "hybrid table" if use_hybrid_table else "table"
                     console.print(
-                        f"\n[bold blue]Verifying control table:[/bold blue] {target_db}.{target_schema}.{target_table}"
+                        f"\n[bold blue]Verifying control {table_type}:[/bold blue] {target_db}.{target_schema}.{target_table}"
                     )
 
                     # Use Snowflake control table
@@ -294,6 +296,7 @@ def validate_config(
                             target_schema=target_schema,
                             target_table=target_table,
                             config=config.snowflake_connection,
+                            use_hybrid_table=use_hybrid_table,
                         ):
                             console.print(
                                 "[green]✓ Snowflake control table verified/created successfully[/green]"

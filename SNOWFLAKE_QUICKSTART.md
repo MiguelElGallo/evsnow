@@ -51,6 +51,97 @@ ALTER USER john_doe
 SET RSA_PUBLIC_KEY='MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy...';
 ```
 
+### Step 2.5: Create Role, Databases, and Grant Permissions
+
+Before configuring your `.env` file, you need to create the required Snowflake resources and grant permissions. Run this SQL script in Snowflake as `ACCOUNTADMIN`:
+
+```sql
+-- ============================================
+-- Run as ACCOUNTADMIN in Snowflake
+-- ============================================
+USE ROLE ACCOUNTADMIN;
+
+-- ============================================
+-- Create the STREAM role (matches SNOWFLAKE_ROLE in .env)
+-- ============================================
+CREATE ROLE IF NOT EXISTS STREAM;
+
+-- Grant the role to your user (matches SNOWFLAKE_USER in .env)
+GRANT ROLE STREAM TO USER STREAMEV;
+
+-- ============================================
+-- Create databases if they don't exist
+-- These match TARGET_DB and SNOWFLAKE_DATABASE in .env
+-- ============================================
+CREATE DATABASE IF NOT EXISTS CONTROL;      -- For checkpoint/control table (TARGET_DB)
+CREATE DATABASE IF NOT EXISTS INGESTION;    -- For event data (SNOWFLAKE_DATABASE, SNOWFLAKE_1_DATABASE)
+
+-- ============================================
+-- Create schemas if they don't exist
+-- These match TARGET_SCHEMA and SNOWFLAKE_SCHEMA in .env
+-- ============================================
+CREATE SCHEMA IF NOT EXISTS CONTROL.PUBLIC;
+CREATE SCHEMA IF NOT EXISTS INGESTION.PUBLIC;
+
+-- ============================================
+-- Warehouse permissions (matches SNOWFLAKE_WAREHOUSE in .env)
+-- ============================================
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE STREAM;
+
+-- ============================================
+-- CONTROL database - FULL permissions
+-- Used for: TARGET_DB, TARGET_SCHEMA, TARGET_TABLE (INGESTION_STATUS)
+-- ============================================
+GRANT ALL PRIVILEGES ON DATABASE CONTROL TO ROLE STREAM;
+GRANT ALL PRIVILEGES ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
+GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
+
+-- ============================================
+-- INGESTION database - FULL permissions
+-- Used for: SNOWFLAKE_1_DATABASE, SNOWFLAKE_1_SCHEMA, SNOWFLAKE_1_TABLE
+-- ============================================
+GRANT ALL PRIVILEGES ON DATABASE INGESTION TO ROLE STREAM;
+GRANT ALL PRIVILEGES ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+
+-- ============================================
+-- Verify the grants
+-- ============================================
+SHOW GRANTS TO ROLE STREAM;
+SHOW GRANTS ON DATABASE CONTROL;
+SHOW GRANTS ON DATABASE INGESTION;
+```
+
+**If you still get "Insufficient privileges" errors**, run these additional commands to transfer ownership:
+
+```sql
+-- Transfer ownership of databases and schemas to STREAM role
+GRANT OWNERSHIP ON DATABASE CONTROL TO ROLE STREAM COPY CURRENT GRANTS;
+GRANT OWNERSHIP ON DATABASE INGESTION TO ROLE STREAM COPY CURRENT GRANTS;
+GRANT OWNERSHIP ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
+GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
+```
+
+**How this relates to `.env.example`:**
+
+| SQL Resource | `.env` Variable | Purpose |
+|--------------|-----------------|---------|
+| `ROLE STREAM` | `SNOWFLAKE_ROLE=STREAM` | Role used for all operations |
+| `USER STREAMEV` | `SNOWFLAKE_USER=STREAMEV` | User connecting to Snowflake |
+| `DATABASE CONTROL` | `TARGET_DB=CONTROL` | Stores checkpoint/control table |
+| `SCHEMA CONTROL.PUBLIC` | `TARGET_SCHEMA=PUBLIC` | Schema for control table |
+| `TABLE INGESTION_STATUS` | `TARGET_TABLE=INGESTION_STATUS` | Created automatically by EvSnow |
+| `DATABASE INGESTION` | `SNOWFLAKE_DATABASE=INGESTION`, `SNOWFLAKE_1_DATABASE=INGESTION` | Stores ingested event data |
+| `SCHEMA INGESTION.PUBLIC` | `SNOWFLAKE_SCHEMA=PUBLIC`, `SNOWFLAKE_1_SCHEMA=PUBLIC` | Schema for event tables |
+| `WAREHOUSE COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE=compute_wh` | Warehouse for query execution |
+
+**⚠️ Customize for your environment:**
+- Replace `STREAMEV` with your actual Snowflake username
+- Replace `COMPUTE_WH` with your warehouse name
+- Add additional databases/schemas if you're using different ones in your `.env`
+
 ### Step 3: Update `.env` File
 
 Your `.env` file has been pre-configured with Snowflake settings. Update these values:
