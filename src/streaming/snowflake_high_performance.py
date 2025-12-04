@@ -182,36 +182,13 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 client_name = f"evsnow_{self.client_name_suffix}"
                 logger.info(f"Creating High-Performance StreamingIngestClient: {client_name}")
 
-                # Write private key to temporary file (high-performance SDK requires file path, not content)
-                import json
-                import tempfile
-
-                # Extract private_key from profile and write to temp file
                 private_key_pem = profile.pop("private_key")  # Remove from profile dict
 
-                # Create temporary private key file
-                key_fd, key_path = tempfile.mkstemp(suffix=".pem", prefix="snowflake_key_")
-                try:
-                    with open(key_fd, "w") as f:
-                        f.write(private_key_pem)
+                from utils.snowflake import temporary_private_key_file, temporary_profile_file
 
-                    logger.debug(f"Private key written to temporary file: {key_path}")
-
-                    # Add key file path to profile
+                with temporary_private_key_file(private_key_pem) as key_path:
                     profile["private_key_file"] = key_path
-
-                    # Write profile JSON to temporary file
-                    profile_fd, profile_path = tempfile.mkstemp(
-                        suffix=".json", prefix="snowflake_profile_"
-                    )
-                    try:
-                        with open(profile_fd, "w") as f:
-                            json.dump(profile, f)
-
-                        logger.debug(f"Profile written to temporary file: {profile_path}")
-
-                        # Initialize High-Performance SDK client
-                        # Params: client_name, db_name, schema_name, pipe_name, profile_json (file path)
+                    with temporary_profile_file(profile) as profile_path:
                         self.streaming_client = StreamingIngestClient(
                             client_name=client_name,
                             db_name=self.snowflake_config.database,
@@ -231,26 +208,6 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                             pipe="EVENTS_TABLE_PIPE",
                             table=self.snowflake_config.table_name,
                         )
-                    finally:
-                        # Clean up temporary profile file (SDK has read it by now)
-                        import os
-
-                        try:
-                            os.unlink(profile_path)
-                            logger.debug(f"Temporary profile file deleted: {profile_path}")
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to delete temporary profile file {profile_path}: {e}"
-                            )
-                finally:
-                    # Clean up temporary key file
-                    import os
-
-                    try:
-                        os.unlink(key_path)
-                        logger.debug(f"Temporary key file deleted: {key_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete temporary key file {key_path}: {e}")
 
                 # Ensure target table exists
                 self._ensure_target_table()

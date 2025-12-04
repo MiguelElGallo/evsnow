@@ -11,7 +11,12 @@ This module provides utilities for:
 Based on best practices from Snowflake documentation and the legacy implementation.
 """
 
+import json
 import logging
+import os
+import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +41,36 @@ logger = logging.getLogger(__name__)
 # Key: (account, user, database, schema, warehouse, role)
 _connection_cache: dict[tuple, sc.SnowflakeConnection] = {}
 _session_cache: dict[tuple, Any] = {}
+
+
+@contextmanager
+def temporary_private_key_file(private_key_pem: str) -> Generator[str]:
+    """Write a private key to a temp file and clean it up."""
+    fd, path = tempfile.mkstemp(suffix=".pem", prefix="snowflake_key_")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(private_key_pem)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            logger.warning("Failed to delete temporary private key file: %s", path)
+
+
+@contextmanager
+def temporary_profile_file(profile: dict[str, Any]) -> Generator[str]:
+    """Write a streaming profile JSON to a temp file and clean it up."""
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="snowflake_profile_")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(profile, handle)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            logger.warning("Failed to delete temporary profile file: %s", path)
 
 
 def _get_cache_key(config: SnowflakeConnectionConfig) -> tuple:
