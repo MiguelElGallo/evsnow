@@ -327,7 +327,9 @@ def validate_config(
         table.add_column("Count", justify="right", style="magenta")
 
         table.add_row("Event Hubs", str(validation_results["event_hubs_count"]))
-        table.add_row("Snowflake Configs", str(validation_results.get("snowflake_configs_count", 0)))
+        table.add_row(
+            "Snowflake Configs", str(validation_results.get("snowflake_configs_count", 0))
+        )
         table.add_row("Mappings", str(validation_results["mappings_count"]))
 
         console.print(table)
@@ -505,9 +507,7 @@ def run(
             console.print("   • Check your .env file configuration")
             console.print("   • Verify EventHub namespace and connection settings")
             console.print("   • Ensure Snowflake token is valid")
-            console.print(
-                "   • Run: [bold]evsnow validate-config[/bold] to check configuration"
-            )
+            console.print("   • Run: [bold]evsnow validate-config[/bold] to check configuration")
             console.print(
                 "   • Run: [bold]evsnow validate-config --show-rbac[/bold] for permission guidance"
             )
@@ -554,7 +554,6 @@ def _show_detailed_config(config: EvSnowConfig) -> None:
     if config.mappings:
         console.print("\n[bold cyan]Event Hub ↔ Snowflake Mappings:[/bold cyan]")
         for i, mapping in enumerate(config.mappings, 1):
-
             table = Table(title=f"Mapping {i}")
             table.add_column("Property", style="cyan")
             table.add_column("Value", style="white")

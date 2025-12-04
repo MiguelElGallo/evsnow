@@ -371,7 +371,9 @@ def create_control_table(
             config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
 
         table_type = "HYBRID TABLE" if use_hybrid_table else "TABLE"
-        logger.info(f"Creating control table ({table_type}): {target_db}.{target_schema}.{target_table}")
+        logger.info(
+            f"Creating control table ({table_type}): {target_db}.{target_schema}.{target_table}"
+        )
 
         conn = get_connection(config)
 
