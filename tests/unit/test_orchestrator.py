@@ -883,16 +883,18 @@ class TestPipelineOrchestrator:
         # Capture the signal handler
         signal_handlers = {}
         
-        def capture_handler(sig, handler):
-            signal_handlers[sig] = handler
+        def capture_handler(sig, handler, *args):
+            # Store both handler and args so we can call handler(args[0]) later
+            signal_handlers[sig] = (handler, args)
         
         mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
         mocker.patch.object(loop, "create_task")
         
         orchestrator.setup_signal_handlers(loop)
         
-        # Act - trigger SIGINT
-        signal_handlers[signal.SIGINT]()
+        # Act - trigger SIGINT (call handler with the captured signal arg)
+        handler, args = signal_handlers[signal.SIGINT]
+        handler(args[0])
         
         # Assert
         assert orchestrator.shutdown_requested
@@ -912,8 +914,9 @@ class TestPipelineOrchestrator:
         # Capture the signal handler
         signal_handlers = {}
         
-        def capture_handler(sig, handler):
-            signal_handlers[sig] = handler
+        def capture_handler(sig, handler, *args):
+            # Store both handler and args so we can call handler(args[0]) later
+            signal_handlers[sig] = (handler, args)
         
         mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
         mock_exit = mocker.patch("sys.exit")
@@ -922,7 +925,8 @@ class TestPipelineOrchestrator:
         
         # Act - trigger SIGINT twice
         orchestrator.shutdown_requested = True  # Simulate first signal
-        signal_handlers[signal.SIGINT]()
+        handler, args = signal_handlers[signal.SIGINT]
+        handler(args[0])
         
         # Assert
         mock_exit.assert_called_once_with(1)
