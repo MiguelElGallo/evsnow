@@ -2,6 +2,8 @@
 
 This guide will walk you through setting up EvSnow to connect to Snowflake in 5 simple steps.
 
+Official detailed documentation is available in [Link](https://docs.snowflake.com/en/user-guide/key-pair-auth).
+
 ## Prerequisites
 
 - Snowflake account with appropriate permissions (ACCOUNTADMIN or equivalent)

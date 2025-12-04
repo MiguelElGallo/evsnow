@@ -27,13 +27,17 @@ if [ -f "rsa_key_encrypted.p8" ]; then
     echo ""
 fi
 
-echo "Step 1: Generating RSA private key (2048-bit)..."
-openssl genrsa -out rsa_key.pem 2048 2>/dev/null
-
-echo "Step 2: Encrypting private key with AES-256..."
+echo "Step 1: Generating RSA private key (2048-bit) and encrypting with DES3..."
 echo "You will be prompted to enter a password (twice)."
 echo "⚠️  IMPORTANT: Remember this password - you'll need it for SNOWFLAKE_PRIVATE_KEY_PASSWORD"
-openssl pkcs8 -topk8 -inform PEM -in rsa_key.pem -out rsa_key_encrypted.p8 -v2 aes256
+# Using des3 as per Snowflake official documentation:
+# https://docs.snowflake.com/en/user-guide/key-pair-auth#generate-the-private-keys
+openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 des3 -inform PEM -out rsa_key_encrypted.p8
+
+echo ""
+echo "Step 2: Creating unencrypted backup copy..."
+openssl pkcs8 -topk8 -inform PEM -in rsa_key_encrypted.p8 -out rsa_key.pem -nocrypt 2>/dev/null || \
+    openssl rsa -in rsa_key_encrypted.p8 -out rsa_key.pem 2>/dev/null
 
 echo ""
 echo "Step 3: Setting secure file permissions..."
@@ -41,7 +45,7 @@ chmod 600 rsa_key_encrypted.p8
 chmod 600 rsa_key.pem
 
 echo "Step 4: Extracting public key..."
-openssl rsa -in rsa_key_encrypted.p8 -pubout -out rsa_key_pub.pem 2>/dev/null
+openssl rsa -in rsa_key_encrypted.p8 -pubout -out rsa_key_pub.pem
 
 echo "Step 5: Preparing public key value for Snowflake..."
 grep -v "BEGIN PUBLIC" rsa_key_pub.pem | grep -v "END PUBLIC" | tr -d '\n' > rsa_key_pub_value.txt
