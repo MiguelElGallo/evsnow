@@ -11,6 +11,8 @@ Official detailed documentation is available in [Link](https://docs.snowflake.co
 - OpenSSL installed on your system
 - EvSnow installed (`uv sync`)
 
+> 📄 **Configuration Reference:** All environment variables are documented in [`.env.example`](./.env.example). Copy it to `.env` and customize the values as you follow this guide.
+
 ## Quick Setup (5 Steps)
 
 ### Step 1: Generate RSA Keys
@@ -142,9 +144,91 @@ GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
 - Replace `COMPUTE_WH` with your warehouse name
 - Add additional databases/schemas if you're using different ones in your `.env`
 
+### Step 2.6: Create Target Table and PIPE Object (Required for High-Performance SDK)
+
+EvSnow uses Snowflake's **high-performance Snowpipe Streaming SDK**, which requires a **PIPE object**. Run this SQL to create the target table and PIPE:
+
+```sql
+-- ============================================================================
+-- SNOWPIPE STREAMING HIGH-PERFORMANCE ARCHITECTURE SETUP
+-- Reference: https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-getting-started
+-- ============================================================================
+
+USE ROLE STREAM;  -- Or ACCOUNTADMIN if STREAM doesn't have create privileges yet
+USE DATABASE INGESTION;
+USE SCHEMA PUBLIC;
+USE WAREHOUSE COMPUTE_WH;
+
+-- ============================================================================
+-- Create the target table for Event Hub data
+-- Matches: SNOWFLAKE_1_TABLE=events_table in .env
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS EVENTS_TABLE (
+    EVENT_BODY VARIANT,
+    PARTITION_ID VARCHAR(50),
+    SEQUENCE_NUMBER NUMBER(38,0),
+    ENQUEUED_TIME TIMESTAMP_NTZ,
+    PROPERTIES VARIANT,
+    SYSTEM_PROPERTIES VARIANT,
+    INGESTION_TIMESTAMP TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- ============================================================================
+-- Create PIPE for HIGH-PERFORMANCE Snowpipe Streaming
+-- Matches: SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE in .env
+-- 
+-- IMPORTANT: High-performance architecture REQUIRES a PIPE object
+-- The PIPE uses DATA_SOURCE(TYPE => 'STREAMING') as the source
+-- ============================================================================
+CREATE OR REPLACE PIPE EVENTS_TABLE_PIPE
+AS
+    COPY INTO EVENTS_TABLE (EVENT_BODY, PARTITION_ID, SEQUENCE_NUMBER, ENQUEUED_TIME, PROPERTIES, SYSTEM_PROPERTIES)
+    FROM (
+        SELECT 
+            $1:event_body::VARIANT,
+            $1:partition_id::VARCHAR,
+            $1:sequence_number::NUMBER,
+            $1:enqueued_time::TIMESTAMP_NTZ,
+            $1:properties::VARIANT,
+            $1:system_properties::VARIANT
+        FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
+    );
+
+-- ============================================================================
+-- Verify the PIPE was created
+-- ============================================================================
+SHOW PIPES LIKE 'EVENTS_TABLE_PIPE';
+
+-- ============================================================================
+-- Grant permissions to STREAM role
+-- ============================================================================
+GRANT OPERATE ON PIPE EVENTS_TABLE_PIPE TO ROLE STREAM;
+GRANT MONITOR ON PIPE EVENTS_TABLE_PIPE TO ROLE STREAM;
+GRANT INSERT ON TABLE EVENTS_TABLE TO ROLE STREAM;
+GRANT SELECT ON TABLE EVENTS_TABLE TO ROLE STREAM;
+
+-- Verify grants
+SHOW GRANTS ON PIPE EVENTS_TABLE_PIPE;
+
+SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
+```
+
+**How this relates to [`.env.example`](./.env.example):**
+
+| SQL Resource | `.env` Variable | Purpose |
+|--------------|-----------------|---------|
+| `TABLE EVENTS_TABLE` | `SNOWFLAKE_1_TABLE=events_table` | Target table for ingested events |
+| `PIPE EVENTS_TABLE_PIPE` | `SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE` | Required for high-performance SDK |
+
+> ⚠️ **Error `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`?** This means the PIPE hasn't been created or your role doesn't have permissions. Run the SQL above to fix it.
+
+> 📄 **Alternative:** You can also run the pre-made script: [`setup_snowpipe_streaming.sql`](./setup_snowpipe_streaming.sql)
+
 ### Step 3: Update `.env` File
 
-Your `.env` file has been pre-configured with Snowflake settings. Update these values:
+Your `.env` file has been pre-configured with Snowflake settings. See [`.env.example`](./.env.example) for all available configuration options with detailed comments.
+
+Update these values:
 
 ```bash
 # Snowflake Connection Settings
@@ -279,7 +363,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
 | `.env` | Your configuration with secrets | ❌ No (already in .gitignore) |
 | `snowflake/rsa_key_encrypted.p8` | Private key | ❌ No (already in .gitignore) |
 | `snowflake/rsa_key_pub.pem` | Public key file | ❌ No (already in .gitignore) |
-| `.env.example` | Configuration template | ✅ Yes |
+| [`.env.example`](./.env.example) | Configuration template with all options documented | ✅ Yes |
 | `generate_snowflake_keys.sh` | Key generation script | ✅ Yes |
 | `verify_snowflake_setup.sh` | Verification script | ✅ Yes |
 | `snowflake_setup.md` | Detailed setup guide | ✅ Yes |
@@ -311,9 +395,9 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
 
 ## What's Next?
 
-- **Multiple Event Hubs:** Add `EVENTHUBNAME_2`, `SNOWFLAKE_2_*` configurations
-- **Monitoring:** Enable Logfire observability (see `.env.example`)
-- **Smart Retry:** Configure LLM-powered retry logic for error handling
+- **Multiple Event Hubs:** Add `EVENTHUBNAME_2`, `SNOWFLAKE_2_*` configurations (see [`.env.example`](./.env.example))
+- **Monitoring:** Enable Logfire observability (see [`.env.example`](./.env.example) for `LOGFIRE_*` settings)
+- **Smart Retry:** Configure LLM-powered retry logic (see [`.env.example`](./.env.example) for `SMART_RETRY_*` settings)
 - **Production:** Review [snowflake_setup.md](./snowflake_setup.md) for advanced topics
 
 ## Need Help?
