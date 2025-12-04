@@ -150,7 +150,7 @@ def load_private_key(private_key_file: str, private_key_password: str | None = N
             )
 
         # Convert to DER format for Snowflake
-        private_key_der = private_key_obj.private_bytes(
+        private_key_der: bytes = private_key_obj.private_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption(),

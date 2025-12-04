@@ -8,6 +8,7 @@ remain focused on pipeline orchestration.
 import json
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -95,18 +96,39 @@ class EventHubMessage:
 class MessageBatch:
     """Container for batched EventHub messages."""
 
-    def __init__(self, max_size: int = 1000, max_wait_seconds: int = 300):
+    def __init__(
+        self,
+        max_size: int = 1000,
+        max_wait_seconds: int = 300,
+        batch_id: str | None = None,
+    ):
+        self.batch_id = batch_id or uuid.uuid4().hex[:8]
         self.messages: list[EventHubMessage] = []
         self.max_size = max_size
         self.max_wait_seconds = max_wait_seconds
         self.created_at = time.time()
         self.last_sequence_by_partition: dict[str, int] = {}
+        self.ready_reason: str | None = None
 
     def add_message(self, message: EventHubMessage) -> bool:
         """Add message to batch and return readiness state."""
         self.messages.append(message)
         self.last_sequence_by_partition[message.partition_id] = message.sequence_number
-        return self.is_ready()
+
+        if len(self.messages) >= self.max_size:
+            self.ready_reason = self.ready_reason or "size"
+            return True
+
+        if (time.time() - self.created_at) >= self.max_wait_seconds:
+            self.ready_reason = self.ready_reason or "timeout"
+            return True
+
+        return False
+
+    def mark_timeout_ready(self) -> None:
+        """Mark batch ready due to timeout (used by scheduler)."""
+        if not self.ready_reason:
+            self.ready_reason = "timeout"
 
     def is_ready(self) -> bool:
         """Return True if batch size or timeout threshold reached."""

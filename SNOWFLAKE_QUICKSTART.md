@@ -2,7 +2,7 @@
 
 This guide will walk you through setting up EvSnow to connect to Snowflake in 5 simple steps.
 
-Official detailed documentation is available in [Link](https://docs.snowflake.com/en/user-guide/key-pair-auth).
+Official detailed documentation is available in [Snowflake key-pair authentication docs](https://docs.snowflake.com/en/user-guide/key-pair-auth).
 
 ## Prerequisites
 
@@ -225,7 +225,6 @@ SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
 | `PIPE EVENTS_TABLE_PIPE` | `SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE` | Required for high-performance SDK |
 
 > ⚠️ **Error `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`?** This means the PIPE hasn't been created or your role doesn't have permissions. Run the SQL above to fix it.
-
 > 📄 **Alternative:** You can also run the pre-made script: [`setup_snowpipe_streaming.sql`](./setup_snowpipe_streaming.sql)
 
 ### Step 3: Update `.env` File
@@ -279,7 +278,7 @@ This will check:
 
 **Expected output:**
 
-```
+```text
 ✅ All required configuration values are set!
 ```
 
@@ -299,7 +298,7 @@ evsnow validate-config
 
 **Expected output:**
 
-```
+```text
 ✓ Configuration is valid!
 ✓ Snowflake control table verified/created successfully
 ```

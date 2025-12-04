@@ -7,6 +7,12 @@ authentication.
 """
 
 import logging
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from azure.identity.aio import AzureCliCredential
+else:  # Fallback for runtime without importing azure.identity during type checking
+    AzureCliCredential = Any
 
 
 async def build_eventhub_cli_credential(

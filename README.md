@@ -29,6 +29,7 @@ cp .env.example .env
 ```
 
 Then set your values in `.env`. The pipeline needs:
+
 - Azure Event Hub namespace, topics, and consumer groups
 - Snowflake key-pair auth details and role
 - Topic → table mappings

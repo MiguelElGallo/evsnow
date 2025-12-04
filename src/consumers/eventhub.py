@@ -103,6 +103,7 @@ class EventHubAsyncConsumer:
         self.running = False
         self.tasks: set[asyncio.Task] = set()
         self._first_message_logged: set[str] = set()  # Track first message per partition
+        self._batch_counter = 0
 
         # Statistics
         self.stats: dict[str, Any] = {
@@ -325,12 +326,7 @@ class EventHubAsyncConsumer:
             logger.warning("")
 
             # Initialize batch
-            self.current_batch = MessageBatch(
-                max_size=self.batch_size, max_wait_seconds=self.batch_timeout_seconds
-            )
-            logger.info(
-                f"📦 Initialized message batch (max: {self.batch_size}, timeout: {self.batch_timeout_seconds}s)"
-            )
+            self.current_batch = self._new_batch(reason="startup")
 
             self.running = True
             self.stats["start_time"] = datetime.now(UTC)
@@ -503,6 +499,8 @@ class EventHubAsyncConsumer:
             message_count = len(self.current_batch.messages)
             logger.info(f"📦 Processing {message_count} remaining messages before shutdown...")
             try:
+                if not self.current_batch.ready_reason:
+                    self.current_batch.ready_reason = "shutdown"
                 await self._process_batch(self.current_batch)
                 logger.info(
                     f"✅ {message_count} remaining messages processed and checkpoints updated"
@@ -589,10 +587,7 @@ class EventHubAsyncConsumer:
                     f"🔄 Batch ready for processing ({len(self.current_batch.messages)} messages)"
                 )
                 await self._process_batch(self.current_batch)
-                self.current_batch = MessageBatch(
-                    max_size=self.batch_size,
-                    max_wait_seconds=self.batch_timeout_seconds,
-                )
+                self.current_batch = self._new_batch(reason="after_process")
 
         except Exception as e:
             logger.error(f"Error processing event: {e}", exc_info=True)
@@ -627,11 +622,9 @@ class EventHubAsyncConsumer:
                     logger.info(
                         f"⏱️ Batch timeout reached! Processing {len(self.current_batch.messages)} messages"
                     )
+                    self.current_batch.mark_timeout_ready()
                     await self._process_batch(self.current_batch)
-                    self.current_batch = MessageBatch(
-                        max_size=self.batch_size,
-                        max_wait_seconds=self.batch_timeout_seconds,
-                    )
+                    self.current_batch = self._new_batch(reason="timeout_reset")
 
             except asyncio.CancelledError:
                 logger.info("⏰ Batch timeout handler cancelled")
@@ -639,13 +632,34 @@ class EventHubAsyncConsumer:
             except Exception as e:
                 logger.error(f"❌ Error in batch timeout handler: {e}", exc_info=True)
 
+    def _new_batch(self, reason: str) -> MessageBatch:
+        """Create a new message batch and log its creation."""
+        self._batch_counter += 1
+        batch = MessageBatch(
+            max_size=self.batch_size,
+            max_wait_seconds=self.batch_timeout_seconds,
+        )
+        logfire.info(
+            "eventhub.batch.created",
+            batch_id=batch.batch_id,
+            reason=reason,
+            batch_index=self._batch_counter,
+            batch_max_size=self.batch_size,
+            batch_timeout_seconds=self.batch_timeout_seconds,
+        )
+        return batch
+
     async def _process_batch(self, batch: MessageBatch) -> None:
         """Process a batch of messages."""
+        batch_age_seconds = time.time() - batch.created_at
         with logfire.span(
-            "eventhub.process_batch",
+            "eventhub.batch",
+            batch_id=batch.batch_id,
+            ready_reason=batch.ready_reason or "unknown",
             batch_size=len(batch.messages),
             partitions=list(batch.last_sequence_by_partition.keys()),
             eventhub_name=self.eventhub_config.name,
+            batch_age_seconds=batch_age_seconds,
         ) as span:
             if not batch.messages:
                 logger.debug("No messages in batch to process")
