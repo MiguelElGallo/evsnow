@@ -1,5 +1,5 @@
 """
-Snowflake connection utilities for StreamDuck pipeline.
+Snowflake connection utilities for Snowflake pipeline.
 
 This module provides utilities for:
 1. Creating and managing Snowflake connections with private key authentication

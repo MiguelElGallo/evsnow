@@ -24,12 +24,14 @@ Run the automated key generation script:
 ```
 
 **What this does:**
+
 - Creates `snowflake/` directory
 - Generates encrypted RSA private key (you'll set a password)
 - Extracts public key for Snowflake
 - Displays your public key value
 
-**⚠️ Important:** 
+**⚠️ Important:**
+
 - Remember the password you set - you'll need it for `.env`
 - The public key value will be displayed at the end - copy it!
 
@@ -46,6 +48,7 @@ SET RSA_PUBLIC_KEY='<paste_the_public_key_value_from_step1>';
 ```
 
 **Example:**
+
 ```sql
 USE ROLE ACCOUNTADMIN;
 
@@ -140,6 +143,7 @@ GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
 | `WAREHOUSE COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE=compute_wh` | Warehouse for query execution |
 
 **⚠️ Customize for your environment:**
+
 - Replace `STREAMEV` with your actual Snowflake username
 - Replace `COMPUTE_WH` with your warehouse name
 - Add additional databases/schemas if you're using different ones in your `.env`
@@ -254,6 +258,7 @@ SNOWFLAKE_1_BATCH=1000                           # Batch size (leave as-is)
 ```
 
 **How to find your Snowflake account identifier:**
+
 - **Option 1:** In Snowflake UI, look at the URL: `https://<account_identifier>.snowflakecomputing.com`
 - **Option 2:** Run in Snowflake: `SELECT CURRENT_ACCOUNT(), CURRENT_REGION();`
 - **Format:** `<account_locator>.<region>` (e.g., `xy12345.us-east-1`)
@@ -267,11 +272,13 @@ Run the verification script to check if everything is set up correctly:
 ```
 
 This will check:
+
 - ✓ All required environment variables are set
 - ✓ Private key file exists and has correct permissions
 - ✓ No placeholder values remain
 
 **Expected output:**
+
 ```
 ✅ All required configuration values are set!
 ```
@@ -285,11 +292,13 @@ evsnow validate-config
 ```
 
 **What this does:**
+
 - Tests Snowflake connection using key-pair authentication
 - Creates the `INGESTION_STATUS` hybrid table (if it doesn't exist)
 - Verifies permissions
 
 **Expected output:**
+
 ```
 ✓ Configuration is valid!
 ✓ Snowflake control table verified/created successfully
@@ -312,6 +321,7 @@ evsnow run --dry-run
 ## Troubleshooting
 
 ### Error: "Private key file not found"
+
 ```bash
 # Check if the file exists
 ls -la snowflake/rsa_key_encrypted.p8
@@ -321,6 +331,7 @@ ls -la snowflake/rsa_key_encrypted.p8
 ```
 
 ### Error: "Authentication failed"
+
 ```bash
 # Verify public key is assigned in Snowflake
 # Run this in Snowflake:
@@ -330,6 +341,7 @@ DESC USER <your_username>;
 ```
 
 ### Error: "Invalid private key password"
+
 ```bash
 # Test the password manually
 openssl rsa -in snowflake/rsa_key_encrypted.p8 -check
@@ -339,6 +351,7 @@ openssl rsa -in snowflake/rsa_key_encrypted.p8 -check
 ```
 
 ### Error: "Insufficient privileges"
+
 ```bash
 # Your Snowflake user needs these permissions:
 # 1. CREATE TABLE on the control schema
@@ -375,6 +388,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
    - Never add `*.pem` or `*.p8` files to version control
 
 2. **Secure file permissions:**
+
    ```bash
    chmod 600 snowflake/rsa_key_encrypted.p8
    ```
@@ -389,6 +403,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
    - Consider using environment variables from a secret manager in production
 
 5. **Revoke compromised keys immediately:**
+
    ```sql
    ALTER USER <username> UNSET RSA_PUBLIC_KEY;
    ```
