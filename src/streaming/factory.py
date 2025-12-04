@@ -55,7 +55,6 @@ def create_snowflake_client(
 
     Example:
         # Set environment variables:
-        export SNOWFLAKE_STREAMING_MODE=high-performance
         export SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 
         client = create_snowflake_client(snowflake_config, connection_config)

@@ -1,8 +1,7 @@
 """
-Abstract base class for Snowflake streaming clients.
+Abstract base class for the Snowflake **high-performance** streaming client.
 
-This module defines the interface that both Classic and High-Performance
-SDK implementations must follow, enabling runtime switching between modes.
+Only the high-performance Snowpipe Streaming architecture is supported.
 """
 
 from abc import ABC, abstractmethod
@@ -13,11 +12,7 @@ from utils.config import SnowflakeConfig, SnowflakeConnectionConfig
 
 class SnowflakeStreamingClientBase(ABC):
     """
-    Abstract base class for Snowflake streaming clients.
-
-    Defines the interface for ingesting data into Snowflake using either:
-    - Classic SDK (snowflake-ingest classic architecture)
-    - High-Performance SDK (snowpipe-streaming high-performance architecture)
+    Abstract base class for Snowflake streaming clients (high-performance only).
 
     Implementations must provide methods for:
     - Client lifecycle (start, stop)

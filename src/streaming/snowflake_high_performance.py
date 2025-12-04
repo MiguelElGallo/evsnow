@@ -7,17 +7,7 @@ This module provides a streaming client using the HIGH-PERFORMANCE Snowpipe Stre
 - Server-side schema validation
 - Supports in-flight transformations via PIPE
 
-⚠️  KNOWN ISSUE: Currently fails on Azure-hosted Snowflake with AWS_KEY_ID error.
-    SDK bug prevents Azure deployment. Use Classic SDK for Azure until fixed.
-
-Best for:
-- AWS-hosted Snowflake (works reliably)
-- GCP-hosted Snowflake (should work, needs testing)
-- High-throughput requirements (>2 GB/s)
-- Once Azure SDK bug is fixed (expected in v1.2.0+)
-
 Documentation: https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-overview
-Issue: See SNOWFLAKE_SDK_ISSUE.md for Azure compatibility details
 """
 
 import logging
@@ -107,7 +97,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         - private_key_file: Path to PEM private key file (we write temp file in start())
         - role: Role to use (optional)
 
-        IMPORTANT: Unlike classic SDK, the profile does NOT include:
+        IMPORTANT: The profile does NOT include:
         - warehouse, database, schema (passed to StreamingIngestClient constructor instead)
         - host (use full 'url' instead)
         - private_key content (use 'private_key_file' path instead)
