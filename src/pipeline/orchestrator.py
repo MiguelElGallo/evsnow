@@ -152,17 +152,30 @@ class PipelineMapping:
         logger.info(f"🛑 Stopping mapping: {self.stats['mapping_key']}")
         self.running = False
 
-        # Stop EventHub consumer (this will process remaining messages and save checkpoints)
+        # Stop EventHub consumer first (this will process remaining messages and save checkpoints)
         if self.eventhub_consumer:
             logger.info(f"📦 Finalizing EventHub consumer for {self.stats['mapping_key']}...")
             await self.eventhub_consumer.stop()
-            self.eventhub_consumer = None
+            # DON'T set to None yet - keep reference until Snowflake is closed
 
-        # Stop Snowflake client
+        # Stop Snowflake client and ensure flush completes
+        # CRITICAL: Do this BEFORE setting eventhub_consumer to None to avoid GC issues
         if self.snowflake_client:
-            logger.info(f"🔌 Closing Snowflake client for {self.stats['mapping_key']}...")
-            self.snowflake_client.stop()
+            logger.info(
+                f"🔌 Flushing and closing Snowflake client for {self.stats['mapping_key']}..."
+            )
+            # Run synchronous stop() in executor to not block the event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.snowflake_client.stop)
+            # Give extra time for flush to propagate through Snowflake infrastructure
+            logger.info("⏳ Waiting for Snowflake flush to complete...")
+            await asyncio.sleep(3)
+            logger.info(f"✅ Snowflake client flushed and closed for {self.stats['mapping_key']}")
             self.snowflake_client = None
+
+        # Now safe to clear EventHub consumer reference
+        if self.eventhub_consumer:
+            self.eventhub_consumer = None
 
         logger.info(f"✅ Mapping {self.stats['mapping_key']} stopped gracefully")
 
@@ -387,12 +400,16 @@ class PipelineOrchestrator:
         logger.info("Stopping pipeline orchestrator...")
         self.running = False
 
-        # Cancel all running tasks
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
+        # Stop all mappings gracefully (don't cancel tasks - let them shut down properly)
+        for mapping in self.mappings:
+            try:
+                await mapping.stop()
+            except Exception as e:
+                logger.error(
+                    f"Error stopping mapping {mapping.stats['mapping_key']}: {e}", exc_info=True
+                )
 
-        # Wait for tasks to finish cancellation
+        # Now wait for all tasks to complete
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
 
@@ -479,13 +496,8 @@ class PipelineOrchestrator:
             )
             self.shutdown_requested = True
 
-            # Cancel all tasks to trigger graceful shutdown
-            for task in self.tasks:
-                if not task.done():
-                    logger.debug(f"Cancelling task: {task.get_name()}")
-                    task.cancel()
-
-            # Stop the orchestrator
+            # Stop the orchestrator gracefully - DON'T cancel tasks
+            # The stop() method will handle proper shutdown of all components
             loop.create_task(self.stop())
 
         # Use asyncio's add_signal_handler for proper async signal handling

@@ -23,6 +23,8 @@ import logfire
 from azure.eventhub import EventData
 from azure.eventhub.aio import EventHubConsumerClient, PartitionContext
 
+from consumers.checkpoints import SnowflakeCheckpointManager, SnowflakeCheckpointStore
+from consumers.messages import BytesEncoder, EventHubMessage, MessageBatch, _convert_bytes_to_str
 from utils.azure_identity import build_eventhub_cli_credential
 from utils.config import EventHubConfig, SnowflakeConnectionConfig
 
@@ -33,10 +35,6 @@ logger = logging.getLogger(__name__)
 # We handle these gracefully, so we don't need to see them every time
 eventhub_processor_logger = logging.getLogger("azure.eventhub.aio._eventprocessor.event_processor")
 eventhub_processor_logger.setLevel(logging.ERROR)  # Only show ERROR and above, suppress WARNING
-
-
-from consumers.checkpoints import SnowflakeCheckpointManager, SnowflakeCheckpointStore
-from consumers.messages import BytesEncoder, EventHubMessage, MessageBatch, _convert_bytes_to_str
 
 __all__ = [
     "BytesEncoder",
@@ -197,7 +195,10 @@ class EventHubAsyncConsumer:
             logger.info("🔍 Checking for existing checkpoints...")
             partition_checkpoints = await self.checkpoint_manager.get_last_checkpoint()
 
-            if partition_checkpoints:
+            # Determine starting position based on checkpoint existence
+            has_checkpoints = partition_checkpoints is not None and len(partition_checkpoints) > 0
+
+            if has_checkpoints:
                 logger.info(f"✅ Found checkpoints in Snowflake: {partition_checkpoints}")
                 logger.info(
                     "   SDK will automatically resume from NEXT sequence after these checkpoints:"
@@ -208,11 +209,24 @@ class EventHubAsyncConsumer:
                     )
                 self.stats["last_checkpoint"] = partition_checkpoints
             else:
-                logger.warning(
-                    "⚠️ No checkpoints found in Snowflake. SDK will start from LATEST (only NEW messages will be received)."
-                )
-                logger.warning(
-                    "   To process all messages from the beginning, you need to set starting_position='-1'"
+                starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
+                logger.warning("⚠️ No checkpoints found in Snowflake.")
+
+                if starting_pos == "-1":
+                    logger.info(
+                        f"   Starting from BEGINNING of stream (starting_position='{starting_pos}') to process ALL existing messages."
+                    )
+                elif starting_pos == "@latest":
+                    logger.info(
+                        f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
+                    )
+                elif starting_pos == "0":
+                    logger.info(
+                        f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
+                    )
+
+                logger.info(
+                    "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
                 )
 
             # Create EventHub client WITH checkpoint store
@@ -340,13 +354,34 @@ class EventHubAsyncConsumer:
             # SDK will automatically load checkpoints from checkpoint_store
             # and resume from the correct position for each partition
             logger.info("👂 Starting to receive messages from EventHub...")
-            logger.info("⏳ SDK loading checkpoints from store and resuming...")
+
+            if has_checkpoints:
+                logger.info(
+                    "⏳ SDK loading checkpoints from store and resuming from saved positions..."
+                )
+            else:
+                starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
+                logger.info(f"⏳ SDK starting from {starting_pos} (no checkpoints found)...")
 
             try:
-                await self.client.receive(
-                    on_event=self._on_event,
-                    # DO NOT pass starting_position - let SDK use checkpoint_store
-                )
+                # Determine starting position based on checkpoint existence
+                receive_kwargs: dict[str, Any] = {
+                    "on_event": self._on_event,
+                }
+
+                # Only set starting_position if NO checkpoints exist
+                # When checkpoints exist, SDK will use them automatically
+                if not has_checkpoints:
+                    starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
+                    receive_kwargs["starting_position"] = starting_pos
+                    # CRITICAL: Set starting_position_inclusive=False to avoid reprocessing
+                    # Without this, SDK may re-process messages from checkpoints
+                    receive_kwargs["starting_position_inclusive"] = False
+                    logger.info(
+                        f"📍 Setting starting_position='{starting_pos}' (exclusive, configured value)"
+                    )
+
+                await self.client.receive(**receive_kwargs)
             except Exception as receive_error:
                 error_msg = str(receive_error).lower()
                 error_type = type(receive_error).__name__
@@ -463,59 +498,82 @@ class EventHubAsyncConsumer:
 
     async def stop(self) -> None:
         """Stop the EventHub consumer gracefully."""
-        logger.info("🛑 Stopping EventHub consumer gracefully...")
-        self.running = False
+        try:
+            logger.info("🛑 Stopping EventHub consumer gracefully...")
+            self.running = False
 
-        # Close EventHub client first to stop receiving new messages
-        if self.client:
-            logger.info("🔌 Closing EventHub client to stop receiving messages...")
-            try:
-                await self.client.close()
-            except Exception as e:
-                logger.warning(f"Error closing EventHub client: {e}")
-            self.client = None
+            # Cancel timeout handler task FIRST to prevent it from processing/clearing the batch
+            for task in self.tasks:
+                if not task.done():
+                    task.cancel()
 
-        # Close Azure credential to prevent resource leak
-        if self.credential:
-            logger.info("🔐 Closing Azure credential...")
-            try:
-                await self.credential.close()
-            except Exception as e:
-                logger.warning(f"Error closing credential: {e}")
-            self.credential = None
+            # Wait for timeout handler to fully stop
+            if self.tasks:
+                logger.info(f"⏳ Waiting for {len(self.tasks)} tasks to complete...")
+                await asyncio.gather(*self.tasks, return_exceptions=True)
+                logger.info("✅ All tasks completed")
+            self.tasks.clear()
+        except Exception as e:
+            logger.error(f"❌ Error during initial shutdown steps: {e}", exc_info=True)
+            raise
 
-        # Cancel timeout handler task
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
+        try:
+            # Process any remaining messages in current batch BEFORE closing the client
+            batch_exists = self.current_batch is not None
+            message_count = 0
+            if self.current_batch:
+                batch_has_messages = self.current_batch.messages
+                message_count = len(batch_has_messages) if batch_has_messages else 0
+            logger.info(
+                f"🔍 Shutdown check: batch_exists={batch_exists}, message_count={message_count}"
+            )
 
-        # Wait for tasks to complete
-        if self.tasks:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
-        self.tasks.clear()
+            if self.current_batch and self.current_batch.messages:
+                logger.info(f"📦 Processing {message_count} remaining messages before shutdown...")
+                try:
+                    if not self.current_batch.ready_reason:
+                        self.current_batch.ready_reason = "shutdown"
+                    await self._process_batch(self.current_batch)
+                    logger.info(
+                        f"✅ {message_count} remaining messages processed and checkpoints updated"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
+            else:
+                logger.info("✅ No remaining messages to process")
+        except Exception as e:
+            logger.error(f"❌ Error during batch processing: {e}", exc_info=True)
+            # Don't raise - continue with cleanup
 
-        # Now process any remaining messages in current batch
-        if self.current_batch and self.current_batch.messages:
-            message_count = len(self.current_batch.messages)
-            logger.info(f"📦 Processing {message_count} remaining messages before shutdown...")
-            try:
-                if not self.current_batch.ready_reason:
-                    self.current_batch.ready_reason = "shutdown"
-                await self._process_batch(self.current_batch)
-                logger.info(
-                    f"✅ {message_count} remaining messages processed and checkpoints updated"
-                )
-            except Exception as e:
-                logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
-        else:
-            logger.info("✅ No remaining messages to process")
+        try:
+            # Close EventHub client to stop receiving new messages
+            if self.client:
+                logger.info("🔌 Closing EventHub client...")
+                try:
+                    await self.client.close()
+                except Exception as e:
+                    logger.warning(f"Error closing EventHub client: {e}")
+                self.client = None
 
-        # Close checkpoint manager
-        if self.checkpoint_manager:
-            self.checkpoint_manager.close()
-            self.checkpoint_manager = None
+            # Close Azure credential to prevent resource leak
+            if self.credential:
+                logger.info("🔐 Closing Azure credential...")
+                try:
+                    await self.credential.close()
+                except Exception as e:
+                    logger.warning(f"Error closing credential: {e}")
+                self.credential = None
 
-        logger.info("✅ EventHub consumer stopped gracefully")
+            # Close checkpoint manager
+            if self.checkpoint_manager:
+                logger.info("🗄️ Closing checkpoint manager...")
+                self.checkpoint_manager.close()
+                self.checkpoint_manager = None
+
+            logger.info("✅ EventHub consumer stopped gracefully")
+        except Exception as e:
+            logger.error(f"❌ Error during final cleanup: {e}", exc_info=True)
+            # Don't raise - we're shutting down anyway
 
     async def _on_event(self, partition_context: PartitionContext, event: EventData | None) -> None:
         """

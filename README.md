@@ -107,6 +107,65 @@ uv run evsnow status
 uv run evsnow run --dry-run
 ```
 
+### Starting Fresh (No Checkpoints)
+
+When starting the pipeline **without existing checkpoints** (e.g., after truncating checkpoint tables), you can control how the consumer processes existing messages:
+
+```bash
+# Example: Starting fresh after truncating tables
+snowsql -q "truncate table ingestion.public.events_table;"
+snowsql -q "truncate table control.public.ingestion_status;"
+
+# Consumer will process based on STARTING_POSITION_ON_NO_CHECKPOINT setting
+uv run evsnow run
+```
+
+**Starting Position Options** (in `.env`):
+
+Configure where the consumer begins reading when **no checkpoints exist**. Once checkpoints are saved, the consumer always resumes from the last checkpoint position, regardless of this setting.
+
+```bash
+# Option 1: Start from BEGINNING of stream (default, recommended)
+# Processes ALL messages currently in the Event Hub partition
+# Use this to ensure no messages are lost when starting fresh
+EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
+
+# Option 2: Start from LATEST position
+# Only processes messages that arrive AFTER the consumer connects
+# Messages already in Event Hub will be skipped
+EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=@latest
+
+# Option 3: Start from EARLIEST retained message
+# Similar to -1 but explicitly starts from the oldest available message
+# Based on Event Hub retention policy (typically 1-7 days)
+EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
+```
+
+**How It Works:**
+
+1. **First Run (No Checkpoints)**
+   - Consumer uses the configured `STARTING_POSITION_ON_NO_CHECKPOINT` value
+   - Position `-1` or `0`: Reads all existing messages in Event Hub
+   - Position `@latest`: Skips existing messages, only reads new ones
+
+2. **Subsequent Runs (Checkpoints Exist)**
+   - Consumer **always** resumes from last saved checkpoint
+   - The `STARTING_POSITION_ON_NO_CHECKPOINT` setting is ignored
+   - Ensures exactly-once processing semantics
+
+3. **After Truncating Checkpoints**
+   - Behaves like first run again
+   - Uses configured starting position to determine where to begin
+
+**Official Azure Documentation:**
+- [Event Hubs Event Position](https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-features#event-consumers)
+- [Starting Position Options](https://learn.microsoft.com/en-us/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient#azure-eventhub-eventhubconsumerclient-receive)
+
+**Recommendation:** 
+- Use `-1` (default) for production to prevent message loss
+- Use `@latest` for development/testing when you only want new messages
+- Avoid `0` unless you specifically need the earliest retained message (usually same as `-1`)
+
 ## Optional features
 
 ### Smart Retry (LLM-Powered)

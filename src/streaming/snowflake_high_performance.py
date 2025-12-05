@@ -227,22 +227,28 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         """Stop the Snowflake streaming client and clean up resources."""
         logger.info("Stopping Snowflake streaming client...")
 
-        # Close all channels
+        # Close all channels with wait_for_flush=True
+        # The Snowflake SDK will flush each channel before closing it
+        logger.info(f"🔌 Closing {len(self.channels)} channels with flush...")
         for channel_name, channel in self.channels.items():
             try:
                 if channel is not None:
-                    logger.info(f"Closing channel: {channel_name}")
+                    logger.info(f"Closing channel with flush: {channel_name}")
+                    # The SDK automatically flushes when close() is called on a channel
                     channel.close()
-                    logger.info(f"✅ Channel closed: {channel_name}")
+                    logger.info(f"✅ Channel closed and flushed: {channel_name}")
             except Exception as e:
                 logger.error(f"Error closing channel {channel_name}: {e}", exc_info=True)
 
         self.channels.clear()
+        logger.info("✅ All channels closed with flush")
 
         # Close the StreamingIngestClient
+        # Note: The SDK's close() method doesn't accept wait_for_flush parameter in Python bindings
+        # We've already flushed all channels above, so this is safe
         if self.streaming_client is not None:
             try:
-                logger.info("Closing StreamingIngestClient...")
+                logger.info("Closing StreamingIngestClient (channels already flushed)...")
                 self.streaming_client.close()
                 logger.info("✅ StreamingIngestClient closed")
                 self.streaming_client = None
@@ -250,6 +256,20 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 logger.error(f"Error closing StreamingIngestClient: {e}", exc_info=True)
 
         logger.info("Snowflake streaming client stopped")
+
+    def __del__(self) -> None:
+        """Destructor to ensure proper cleanup if stop() wasn't called."""
+        # If the streaming_client still exists when this object is being destroyed,
+        # it means stop() was never called. Call it now to ensure proper flush.
+        if self.streaming_client is not None:
+            logger.warning(
+                "⚠️ Snowflake client being destroyed without explicit stop() call! "
+                "Calling stop() now to flush data..."
+            )
+            try:
+                self.stop()
+            except Exception as e:
+                logger.error(f"Error in __del__ while stopping Snowflake client: {e}")
 
     def _ensure_target_table(self) -> None:
         """Ensure the target table exists with the correct schema."""
@@ -384,6 +404,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 )
 
             # Insert rows into the channel (based on gist reference pattern)
+            flush_result = None
             try:
                 rows_inserted = 0
                 for row in data_batch:
@@ -403,6 +424,28 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 # Get latest committed offset token for verification
                 offset_token = channel.get_latest_committed_offset_token()
                 logger.debug(f"Latest committed offset for channel {channel_name}: {offset_token}")
+
+                if hasattr(channel, "flush"):
+                    try:
+                        flush_result = channel.flush()
+                        logger.debug(
+                            "Flushed channel %s after append (result=%s)",
+                            channel_name,
+                            flush_result,
+                        )
+                    except Exception as flush_error:
+                        logger.error(
+                            "Failed to flush channel %s: %s",
+                            channel_name,
+                            flush_error,
+                            exc_info=True,
+                        )
+                        raise
+                else:
+                    logger.debug(
+                        "Channel %s has no flush() method; relying on SDK auto-flush/close",
+                        channel_name,
+                    )
 
             except Exception as e:
                 logger.error(
@@ -427,6 +470,8 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             span.set_attribute("messages_sent", len(data_batch))
             span.set_attribute("total_messages", self.stats["total_messages_sent"])
             span.set_attribute("total_batches", self.stats["total_batches_sent"])
+            if flush_result is not None:
+                span.set_attribute("flush_result", str(flush_result))
 
             logger.debug(
                 f"Successfully ingested {len(data_batch)} records to {channel_name} (partition {partition_id})"
