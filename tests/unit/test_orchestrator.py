@@ -729,7 +729,6 @@ class TestPipelineOrchestrator:
         # Create mock tasks
         mock_task1 = mocker.MagicMock()
         mock_task1.done.return_value = False
-        mock_task1.cancel = mocker.MagicMock()
         orchestrator.tasks = [mock_task1]
         
         # Mock asyncio.gather to return immediately with completed future
@@ -740,9 +739,11 @@ class TestPipelineOrchestrator:
         # Act
         await orchestrator.stop()
         
-        # Assert
+        # Assert - now verifies graceful shutdown without task cancellation
         assert not orchestrator.running
-        mock_task1.cancel.assert_called_once()
+        # Verify mapping.stop() was called on each mapping
+        for mapping in orchestrator.mappings:
+            mapping.stop.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_stop_cleans_up_all_mappings(
@@ -888,7 +889,7 @@ class TestPipelineOrchestrator:
             signal_handlers[sig] = (handler, args)
         
         mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
-        mocker.patch.object(loop, "create_task")
+        mock_create_task = mocker.patch.object(loop, "create_task")
         
         orchestrator.setup_signal_handlers(loop)
         
@@ -896,9 +897,10 @@ class TestPipelineOrchestrator:
         handler, args = signal_handlers[signal.SIGINT]
         handler(args[0])
         
-        # Assert
+        # Assert - now verifies graceful shutdown by calling stop()
         assert orchestrator.shutdown_requested
-        mock_task.cancel.assert_called_once()
+        # Verify that stop() is scheduled via create_task (graceful shutdown)
+        mock_create_task.assert_called_once()
 
     def test_signal_handler_forces_exit_on_second_signal(
         self,
