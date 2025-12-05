@@ -9,6 +9,14 @@ Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkp
 
 See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
 
+## Prerequisites
+
+- Python 3.13+ and `uv` installed
+- Snowflake account/role with permission to create/use the target database, schema, and pipe
+- Azure Event Hub namespace with read access (consumer group) and either `az login` or a connection string
+- Ability to run OpenSSL to generate RSA keys for Snowflake key-pair auth
+- `snowsql` (or Snowflake UI) to truncate tables/checkpoints when testing from scratch
+
 ## Install
 
 ```bash
@@ -18,6 +26,10 @@ cd evsnow
 
 # Install dependencies
 uv sync
+
+# Quickstart
+uv run evsnow validate-config
+uv run evsnow run --dry-run
 ```
 
 ## Configure
@@ -30,9 +42,10 @@ cp .env.example .env
 
 Then set your values in `.env`. The pipeline needs:
 
-- Azure Event Hub namespace, topics, and consumer groups
-- Snowflake key-pair auth details and role
-- Topic → table mappings
+- **Azure Event Hub** (namespace, event hub name, consumer group, optional connection string)
+- **Snowflake connection** (account, user, key pair, warehouse, database, schema, role)
+- **Checkpoint/control table** for offsets
+- **Topic → table mappings**
 
 Key settings (example):
 
@@ -74,6 +87,7 @@ Generate RSA key pair for authentication:
 
 # Assign public key to Snowflake user
 # See SNOWFLAKE_QUICKSTART.md for detailed instructions
+# Example: ALTER USER STREAMEV SET RSA_PUBLIC_KEY='MIIBIjANBgkqhki...';
 ```
 
 ### Azure authentication
@@ -120,42 +134,30 @@ snowsql -q "truncate table control.public.ingestion_status;"
 uv run evsnow run
 ```
 
-**Starting Position Options** (in `.env`):
-
-Configure where the consumer begins reading when **no checkpoints exist**. Once checkpoints are saved, the consumer always resumes from the last checkpoint position, regardless of this setting.
+**Starting Position Options** (in `.env`): choose where the consumer begins when **no checkpoints exist**. After checkpoints are saved, the setting is ignored (resume from checkpoint).
 
 ```bash
-# Option 1: Start from BEGINNING of stream (default, recommended)
-# Processes ALL messages currently in the Event Hub partition
-# Use this to ensure no messages are lost when starting fresh
+# Option 1: BEGINNING of stream (default, recommended)
+# Processes ALL existing messages in the Event Hub partition
+# Use to ensure no messages are lost when starting fresh
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
 
-# Option 2: Start from LATEST position
+# Option 2: LATEST position
 # Only processes messages that arrive AFTER the consumer connects
-# Messages already in Event Hub will be skipped
+# Skips messages already in Event Hub
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=@latest
 
-# Option 3: Start from EARLIEST retained message
-# Similar to -1 but explicitly starts from the oldest available message
-# Based on Event Hub retention policy (typically 1-7 days)
+# Option 3: EARLIEST retained message
+# Similar to -1 but explicitly starts from the oldest retained message
+# Depends on Event Hub retention (typically 1-7 days)
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
 ```
 
 **How It Works:**
 
-1. **First Run (No Checkpoints)**
-   - Consumer uses the configured `STARTING_POSITION_ON_NO_CHECKPOINT` value
-   - Position `-1` or `0`: Reads all existing messages in Event Hub
-   - Position `@latest`: Skips existing messages, only reads new ones
-
-2. **Subsequent Runs (Checkpoints Exist)**
-   - Consumer **always** resumes from last saved checkpoint
-   - The `STARTING_POSITION_ON_NO_CHECKPOINT` setting is ignored
-   - Ensures exactly-once processing semantics
-
-3. **After Truncating Checkpoints**
-   - Behaves like first run again
-   - Uses configured starting position to determine where to begin
+1. **First run (no checkpoints):** Uses `STARTING_POSITION_ON_NO_CHECKPOINT` (`-1/0` = all existing messages; `@latest` = only new messages).
+2. **Subsequent runs (checkpoints exist):** Always resumes from the last saved checkpoint; the setting is ignored.
+3. **After truncating checkpoints:** Same as first run again; uses the configured starting position.
 
 **Official Azure Documentation:**
 - [Event Hubs Event Position](https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-features#event-consumers)
@@ -170,7 +172,7 @@ EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
 
 ### Smart Retry (LLM-Powered)
 
-Enable intelligent retry decisions using LLM analysis:
+Use LLM analysis to classify errors and decide whether to retry:
 
 ```bash
 # Add to .env
@@ -192,7 +194,7 @@ uv run evsnow run --smart
 
 ### Logfire Observability
 
-Monitor your pipeline with real-time tracing:
+Send structured traces/logs for observability:
 
 ```bash
 # Add to .env
