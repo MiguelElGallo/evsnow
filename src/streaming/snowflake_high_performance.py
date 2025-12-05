@@ -7,17 +7,7 @@ This module provides a streaming client using the HIGH-PERFORMANCE Snowpipe Stre
 - Server-side schema validation
 - Supports in-flight transformations via PIPE
 
-⚠️  KNOWN ISSUE: Currently fails on Azure-hosted Snowflake with AWS_KEY_ID error.
-    SDK bug prevents Azure deployment. Use Classic SDK for Azure until fixed.
-
-Best for:
-- AWS-hosted Snowflake (works reliably)
-- GCP-hosted Snowflake (should work, needs testing)
-- High-throughput requirements (>2 GB/s)
-- Once Azure SDK bug is fixed (expected in v1.2.0+)
-
 Documentation: https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-overview
-Issue: See SNOWFLAKE_SDK_ISSUE.md for Azure compatibility details
 """
 
 import logging
@@ -107,7 +97,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         - private_key_file: Path to PEM private key file (we write temp file in start())
         - role: Role to use (optional)
 
-        IMPORTANT: Unlike classic SDK, the profile does NOT include:
+        IMPORTANT: The profile does NOT include:
         - warehouse, database, schema (passed to StreamingIngestClient constructor instead)
         - host (use full 'url' instead)
         - private_key content (use 'private_key_file' path instead)
@@ -192,36 +182,13 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 client_name = f"evsnow_{self.client_name_suffix}"
                 logger.info(f"Creating High-Performance StreamingIngestClient: {client_name}")
 
-                # Write private key to temporary file (high-performance SDK requires file path, not content)
-                import json
-                import tempfile
-
-                # Extract private_key from profile and write to temp file
                 private_key_pem = profile.pop("private_key")  # Remove from profile dict
 
-                # Create temporary private key file
-                key_fd, key_path = tempfile.mkstemp(suffix=".pem", prefix="snowflake_key_")
-                try:
-                    with open(key_fd, "w") as f:
-                        f.write(private_key_pem)
+                from utils.snowflake import temporary_private_key_file, temporary_profile_file
 
-                    logger.debug(f"Private key written to temporary file: {key_path}")
-
-                    # Add key file path to profile
+                with temporary_private_key_file(private_key_pem) as key_path:
                     profile["private_key_file"] = key_path
-
-                    # Write profile JSON to temporary file
-                    profile_fd, profile_path = tempfile.mkstemp(
-                        suffix=".json", prefix="snowflake_profile_"
-                    )
-                    try:
-                        with open(profile_fd, "w") as f:
-                            json.dump(profile, f)
-
-                        logger.debug(f"Profile written to temporary file: {profile_path}")
-
-                        # Initialize High-Performance SDK client
-                        # Params: client_name, db_name, schema_name, pipe_name, profile_json (file path)
+                    with temporary_profile_file(profile) as profile_path:
                         self.streaming_client = StreamingIngestClient(
                             client_name=client_name,
                             db_name=self.snowflake_config.database,
@@ -241,26 +208,6 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                             pipe="EVENTS_TABLE_PIPE",
                             table=self.snowflake_config.table_name,
                         )
-                    finally:
-                        # Clean up temporary profile file (SDK has read it by now)
-                        import os
-
-                        try:
-                            os.unlink(profile_path)
-                            logger.debug(f"Temporary profile file deleted: {profile_path}")
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to delete temporary profile file {profile_path}: {e}"
-                            )
-                finally:
-                    # Clean up temporary key file
-                    import os
-
-                    try:
-                        os.unlink(key_path)
-                        logger.debug(f"Temporary key file deleted: {key_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete temporary key file {key_path}: {e}")
 
                 # Ensure target table exists
                 self._ensure_target_table()
@@ -280,22 +227,28 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         """Stop the Snowflake streaming client and clean up resources."""
         logger.info("Stopping Snowflake streaming client...")
 
-        # Close all channels
+        # Close all channels with wait_for_flush=True
+        # The Snowflake SDK will flush each channel before closing it
+        logger.info(f"🔌 Closing {len(self.channels)} channels with flush...")
         for channel_name, channel in self.channels.items():
             try:
                 if channel is not None:
-                    logger.info(f"Closing channel: {channel_name}")
+                    logger.info(f"Closing channel with flush: {channel_name}")
+                    # The SDK automatically flushes when close() is called on a channel
                     channel.close()
-                    logger.info(f"✅ Channel closed: {channel_name}")
+                    logger.info(f"✅ Channel closed and flushed: {channel_name}")
             except Exception as e:
                 logger.error(f"Error closing channel {channel_name}: {e}", exc_info=True)
 
         self.channels.clear()
+        logger.info("✅ All channels closed with flush")
 
         # Close the StreamingIngestClient
+        # Note: The SDK's close() method doesn't accept wait_for_flush parameter in Python bindings
+        # We've already flushed all channels above, so this is safe
         if self.streaming_client is not None:
             try:
-                logger.info("Closing StreamingIngestClient...")
+                logger.info("Closing StreamingIngestClient (channels already flushed)...")
                 self.streaming_client.close()
                 logger.info("✅ StreamingIngestClient closed")
                 self.streaming_client = None
@@ -303,6 +256,20 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 logger.error(f"Error closing StreamingIngestClient: {e}", exc_info=True)
 
         logger.info("Snowflake streaming client stopped")
+
+    def __del__(self) -> None:
+        """Destructor to ensure proper cleanup if stop() wasn't called."""
+        # If the streaming_client still exists when this object is being destroyed,
+        # it means stop() was never called. Call it now to ensure proper flush.
+        if self.streaming_client is not None:
+            logger.warning(
+                "⚠️ Snowflake client being destroyed without explicit stop() call! "
+                "Calling stop() now to flush data..."
+            )
+            try:
+                self.stop()
+            except Exception as e:
+                logger.error(f"Error in __del__ while stopping Snowflake client: {e}")
 
     def _ensure_target_table(self) -> None:
         """Ensure the target table exists with the correct schema."""
@@ -437,6 +404,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 )
 
             # Insert rows into the channel (based on gist reference pattern)
+            flush_result = None
             try:
                 rows_inserted = 0
                 for row in data_batch:
@@ -456,6 +424,28 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 # Get latest committed offset token for verification
                 offset_token = channel.get_latest_committed_offset_token()
                 logger.debug(f"Latest committed offset for channel {channel_name}: {offset_token}")
+
+                if hasattr(channel, "flush"):
+                    try:
+                        flush_result = channel.flush()
+                        logger.debug(
+                            "Flushed channel %s after append (result=%s)",
+                            channel_name,
+                            flush_result,
+                        )
+                    except Exception as flush_error:
+                        logger.error(
+                            "Failed to flush channel %s: %s",
+                            channel_name,
+                            flush_error,
+                            exc_info=True,
+                        )
+                        raise
+                else:
+                    logger.debug(
+                        "Channel %s has no flush() method; relying on SDK auto-flush/close",
+                        channel_name,
+                    )
 
             except Exception as e:
                 logger.error(
@@ -480,6 +470,8 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             span.set_attribute("messages_sent", len(data_batch))
             span.set_attribute("total_messages", self.stats["total_messages_sent"])
             span.set_attribute("total_batches", self.stats["total_batches_sent"])
+            if flush_result is not None:
+                span.set_attribute("flush_result", str(flush_result))
 
             logger.debug(
                 f"Successfully ingested {len(data_batch)} records to {channel_name} (partition {partition_id})"

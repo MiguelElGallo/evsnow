@@ -426,7 +426,7 @@ class TestMultiMappingPipeline:
             )
         
         # Track ingestions per mapping
-        ingestions = {"TABLE_1": [], "TABLE_2": []}
+        ingestions: dict[str, list[int]] = {"TABLE_1": [], "TABLE_2": []}
         
         def mock_ingest(channel_name, data_batch, partition_id):
             if "hub-1" in channel_name:

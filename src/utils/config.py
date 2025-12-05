@@ -280,6 +280,12 @@ class EventHubConfig(BaseModel):
         default=300, description="Maximum time to wait for batch completion"
     )
 
+    # Starting position when no checkpoints exist
+    starting_position_on_no_checkpoint: str = Field(
+        default="-1",
+        description="Starting position when no checkpoints exist. Options: '-1' (beginning), '@latest' (only new), '0' (earliest)",
+    )
+
     @field_validator("namespace")
     @classmethod
     def validate_namespace(cls, v: str) -> str:
@@ -302,6 +308,17 @@ class EventHubConfig(BaseModel):
         """Validate consumer group format."""
         if not v.strip():
             raise ValueError("Consumer group cannot be empty")
+        return v
+
+    @field_validator("starting_position_on_no_checkpoint")
+    @classmethod
+    def validate_starting_position(cls, v: str) -> str:
+        """Validate starting position format."""
+        valid_positions = ["-1", "@latest", "0"]
+        if v not in valid_positions:
+            raise ValueError(
+                f"Invalid starting_position: {v}. Must be one of: {', '.join(valid_positions)}"
+            )
         return v
 
 

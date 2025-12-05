@@ -12,22 +12,20 @@ Based on Azure EventHub SDK patterns but adapted for Snowflake checkpointing.
 """
 
 import asyncio
-import json
 import logging
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 import logfire
 from azure.eventhub import EventData
-from azure.eventhub.aio import (
-    CheckpointStore,
-    EventHubConsumerClient,
-    PartitionContext,
-)
+from azure.eventhub.aio import EventHubConsumerClient, PartitionContext
 
+from consumers.checkpoints import SnowflakeCheckpointManager, SnowflakeCheckpointStore
+from consumers.messages import BytesEncoder, EventHubMessage, MessageBatch, _convert_bytes_to_str
+from utils.azure_identity import build_eventhub_cli_credential
 from utils.config import EventHubConfig, SnowflakeConnectionConfig
 
 logger = logging.getLogger(__name__)
@@ -38,457 +36,16 @@ logger = logging.getLogger(__name__)
 eventhub_processor_logger = logging.getLogger("azure.eventhub.aio._eventprocessor.event_processor")
 eventhub_processor_logger.setLevel(logging.ERROR)  # Only show ERROR and above, suppress WARNING
 
-
-class BytesEncoder(json.JSONEncoder):
-    """Custom JSON encoder that converts bytes to strings."""
-
-    def default(self, obj):
-        if isinstance(obj, bytes):
-            return obj.decode("utf-8", errors="replace")
-        return super().default(obj)
-
-
-def _convert_bytes_to_str(obj: Any) -> Any:
-    """
-    Recursively convert bytes to strings in nested structures.
-    Handles dicts, lists, tuples, and bytes objects.
-    """
-    if isinstance(obj, bytes):
-        return obj.decode("utf-8", errors="replace")
-    elif isinstance(obj, dict):
-        return {_convert_bytes_to_str(k): _convert_bytes_to_str(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(_convert_bytes_to_str(item) for item in obj)
-    else:
-        return obj
-
-
-class EventHubMessage:
-    """Wrapper for EventHub message with additional metadata."""
-
-    def __init__(self, event_data: EventData, partition_id: str, sequence_number: int):
-        self.event_data = event_data
-        self.partition_id = partition_id
-        self.sequence_number = sequence_number
-        self.body = event_data.body_as_str()
-        self.enqueued_time = event_data.enqueued_time
-        self.properties = event_data.properties
-        self.system_properties = event_data.system_properties
-        self.partition_context: PartitionContext | None = None  # For checkpoint updates
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert message to dictionary for Snowflake ingestion."""
-        # Convert properties and system_properties, handling bytes values recursively
-        properties_json = None
-        if self.properties:
-            clean_props = _convert_bytes_to_str(self.properties)
-            properties_json = json.dumps(clean_props, cls=BytesEncoder)
-
-        system_props_json = None
-        if self.system_properties:
-            clean_sys_props = _convert_bytes_to_str(dict(self.system_properties))
-            system_props_json = json.dumps(clean_sys_props, cls=BytesEncoder)
-
-        result = {
-            "event_body": self.body,
-            "partition_id": self.partition_id,
-            "sequence_number": self.sequence_number,
-            "enqueued_time": self.enqueued_time.isoformat() if self.enqueued_time else None,
-            "properties": properties_json,
-            "system_properties": system_props_json,
-            "ingestion_timestamp": datetime.now(UTC).isoformat(),
-        }
-
-        # Debug: Check for any remaining bytes in the result
-        for key, value in result.items():
-            if isinstance(value, bytes):
-                value_preview = value[:100] if len(value) > 100 else value
-                logger.error(
-                    f"FOUND BYTES in to_dict() result: key={key}, value_type={type(value)}, value={value_preview!r}"
-                )
-
-        return result
-
-
-class MessageBatch:
-    """Container for batched EventHub messages."""
-
-    def __init__(self, max_size: int = 1000, max_wait_seconds: int = 300):
-        self.messages: list[EventHubMessage] = []
-        self.max_size = max_size
-        self.max_wait_seconds = max_wait_seconds
-        self.created_at = time.time()
-        self.last_sequence_by_partition: dict[str, int] = {}
-
-    def add_message(self, message: EventHubMessage) -> bool:
-        """
-        Add message to batch.
-
-        Returns True if batch is ready for processing after adding this message.
-        """
-        self.messages.append(message)
-        self.last_sequence_by_partition[message.partition_id] = message.sequence_number
-
-        # Check if batch is ready
-        return self.is_ready()
-
-    def is_ready(self) -> bool:
-        """Check if batch is ready for processing."""
-        return (
-            len(self.messages) >= self.max_size
-            or (time.time() - self.created_at) >= self.max_wait_seconds
-        )
-
-    def get_checkpoint_data(self) -> dict[str, int]:
-        """Get checkpoint data (highest sequence number per partition)."""
-        return self.last_sequence_by_partition.copy()
-
-    def to_dict_list(self) -> list[dict[str, Any]]:
-        """Convert all messages to list of dictionaries."""
-        return [msg.to_dict() for msg in self.messages]
-
-
-class SnowflakeCheckpointManager:
-    """Manages checkpoints using Snowflake tables."""
-
-    def __init__(
-        self,
-        eventhub_namespace: str,
-        eventhub_name: str,
-        target_db: str,
-        target_schema: str,
-        target_table: str,
-        snowflake_config: SnowflakeConnectionConfig | None = None,
-        session=None,
-        control_db: str | None = None,
-        control_schema: str | None = None,
-        control_table: str | None = None,
-    ):
-        self.eventhub_namespace = eventhub_namespace
-        self.eventhub_name = eventhub_name
-        # Target = where data is ingested
-        self.target_db = target_db
-        self.target_schema = target_schema
-        self.target_table = target_table
-        # Control = where checkpoints are stored
-        self.control_db = control_db
-        self.control_schema = control_schema
-        self.control_table = control_table
-        self.snowflake_config = snowflake_config
-        self.session = session
-        self._external_session = session is not None
-
-    async def get_last_checkpoint(self) -> dict[str, int] | None:
-        """
-        Get the last checkpoint from Snowflake for each partition.
-
-        Returns:
-            Dictionary mapping partition_id to last processed sequence_number,
-            or None if no checkpoint exists.
-        """
-        try:
-            from utils.snowflake import get_partition_checkpoints
-
-            result: dict[str, int] | None = get_partition_checkpoints(
-                eventhub_namespace=self.eventhub_namespace,
-                eventhub=self.eventhub_name,
-                target_db=self.target_db,
-                target_schema=self.target_schema,
-                target_table=self.target_table,
-                config=self.snowflake_config,
-                control_db=self.control_db,
-                control_schema=self.control_schema,
-                control_table=self.control_table,
-            )
-
-            if result:
-                logger.info(f"Loaded per-partition checkpoints: {result}")
-            else:
-                logger.info("No checkpoints found, starting from beginning")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to get last checkpoint: {e}", exc_info=True)
-            return None
-
-    async def save_checkpoint(
-        self,
-        partition_checkpoints: dict[str, int],
-        partition_metadata: dict[str, dict[str, Any]] | None = None,
-    ) -> bool:
-        """
-        Save per-partition checkpoints to Snowflake.
-
-        Args:
-            partition_checkpoints: Dictionary mapping partition_id to offset (int)
-            partition_metadata: Optional dict mapping partition_id to metadata dict
-                               (e.g., {"0": {"sequence_number": 3582, "timestamp": "..."}})
-        """
-        with logfire.span(
-            "eventhub.checkpoint_save",
-            partitions_count=len(partition_checkpoints),
-            partition_ids=list(partition_checkpoints.keys()),
-            eventhub_name=self.eventhub_name,
-        ) as span:
-            try:
-                from utils.snowflake import insert_partition_checkpoint
-
-                # Save each partition checkpoint as a separate row
-                checkpoints_saved = 0
-                for partition_id, waterlevel in partition_checkpoints.items():
-                    # Get metadata for this partition (if provided)
-                    metadata = None
-                    if partition_metadata and partition_id in partition_metadata:
-                        metadata = partition_metadata[partition_id]
-
-                    logger.info(
-                        f"📝 Inserting checkpoint: partition={partition_id}, "
-                        f"waterlevel={waterlevel} (type={type(waterlevel).__name__}), "
-                        f"target={self.target_db}.{self.target_schema}.{self.target_table}, "
-                        f"control={self.control_db}.{self.control_schema}.{self.control_table}"
-                    )
-
-                    insert_partition_checkpoint(
-                        eventhub_namespace=self.eventhub_namespace,
-                        eventhub=self.eventhub_name,
-                        target_db=self.target_db,
-                        target_schema=self.target_schema,
-                        target_table=self.target_table,
-                        partition_id=partition_id,
-                        waterlevel=waterlevel,
-                        metadata=metadata,  # Now includes sequence_number and other info
-                        config=self.snowflake_config,
-                        control_db=self.control_db,
-                        control_schema=self.control_schema,
-                        control_table=self.control_table,
-                    )
-                    checkpoints_saved += 1
-
-                span.set_attribute("checkpoints_saved", checkpoints_saved)
-                span.set_attribute("success", True)
-
-                logger.info(
-                    f"Checkpoint saved for {len(partition_checkpoints)} partitions: {partition_checkpoints}"
-                )
-
-                logfire.info(
-                    "Checkpoints saved to Snowflake",
-                    eventhub_name=self.eventhub_name,
-                    partitions_count=checkpoints_saved,
-                    partition_ids=list(partition_checkpoints.keys()),
-                )
-
-                return True
-            except Exception as e:
-                logger.error(f"Failed to save checkpoint: {e}", exc_info=True)
-                span.set_attribute("error", str(e))
-                span.set_attribute("success", False)
-                logfire.error(
-                    "Checkpoint save failed",
-                    error=str(e),
-                    eventhub_name=self.eventhub_name,
-                    partitions_count=len(partition_checkpoints),
-                )
-                return False
-
-    def close(self):
-        """Close resources if we own them."""
-        if self.session and not self._external_session:
-            self.session.close()
-
-
-class SnowflakeCheckpointStore(CheckpointStore):
-    """
-    Azure SDK-compatible checkpoint store that uses Snowflake for persistence.
-
-    This class implements the Azure EventHub CheckpointStore abstract base class,
-    bridging the Azure SDK's checkpoint mechanism with our Snowflake storage.
-    """
-
-    def __init__(self, checkpoint_manager: SnowflakeCheckpointManager):
-        """
-        Initialize the checkpoint store.
-
-        Args:
-            checkpoint_manager: The Snowflake checkpoint manager instance
-        """
-        self.checkpoint_manager = checkpoint_manager
-        # Cache for ownership claims (partition_id -> dict with ownership info)
-        self._ownership_cache: dict[str, dict[str, Any]] = {}
-        # Cache for checkpoints (partition_id -> dict with checkpoint info)
-        self._checkpoint_cache: dict[str, dict[str, Any]] = {}
-
-    async def list_ownership(
-        self,
-        fully_qualified_namespace: str,
-        eventhub_name: str,
-        consumer_group: str,
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        """
-        List all partition ownership records.
-
-        Returns:
-            List of ownership dictionaries with keys:
-                - fully_qualified_namespace
-                - eventhub_name
-                - consumer_group
-                - partition_id
-                - owner_id
-                - last_modified_time
-                - etag
-        """
-        # Return cached ownership records
-        return list(self._ownership_cache.values())
-
-    async def claim_ownership(
-        self, ownership_list: Iterable[dict[str, Any]], **kwargs: Any
-    ) -> list[dict[str, Any]]:
-        """
-        Claim ownership of partitions.
-
-        Args:
-            ownership_list: Iterable of ownership dictionaries to claim
-
-        Returns:
-            List of successfully claimed ownership dictionaries
-        """
-        claimed = []
-        for ownership in ownership_list:
-            partition_id = ownership["partition_id"]
-            # Update cache with ownership info
-            self._ownership_cache[partition_id] = {
-                "fully_qualified_namespace": ownership["fully_qualified_namespace"],
-                "eventhub_name": ownership["eventhub_name"],
-                "consumer_group": ownership["consumer_group"],
-                "partition_id": partition_id,
-                "owner_id": ownership["owner_id"],
-                "last_modified_time": time.time(),
-                "etag": str(time.time()),  # Simple etag using timestamp
-            }
-            claimed.append(self._ownership_cache[partition_id])
-
-        logger.debug(f"Claimed ownership for {len(claimed)} partitions")
-        return claimed
-
-    async def update_checkpoint(self, checkpoint: dict[str, Any], **kwargs: Any) -> None:
-        """
-        Update checkpoint for a partition.
-
-        Args:
-            checkpoint: Dictionary with keys:
-                - fully_qualified_namespace
-                - eventhub_name
-                - consumer_group
-                - partition_id
-                - offset (string - this is the EventHub offset, NOT sequence number)
-                - sequence_number
-        """
-        partition_id = checkpoint["partition_id"]
-        offset = checkpoint["offset"]  # This is the EventHub offset (string)
-        sequence_number = checkpoint["sequence_number"]
-
-        # Log what we received from SDK
-        logger.info(
-            f"🔍 SDK update_checkpoint called: partition={partition_id}, "
-            f"offset={offset!r} (type={type(offset).__name__}), "
-            f"sequence={sequence_number} (type={type(sequence_number).__name__})"
-        )
-
-        # Update checkpoint cache
-        self._checkpoint_cache[partition_id] = checkpoint
-
-        # CRITICAL: We need to save the OFFSET, not sequence number!
-        # EventHub uses offset for resumption, not sequence number
-        # Convert offset string to int for storage (Snowflake waterlevel column is BIGINT)
-        try:
-            offset_int = int(offset)
-            logger.info(
-                f"✅ Converted offset to int: partition={partition_id}, offset_int={offset_int}"
-            )
-        except (ValueError, TypeError) as e:
-            logger.error(
-                f"❌ CRITICAL: Invalid offset format: offset={offset!r}, type={type(offset).__name__}, "
-                f"error={e}, using sequence_number={sequence_number} as fallback"
-            )
-            offset_int = sequence_number
-
-        # Save OFFSET to Snowflake (stored in waterlevel column)
-        # Also save sequence_number and other info in metadata JSON
-        partition_checkpoints = {partition_id: offset_int}
-        partition_metadata = {
-            partition_id: {
-                "sequence_number": sequence_number,
-                "offset_string": offset,  # Keep original string format
-                "fully_qualified_namespace": checkpoint.get("fully_qualified_namespace"),
-                "eventhub_name": checkpoint.get("eventhub_name"),
-                "consumer_group": checkpoint.get("consumer_group"),
-            }
-        }
-
-        logger.info(
-            f"💾 Calling save_checkpoint: partition={partition_id}, "
-            f"waterlevel={offset_int}, metadata.sequence_number={sequence_number}"
-        )
-
-        success = await self.checkpoint_manager.save_checkpoint(
-            partition_checkpoints, partition_metadata
-        )
-
-        if success:
-            logger.debug(
-                f"Checkpoint updated for partition {partition_id}: offset={offset}, sequence={sequence_number}"
-            )
-        else:
-            logger.warning(f"Failed to update checkpoint for partition {partition_id}")
-
-    async def list_checkpoints(
-        self,
-        fully_qualified_namespace: str,
-        eventhub_name: str,
-        consumer_group: str,
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        """
-        List all checkpoints.
-
-        Returns:
-            List of checkpoint dictionaries with keys:
-                - fully_qualified_namespace
-                - eventhub_name
-                - consumer_group
-                - partition_id
-                - offset
-                - sequence_number
-        """
-        # Load checkpoints from Snowflake
-        checkpoints_data = await self.checkpoint_manager.get_last_checkpoint()
-
-        if not checkpoints_data:
-            return []
-
-        # Convert Snowflake format to Azure SDK format
-        # CRITICAL: waterlevel column stores the OFFSET (not sequence number)
-        # The SDK needs the offset to resume from the correct position
-        checkpoints = []
-        for partition_id, offset_value in checkpoints_data.items():
-            checkpoint = {
-                "fully_qualified_namespace": fully_qualified_namespace,
-                "eventhub_name": eventhub_name,
-                "consumer_group": consumer_group,
-                "partition_id": partition_id,
-                "offset": str(offset_value),  # SDK expects offset as string
-                "sequence_number": offset_value,  # We don't have separate seq num, use offset
-            }
-            self._checkpoint_cache[partition_id] = checkpoint
-            checkpoints.append(checkpoint)
-            logger.info(
-                f"📍 Returning checkpoint to SDK: partition={partition_id}, offset={offset_value}"
-            )
-
-        logger.info(f"Loaded {len(checkpoints)} checkpoints from Snowflake for SDK")
-        return checkpoints
+__all__ = [
+    "BytesEncoder",
+    "EventHubAsyncConsumer",
+    "EventHubMessage",
+    "MessageBatch",
+    "SnowflakeCheckpointManager",
+    "SnowflakeCheckpointStore",
+    "_convert_bytes_to_str",
+    "create_eventhub_consumer",
+]
 
 
 class EventHubAsyncConsumer:
@@ -544,6 +101,7 @@ class EventHubAsyncConsumer:
         self.running = False
         self.tasks: set[asyncio.Task] = set()
         self._first_message_logged: set[str] = set()  # Track first message per partition
+        self._batch_counter = 0
 
         # Statistics
         self.stats: dict[str, Any] = {
@@ -637,7 +195,10 @@ class EventHubAsyncConsumer:
             logger.info("🔍 Checking for existing checkpoints...")
             partition_checkpoints = await self.checkpoint_manager.get_last_checkpoint()
 
-            if partition_checkpoints:
+            # Determine starting position based on checkpoint existence
+            has_checkpoints = partition_checkpoints is not None and len(partition_checkpoints) > 0
+
+            if has_checkpoints:
                 logger.info(f"✅ Found checkpoints in Snowflake: {partition_checkpoints}")
                 logger.info(
                     "   SDK will automatically resume from NEXT sequence after these checkpoints:"
@@ -648,11 +209,24 @@ class EventHubAsyncConsumer:
                     )
                 self.stats["last_checkpoint"] = partition_checkpoints
             else:
-                logger.warning(
-                    "⚠️ No checkpoints found in Snowflake. SDK will start from LATEST (only NEW messages will be received)."
-                )
-                logger.warning(
-                    "   To process all messages from the beginning, you need to set starting_position='-1'"
+                starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
+                logger.warning("⚠️ No checkpoints found in Snowflake.")
+
+                if starting_pos == "-1":
+                    logger.info(
+                        f"   Starting from BEGINNING of stream (starting_position='{starting_pos}') to process ALL existing messages."
+                    )
+                elif starting_pos == "@latest":
+                    logger.info(
+                        f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
+                    )
+                elif starting_pos == "0":
+                    logger.info(
+                        f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
+                    )
+
+                logger.info(
+                    "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
                 )
 
             # Create EventHub client WITH checkpoint store
@@ -673,50 +247,18 @@ class EventHubAsyncConsumer:
                 )
                 logger.info("✅ EventHub client created with connection string")
             else:
-                # Create credential for EventHub authentication
-                from azure.identity.aio import AzureCliCredential
-
-                logger.info("🔐 Initializing AzureCliCredential...")
+                logger.info("🔐 Initializing Azure CLI credential (Event Hub scope)...")
                 try:
-                    # Enable logging for azure.identity to see which credential is used
-                    import logging as stdlib_logging
-
-                    azure_identity_logger = stdlib_logging.getLogger("azure.identity")
-                    original_level = azure_identity_logger.level
-                    # Temporarily set to INFO to see credential attempts
-                    azure_identity_logger.setLevel(stdlib_logging.INFO)
-
-                    # Use AzureCliCredential directly since we know the user is logged in with az CLI
-                    # DefaultAzureCredential has issues with some credential types in async context
-                    credential = AzureCliCredential()
-                    self.credential = credential  # Store for proper cleanup
-                    logger.info("✅ AzureCliCredential created successfully")
-
-                    # Test credential by getting a token (this will show which method succeeds)
-                    logger.info("🔍 Testing credential by requesting EventHub token...")
-                    try:
-                        test_token = await credential.get_token(
-                            "https://eventhubs.azure.net/.default"
-                        )
-                        logger.info("✅ Successfully obtained token for EventHub scope")
-                        logger.info(f"   Token expires: {test_token.expires_on}")
-                        logfire.info(
-                            "Azure credential test successful",
-                            token_expiry=test_token.expires_on,
-                            namespace=self.eventhub_config.namespace,
-                        )
-                    except Exception as token_error:
-                        logger.error(f"❌ Failed to get test token: {token_error}")
-                        logfire.error(
-                            "Azure credential test failed",
-                            error=str(token_error),
-                            namespace=self.eventhub_config.namespace,
-                        )
-                        raise
-
-                    # Restore original log level
-                    azure_identity_logger.setLevel(original_level)
-
+                    credential, expiry = await build_eventhub_cli_credential(
+                        namespace=self.eventhub_config.namespace,
+                        logger=logger,
+                    )
+                    self.credential = credential
+                    logfire.info(
+                        "Azure credential test successful",
+                        token_expiry=expiry,
+                        namespace=self.eventhub_config.namespace,
+                    )
                 except Exception as cred_error:
                     logger.error(f"❌ Failed to create or test AzureCliCredential: {cred_error}")
                     logger.error("")
@@ -758,11 +300,11 @@ class EventHubAsyncConsumer:
                 )
                 logger.info("")
 
-                logger.info("� Creating EventHub client with credential-based authentication...")
+                logger.info("Creating EventHub client with credential-based authentication...")
                 self.client = EventHubConsumerClient(
                     fully_qualified_namespace=self.eventhub_config.namespace,
                     eventhub_name=self.eventhub_config.name,
-                    credential=credential,
+                    credential=self.credential,
                     consumer_group=self.eventhub_config.consumer_group,
                     checkpoint_store=checkpoint_store,
                 )
@@ -798,12 +340,7 @@ class EventHubAsyncConsumer:
             logger.warning("")
 
             # Initialize batch
-            self.current_batch = MessageBatch(
-                max_size=self.batch_size, max_wait_seconds=self.batch_timeout_seconds
-            )
-            logger.info(
-                f"📦 Initialized message batch (max: {self.batch_size}, timeout: {self.batch_timeout_seconds}s)"
-            )
+            self.current_batch = self._new_batch(reason="startup")
 
             self.running = True
             self.stats["start_time"] = datetime.now(UTC)
@@ -817,13 +354,34 @@ class EventHubAsyncConsumer:
             # SDK will automatically load checkpoints from checkpoint_store
             # and resume from the correct position for each partition
             logger.info("👂 Starting to receive messages from EventHub...")
-            logger.info("⏳ SDK loading checkpoints from store and resuming...")
+
+            if has_checkpoints:
+                logger.info(
+                    "⏳ SDK loading checkpoints from store and resuming from saved positions..."
+                )
+            else:
+                starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
+                logger.info(f"⏳ SDK starting from {starting_pos} (no checkpoints found)...")
 
             try:
-                await self.client.receive(
-                    on_event=self._on_event,
-                    # DO NOT pass starting_position - let SDK use checkpoint_store
-                )
+                # Determine starting position based on checkpoint existence
+                receive_kwargs: dict[str, Any] = {
+                    "on_event": self._on_event,
+                }
+
+                # Only set starting_position if NO checkpoints exist
+                # When checkpoints exist, SDK will use them automatically
+                if not has_checkpoints:
+                    starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
+                    receive_kwargs["starting_position"] = starting_pos
+                    # CRITICAL: Set starting_position_inclusive=False to avoid reprocessing
+                    # Without this, SDK may re-process messages from checkpoints
+                    receive_kwargs["starting_position_inclusive"] = False
+                    logger.info(
+                        f"📍 Setting starting_position='{starting_pos}' (exclusive, configured value)"
+                    )
+
+                await self.client.receive(**receive_kwargs)
             except Exception as receive_error:
                 error_msg = str(receive_error).lower()
                 error_type = type(receive_error).__name__
@@ -940,57 +498,82 @@ class EventHubAsyncConsumer:
 
     async def stop(self) -> None:
         """Stop the EventHub consumer gracefully."""
-        logger.info("🛑 Stopping EventHub consumer gracefully...")
-        self.running = False
+        try:
+            logger.info("🛑 Stopping EventHub consumer gracefully...")
+            self.running = False
 
-        # Close EventHub client first to stop receiving new messages
-        if self.client:
-            logger.info("🔌 Closing EventHub client to stop receiving messages...")
-            try:
-                await self.client.close()
-            except Exception as e:
-                logger.warning(f"Error closing EventHub client: {e}")
-            self.client = None
+            # Cancel timeout handler task FIRST to prevent it from processing/clearing the batch
+            for task in self.tasks:
+                if not task.done():
+                    task.cancel()
 
-        # Close Azure credential to prevent resource leak
-        if self.credential:
-            logger.info("🔐 Closing Azure credential...")
-            try:
-                await self.credential.close()
-            except Exception as e:
-                logger.warning(f"Error closing credential: {e}")
-            self.credential = None
+            # Wait for timeout handler to fully stop
+            if self.tasks:
+                logger.info(f"⏳ Waiting for {len(self.tasks)} tasks to complete...")
+                await asyncio.gather(*self.tasks, return_exceptions=True)
+                logger.info("✅ All tasks completed")
+            self.tasks.clear()
+        except Exception as e:
+            logger.error(f"❌ Error during initial shutdown steps: {e}", exc_info=True)
+            raise
 
-        # Cancel timeout handler task
-        for task in self.tasks:
-            if not task.done():
-                task.cancel()
+        try:
+            # Process any remaining messages in current batch BEFORE closing the client
+            batch_exists = self.current_batch is not None
+            message_count = 0
+            if self.current_batch:
+                batch_has_messages = self.current_batch.messages
+                message_count = len(batch_has_messages) if batch_has_messages else 0
+            logger.info(
+                f"🔍 Shutdown check: batch_exists={batch_exists}, message_count={message_count}"
+            )
 
-        # Wait for tasks to complete
-        if self.tasks:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
-        self.tasks.clear()
+            if self.current_batch and self.current_batch.messages:
+                logger.info(f"📦 Processing {message_count} remaining messages before shutdown...")
+                try:
+                    if not self.current_batch.ready_reason:
+                        self.current_batch.ready_reason = "shutdown"
+                    await self._process_batch(self.current_batch)
+                    logger.info(
+                        f"✅ {message_count} remaining messages processed and checkpoints updated"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
+            else:
+                logger.info("✅ No remaining messages to process")
+        except Exception as e:
+            logger.error(f"❌ Error during batch processing: {e}", exc_info=True)
+            # Don't raise - continue with cleanup
 
-        # Now process any remaining messages in current batch
-        if self.current_batch and self.current_batch.messages:
-            message_count = len(self.current_batch.messages)
-            logger.info(f"📦 Processing {message_count} remaining messages before shutdown...")
-            try:
-                await self._process_batch(self.current_batch)
-                logger.info(
-                    f"✅ {message_count} remaining messages processed and checkpoints updated"
-                )
-            except Exception as e:
-                logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
-        else:
-            logger.info("✅ No remaining messages to process")
+        try:
+            # Close EventHub client to stop receiving new messages
+            if self.client:
+                logger.info("🔌 Closing EventHub client...")
+                try:
+                    await self.client.close()
+                except Exception as e:
+                    logger.warning(f"Error closing EventHub client: {e}")
+                self.client = None
 
-        # Close checkpoint manager
-        if self.checkpoint_manager:
-            self.checkpoint_manager.close()
-            self.checkpoint_manager = None
+            # Close Azure credential to prevent resource leak
+            if self.credential:
+                logger.info("🔐 Closing Azure credential...")
+                try:
+                    await self.credential.close()
+                except Exception as e:
+                    logger.warning(f"Error closing credential: {e}")
+                self.credential = None
 
-        logger.info("✅ EventHub consumer stopped gracefully")
+            # Close checkpoint manager
+            if self.checkpoint_manager:
+                logger.info("🗄️ Closing checkpoint manager...")
+                self.checkpoint_manager.close()
+                self.checkpoint_manager = None
+
+            logger.info("✅ EventHub consumer stopped gracefully")
+        except Exception as e:
+            logger.error(f"❌ Error during final cleanup: {e}", exc_info=True)
+            # Don't raise - we're shutting down anyway
 
     async def _on_event(self, partition_context: PartitionContext, event: EventData | None) -> None:
         """
@@ -1062,10 +645,7 @@ class EventHubAsyncConsumer:
                     f"🔄 Batch ready for processing ({len(self.current_batch.messages)} messages)"
                 )
                 await self._process_batch(self.current_batch)
-                self.current_batch = MessageBatch(
-                    max_size=self.batch_size,
-                    max_wait_seconds=self.batch_timeout_seconds,
-                )
+                self.current_batch = self._new_batch(reason="after_process")
 
         except Exception as e:
             logger.error(f"Error processing event: {e}", exc_info=True)
@@ -1100,11 +680,9 @@ class EventHubAsyncConsumer:
                     logger.info(
                         f"⏱️ Batch timeout reached! Processing {len(self.current_batch.messages)} messages"
                     )
+                    self.current_batch.mark_timeout_ready()
                     await self._process_batch(self.current_batch)
-                    self.current_batch = MessageBatch(
-                        max_size=self.batch_size,
-                        max_wait_seconds=self.batch_timeout_seconds,
-                    )
+                    self.current_batch = self._new_batch(reason="timeout_reset")
 
             except asyncio.CancelledError:
                 logger.info("⏰ Batch timeout handler cancelled")
@@ -1112,13 +690,34 @@ class EventHubAsyncConsumer:
             except Exception as e:
                 logger.error(f"❌ Error in batch timeout handler: {e}", exc_info=True)
 
+    def _new_batch(self, reason: str) -> MessageBatch:
+        """Create a new message batch and log its creation."""
+        self._batch_counter += 1
+        batch = MessageBatch(
+            max_size=self.batch_size,
+            max_wait_seconds=self.batch_timeout_seconds,
+        )
+        logfire.info(
+            "eventhub.batch.created",
+            batch_id=batch.batch_id,
+            reason=reason,
+            batch_index=self._batch_counter,
+            batch_max_size=self.batch_size,
+            batch_timeout_seconds=self.batch_timeout_seconds,
+        )
+        return batch
+
     async def _process_batch(self, batch: MessageBatch) -> None:
         """Process a batch of messages."""
+        batch_age_seconds = time.time() - batch.created_at
         with logfire.span(
-            "eventhub.process_batch",
+            "eventhub.batch",
+            batch_id=batch.batch_id,
+            ready_reason=batch.ready_reason or "unknown",
             batch_size=len(batch.messages),
             partitions=list(batch.last_sequence_by_partition.keys()),
             eventhub_name=self.eventhub_config.name,
+            batch_age_seconds=batch_age_seconds,
         ) as span:
             if not batch.messages:
                 logger.debug("No messages in batch to process")

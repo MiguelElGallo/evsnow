@@ -1,8 +1,8 @@
 # Snowflake Setup Quick Start Guide
 
-This guide will walk you through setting up EvSnow to connect to Snowflake in 5 simple steps.
+This guide will walk you through setting up EvSnow to connect to Snowflake in 6 simple steps.
 
-Official detailed documentation is available in [Link](https://docs.snowflake.com/en/user-guide/key-pair-auth).
+Official detailed documentation is available in [Snowflake key-pair authentication docs](https://docs.snowflake.com/en/user-guide/key-pair-auth).
 
 ## Prerequisites
 
@@ -13,7 +13,9 @@ Official detailed documentation is available in [Link](https://docs.snowflake.co
 
 > 📄 **Configuration Reference:** All environment variables are documented in [`.env.example`](./.env.example). Copy it to `.env` and customize the values as you follow this guide.
 
-## Quick Setup (5 Steps)
+## Quick Setup (6 Steps)
+
+*At a glance:* Generate keys → assign public key → create role/DB/schema/grants → create table + PIPE → fill `.env` → validate and run.
 
 ### Step 1: Generate RSA Keys
 
@@ -24,12 +26,14 @@ Run the automated key generation script:
 ```
 
 **What this does:**
+
 - Creates `snowflake/` directory
 - Generates encrypted RSA private key (you'll set a password)
 - Extracts public key for Snowflake
 - Displays your public key value
 
-**⚠️ Important:** 
+**⚠️ Important:**
+
 - Remember the password you set - you'll need it for `.env`
 - The public key value will be displayed at the end - copy it!
 
@@ -46,6 +50,7 @@ SET RSA_PUBLIC_KEY='<paste_the_public_key_value_from_step1>';
 ```
 
 **Example:**
+
 ```sql
 USE ROLE ACCOUNTADMIN;
 
@@ -53,9 +58,11 @@ ALTER USER john_doe
 SET RSA_PUBLIC_KEY='MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy...';
 ```
 
-### Step 2.5: Create Role, Databases, and Grant Permissions
+### Step 3: Create Role, Databases, and Grant Permissions
 
-Before configuring your `.env` file, you need to create the required Snowflake resources and grant permissions. Run this SQL script in Snowflake as `ACCOUNTADMIN`:
+Purpose: create the `STREAM` role, databases/schemas, and grants required for control and ingestion tables.
+
+Run this SQL script in Snowflake as `ACCOUNTADMIN`:
 
 ```sql
 -- ============================================
@@ -139,14 +146,19 @@ GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
 | `SCHEMA INGESTION.PUBLIC` | `SNOWFLAKE_SCHEMA=PUBLIC`, `SNOWFLAKE_1_SCHEMA=PUBLIC` | Schema for event tables |
 | `WAREHOUSE COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE=compute_wh` | Warehouse for query execution |
 
+Note: Snowflake identifiers are case-insensitive unless quoted; `COMPUTE_WH` and `compute_wh` both work.
+
 **⚠️ Customize for your environment:**
+
 - Replace `STREAMEV` with your actual Snowflake username
 - Replace `COMPUTE_WH` with your warehouse name
 - Add additional databases/schemas if you're using different ones in your `.env`
 
-### Step 2.6: Create Target Table and PIPE Object (Required for High-Performance SDK)
+### Step 4: Create Target Table and PIPE Object (Required for High-Performance SDK)
 
-EvSnow uses Snowflake's **high-performance Snowpipe Streaming SDK**, which requires a **PIPE object**. Run this SQL to create the target table and PIPE:
+Purpose: create the target table and the Snowpipe Streaming PIPE required by the high-performance SDK.
+
+Run this SQL to create the target table and PIPE:
 
 ```sql
 -- ============================================================================
@@ -213,6 +225,8 @@ SHOW GRANTS ON PIPE EVENTS_TABLE_PIPE;
 SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
 ```
 
+> ⚠️ If you see `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`, rerun this block and ensure role `STREAM` has `OPERATE`/`MONITOR` on the PIPE.
+
 **How this relates to [`.env.example`](./.env.example):**
 
 | SQL Resource | `.env` Variable | Purpose |
@@ -221,10 +235,9 @@ SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
 | `PIPE EVENTS_TABLE_PIPE` | `SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE` | Required for high-performance SDK |
 
 > ⚠️ **Error `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`?** This means the PIPE hasn't been created or your role doesn't have permissions. Run the SQL above to fix it.
-
 > 📄 **Alternative:** You can also run the pre-made script: [`setup_snowpipe_streaming.sql`](./setup_snowpipe_streaming.sql)
 
-### Step 3: Update `.env` File
+### Step 5: Update `.env` File
 
 Your `.env` file has been pre-configured with Snowflake settings. See [`.env.example`](./.env.example) for all available configuration options with detailed comments.
 
@@ -254,11 +267,12 @@ SNOWFLAKE_1_BATCH=1000                           # Batch size (leave as-is)
 ```
 
 **How to find your Snowflake account identifier:**
+
 - **Option 1:** In Snowflake UI, look at the URL: `https://<account_identifier>.snowflakecomputing.com`
 - **Option 2:** Run in Snowflake: `SELECT CURRENT_ACCOUNT(), CURRENT_REGION();`
 - **Format:** `<account_locator>.<region>` (e.g., `xy12345.us-east-1`)
 
-### Step 4: Verify Configuration
+### Step 6: Verify Configuration
 
 Run the verification script to check if everything is set up correctly:
 
@@ -267,16 +281,18 @@ Run the verification script to check if everything is set up correctly:
 ```
 
 This will check:
+
 - ✓ All required environment variables are set
 - ✓ Private key file exists and has correct permissions
 - ✓ No placeholder values remain
 
 **Expected output:**
-```
+
+```text
 ✅ All required configuration values are set!
 ```
 
-### Step 5: Test Connection and Create Control Table
+### Step 6 (continued): Test Connection and Create Control Table
 
 Run EvSnow's built-in validation:
 
@@ -285,12 +301,14 @@ evsnow validate-config
 ```
 
 **What this does:**
+
 - Tests Snowflake connection using key-pair authentication
 - Creates the `INGESTION_STATUS` hybrid table (if it doesn't exist)
 - Verifies permissions
 
 **Expected output:**
-```
+
+```text
 ✓ Configuration is valid!
 ✓ Snowflake control table verified/created successfully
 ```
@@ -312,6 +330,7 @@ evsnow run --dry-run
 ## Troubleshooting
 
 ### Error: "Private key file not found"
+
 ```bash
 # Check if the file exists
 ls -la snowflake/rsa_key_encrypted.p8
@@ -321,6 +340,7 @@ ls -la snowflake/rsa_key_encrypted.p8
 ```
 
 ### Error: "Authentication failed"
+
 ```bash
 # Verify public key is assigned in Snowflake
 # Run this in Snowflake:
@@ -330,6 +350,7 @@ DESC USER <your_username>;
 ```
 
 ### Error: "Invalid private key password"
+
 ```bash
 # Test the password manually
 openssl rsa -in snowflake/rsa_key_encrypted.p8 -check
@@ -339,6 +360,7 @@ openssl rsa -in snowflake/rsa_key_encrypted.p8 -check
 ```
 
 ### Error: "Insufficient privileges"
+
 ```bash
 # Your Snowflake user needs these permissions:
 # 1. CREATE TABLE on the control schema
@@ -375,6 +397,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
    - Never add `*.pem` or `*.p8` files to version control
 
 2. **Secure file permissions:**
+
    ```bash
    chmod 600 snowflake/rsa_key_encrypted.p8
    ```
@@ -389,6 +412,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
    - Consider using environment variables from a secret manager in production
 
 5. **Revoke compromised keys immediately:**
+
    ```sql
    ALTER USER <username> UNSET RSA_PUBLIC_KEY;
    ```
