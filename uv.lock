@@ -2472,7 +2472,7 @@ wheels = [
 
 [[package]]
 name = "snowflake-snowpark-python"
-version = "1.42.0"
+version = "1.43.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -2485,9 +2485,9 @@ dependencies = [
     { name = "tzlocal" },
     { name = "wheel" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/e3/b70799997481185cdad44b0786c7597764935d78d71632b4735fb05d63a1/snowflake_snowpark_python-1.42.0.tar.gz", hash = "sha256:e994b3860c816d1b5fdf0c6272f8d9e41505e470140b063ff9418d234fd8cc00", size = 1781749, upload-time = "2025-10-28T18:10:52.418Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/aa/ffc365b782e59318e2b49d1c8080786c95c04302799cf7b8980eea2bfd26/snowflake_snowpark_python-1.43.0.tar.gz", hash = "sha256:282afccb8ba60289a263a42f3040b762c216eef4e64a3aea08ad7dda98a07dff", size = 1814558, upload-time = "2025-12-03T18:13:55.09Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/ea/a3f1ff82aa144fd072f4be440ed636f4c298a7ee7a278e68709cf2753da5/snowflake_snowpark_python-1.42.0-py3-none-any.whl", hash = "sha256:fd92a3633b79573bb481b6e85a1434842758637dc6a30b32b9c5ce2824f4296d", size = 1825602, upload-time = "2025-10-28T18:10:48.778Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/81/771eb54bc045c08577520140b4c24e06fb7c5c1976b1ed0da3e459b896e8/snowflake_snowpark_python-1.43.0-py3-none-any.whl", hash = "sha256:871ca4b3b749c32c48fde9ed59869752279bdaaa0c6d940e6bbe162c12661b94", size = 1858482, upload-time = "2025-12-03T18:13:53.526Z" },
 ]
 
 [[package]]
