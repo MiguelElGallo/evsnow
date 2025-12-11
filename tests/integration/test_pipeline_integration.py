@@ -57,8 +57,9 @@ def mock_snowflake_client_creation(mocker):
     )
 
     # Patch at the import location in orchestrator module
-        mocker.patch(
-            "pipeline.orchestrator.create_snowflake_streaming_client", return_value=mock_client
+    mocker.patch(
+        "pipeline.orchestrator.create_snowflake_streaming_client",
+        return_value=mock_client,
     )
 
     return mock_client
@@ -102,9 +103,9 @@ class TestEndToEndPipeline:
         mock_streaming_client.start.return_value = None
         mock_streaming_client.stop.return_value = None
 
-            mocker.patch(
-                "pipeline.orchestrator.create_snowflake_streaming_client",
-                return_value=mock_streaming_client,
+        mocker.patch(
+            "pipeline.orchestrator.create_snowflake_streaming_client",
+            return_value=mock_streaming_client,
         )
 
         # Create mapping config
