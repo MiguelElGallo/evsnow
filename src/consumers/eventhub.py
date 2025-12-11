@@ -17,7 +17,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NoReturn
 
 import logfire
 from azure.eventhub import EventData
@@ -112,6 +112,213 @@ class EventHubAsyncConsumer:
             "start_time": None,
         }
 
+    def _log_startup_summary(self) -> None:
+        logger.info(f"🚀 Starting EventHub consumer for {self.eventhub_config.name}")
+        logger.info(f"   Namespace: {self.eventhub_config.namespace}")
+        logger.info(f"   Consumer Group: {self.eventhub_config.consumer_group}")
+        logger.info(f"   Consumer ID: {self.consumer_id}")
+        logger.info(f"   Batch Size: {self.batch_size}")
+        logger.info(f"   Batch Timeout: {self.batch_timeout_seconds}s")
+        logger.info("")
+
+    def _log_competing_consumer_guidance(self) -> None:
+        logger.warning("⚠️  IMPORTANT: Competing Consumer Detection")
+        logger.warning("")
+        logger.warning(
+            f"   This consumer ({self.consumer_id}) is using consumer group '{self.eventhub_config.consumer_group}'"
+        )
+        logger.warning(
+            "   EventHub allows ONLY ONE consumer per partition per consumer group at a time."
+        )
+        logger.warning("")
+        logger.warning("   If you see 'amqp:link:stolen' errors, it means:")
+        logger.warning("   • Another consumer instance is competing for the same partitions")
+        logger.warning("   • A zombie process from a previous run is still connected")
+        logger.warning("   • You're running multiple instances of this application")
+        logger.warning("")
+        logger.warning("   To fix:")
+        logger.warning("   • Kill all running instances: ps aux | grep evsnow")
+        logger.warning(
+            f"   • Use a different consumer group (current: '{self.eventhub_config.consumer_group}')"
+        )
+        logger.warning("   • Wait 5-10 minutes for old connections to timeout")
+        logger.warning("")
+
+    def _log_no_checkpoint_behavior(self, starting_pos: str) -> None:
+        logger.warning("⚠️ No checkpoints found in Snowflake.")
+
+        if starting_pos == "-1":
+            logger.info(
+                f"   Starting from BEGINNING of stream (starting_position='{starting_pos}') to process ALL existing messages."
+            )
+        elif starting_pos == "@latest":
+            logger.info(
+                f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
+            )
+        elif starting_pos == "0":
+            logger.info(
+                f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
+            )
+
+        logger.info(
+            "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
+        )
+
+    def _log_rbac_permission_validation_notice(self) -> None:
+        logger.info("")
+        logger.warning("⚠️  IMPORTANT: RBAC Permission Validation")
+        logger.warning("")
+        logger.warning("   Azure does NOT provide an API to pre-check data plane RBAC permissions.")
+        logger.warning(
+            "   Permission validation only happens when SDK tries to receive messages."
+        )
+        logger.warning("")
+        logger.warning("   What happens next:")
+        logger.warning("   1. SDK will attempt to connect to EventHub partitions via AMQP")
+        logger.warning(
+            "   2. If authenticated identity lacks 'Azure Event Hubs Data Receiver' role:"
+        )
+        logger.warning("      - Connection will FAIL with 'Unauthorized' or 'Forbidden' error")
+        logger.warning("      - You'll see detailed error message with fix instructions")
+        logger.warning("   3. If connection succeeds:")
+        logger.warning("      - The authenticated identity HAS the required role")
+        logger.warning("      - Check logs above to see WHICH identity was used")
+        logger.warning("")
+        logger.warning("   NOTE: System may use Managed Identity (not your CLI user)!")
+        logger.warning(
+            "   Look for MSI endpoint in logs: http://169.254.169.254/metadata/identity/..."
+        )
+        logger.warning("")
+
+    def _log_receive_error_header(self, *, error_type: str, receive_error: Exception) -> None:
+        logger.error("")
+        logger.error("=" * 70)
+        logger.error("❌ EVENTHUB RECEIVE ERROR")
+        logger.error("=" * 70)
+        logger.error(f"Error type: {error_type}")
+        logger.error(f"Error message: {receive_error}")
+        logger.error("")
+
+    def _log_azure_credential_error_guidance(
+        self,
+        *,
+        error_type: str,
+        receive_error: Exception,
+    ) -> None:
+        logger.error("🔐 AZURE CREDENTIAL ERROR DETECTED!")
+        logger.error("")
+        logger.error("This error occurs during EventProcessor's partition ownership claiming.")
+        logger.error("The SDK repeatedly tries to claim partition ownership and re-authenticates.")
+        logger.error("")
+        logger.error("Possible causes:")
+        logger.error("  1. Azure CLI token expired and refresh failed")
+        logger.error("  2. Too many rapid authentication requests overwhelming the credential chain")
+        logger.error("  3. Network interruption preventing token refresh")
+        logger.error("  4. Azure CLI process busy or locked")
+        logger.error("")
+        logger.error("Recommended solutions:")
+        logger.error("  1. Run: az login --use-device-code (refresh auth)")
+        logger.error("  2. Set environment variables for faster auth (skip credential chain):")
+        logger.error("     export AZURE_TENANT_ID='your-tenant-id'")
+        logger.error("     export AZURE_CLIENT_ID='your-client-id'")
+        logger.error("     export AZURE_CLIENT_SECRET='your-secret'")
+        logger.error(
+            "  3. Check: az account get-access-token --resource https://eventhubs.azure.net"
+        )
+        logger.error("")
+        logfire.error(
+            "Azure credential error during EventHub receive",
+            error_type=error_type,
+            error_message=str(receive_error),
+            namespace=self.eventhub_config.namespace,
+            eventhub=self.eventhub_config.name,
+        )
+
+    def _raise_rbac_permission_error(
+        self,
+        *,
+        error_type: str,
+        receive_error: Exception,
+    ) -> NoReturn:
+        logger.error("")
+        logger.error("❌ RBAC PERMISSION ERROR DETECTED!")
+        logger.error(f"   Error type: {error_type}")
+        logger.error(f"   Error message: {receive_error}")
+        logger.error("")
+        logger.error("🔐 The authenticated identity lacks required Azure RBAC permissions!")
+        logger.error("")
+        logger.error("Required Role:")
+        logger.error("  • 'Azure Event Hubs Data Receiver' - to read EventHub messages")
+        logger.error("")
+        logger.error("How to Fix:")
+        logger.error("  1. Check which authentication method was used (see logs above)")
+        logger.error("  2. If using Managed Identity, assign the role to the managed identity")
+        logger.error("  3. If using Azure CLI, assign the role to your Azure CLI user")
+        logger.error("  4. Go to Azure Portal → Event Hubs")
+        logger.error(f"  5. Find namespace: {self.eventhub_config.namespace}")
+        logger.error(f"  6. Click on Event Hub: {self.eventhub_config.name}")
+        logger.error("  7. Go to 'Access Control (IAM)' → 'Add role assignment'")
+        logger.error("  8. Select role: 'Azure Event Hubs Data Receiver'")
+        logger.error("  9. Assign to the correct identity (MSI or user)")
+        logger.error("")
+        raise RuntimeError(
+            "Missing Azure RBAC permission: 'Azure Event Hubs Data Receiver' role required for the authenticated identity"
+        ) from receive_error
+
+    def _handle_receive_error(self, receive_error: Exception) -> bool:
+        """Handle EventHub receive errors.
+
+        Returns:
+            True if the error was handled (and should not be re-raised).
+            False if the caller should re-raise the original exception.
+
+        Note: This preserves the current behavior, including swallowing certain
+        credential-chain errors after printing guidance.
+        """
+
+        error_msg = str(receive_error).lower()
+        error_type = type(receive_error).__name__
+
+        self._log_receive_error_header(error_type=error_type, receive_error=receive_error)
+
+        if any(
+            keyword in error_msg
+            for keyword in [
+                "credential",
+                "failed to invoke azure cli",
+                "failed to retrieve a token",
+                "defaultazurecredential failed",
+                "authentication unavailable",
+            ]
+        ):
+            self._log_azure_credential_error_guidance(
+                error_type=error_type,
+                receive_error=receive_error,
+            )
+            return True
+
+        if (
+            any(
+                keyword in error_msg
+                for keyword in [
+                    "unauthorized",
+                    "not authorized",
+                    "authenticationerror",
+                    "permission",
+                    "access denied",
+                    "forbidden",
+                ]
+            )
+            or "401" in error_msg
+            or "403" in error_msg
+        ):
+            self._raise_rbac_permission_error(
+                error_type=error_type,
+                receive_error=receive_error,
+            )
+
+        return False
+
     async def start(self) -> None:
         """
         Start the EventHub consumer.
@@ -140,34 +347,8 @@ class EventHubAsyncConsumer:
             batch_timeout=self.batch_timeout_seconds,
         )
 
-        logger.info(f"🚀 Starting EventHub consumer for {self.eventhub_config.name}")
-        logger.info(f"   Namespace: {self.eventhub_config.namespace}")
-        logger.info(f"   Consumer Group: {self.eventhub_config.consumer_group}")
-        logger.info(f"   Consumer ID: {self.consumer_id}")
-        logger.info(f"   Batch Size: {self.batch_size}")
-        logger.info(f"   Batch Timeout: {self.batch_timeout_seconds}s")
-        logger.info("")
-        logger.warning("⚠️  IMPORTANT: Competing Consumer Detection")
-        logger.warning("")
-        logger.warning(
-            f"   This consumer ({self.consumer_id}) is using consumer group '{self.eventhub_config.consumer_group}'"
-        )
-        logger.warning(
-            "   EventHub allows ONLY ONE consumer per partition per consumer group at a time."
-        )
-        logger.warning("")
-        logger.warning("   If you see 'amqp:link:stolen' errors, it means:")
-        logger.warning("   • Another consumer instance is competing for the same partitions")
-        logger.warning("   • A zombie process from a previous run is still connected")
-        logger.warning("   • You're running multiple instances of this application")
-        logger.warning("")
-        logger.warning("   To fix:")
-        logger.warning("   • Kill all running instances: ps aux | grep evsnow")
-        logger.warning(
-            f"   • Use a different consumer group (current: '{self.eventhub_config.consumer_group}')"
-        )
-        logger.warning("   • Wait 5-10 minutes for old connections to timeout")
-        logger.warning("")
+        self._log_startup_summary()
+        self._log_competing_consumer_guidance()
 
         try:
             # Initialize checkpoint manager
@@ -210,24 +391,7 @@ class EventHubAsyncConsumer:
                 self.stats["last_checkpoint"] = partition_checkpoints
             else:
                 starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
-                logger.warning("⚠️ No checkpoints found in Snowflake.")
-
-                if starting_pos == "-1":
-                    logger.info(
-                        f"   Starting from BEGINNING of stream (starting_position='{starting_pos}') to process ALL existing messages."
-                    )
-                elif starting_pos == "@latest":
-                    logger.info(
-                        f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
-                    )
-                elif starting_pos == "0":
-                    logger.info(
-                        f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
-                    )
-
-                logger.info(
-                    "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
-                )
+                self._log_no_checkpoint_behavior(starting_pos)
 
             # Create EventHub client WITH checkpoint store
             # The SDK will automatically load checkpoints from the store
@@ -312,32 +476,7 @@ class EventHubAsyncConsumer:
 
             logger.info("✅ EventHub client configured - SDK will use checkpoint store to resume")
 
-            logger.info("")
-            logger.warning("⚠️  IMPORTANT: RBAC Permission Validation")
-            logger.warning("")
-            logger.warning(
-                "   Azure does NOT provide an API to pre-check data plane RBAC permissions."
-            )
-            logger.warning(
-                "   Permission validation only happens when SDK tries to receive messages."
-            )
-            logger.warning("")
-            logger.warning("   What happens next:")
-            logger.warning("   1. SDK will attempt to connect to EventHub partitions via AMQP")
-            logger.warning(
-                "   2. If authenticated identity lacks 'Azure Event Hubs Data Receiver' role:"
-            )
-            logger.warning("      - Connection will FAIL with 'Unauthorized' or 'Forbidden' error")
-            logger.warning("      - You'll see detailed error message with fix instructions")
-            logger.warning("   3. If connection succeeds:")
-            logger.warning("      - The authenticated identity HAS the required role")
-            logger.warning("      - Check logs above to see WHICH identity was used")
-            logger.warning("")
-            logger.warning("   NOTE: System may use Managed Identity (not your CLI user)!")
-            logger.warning(
-                "   Look for MSI endpoint in logs: http://169.254.169.254/metadata/identity/..."
-            )
-            logger.warning("")
+            self._log_rbac_permission_validation_notice()
 
             # Initialize batch
             self.current_batch = self._new_batch(reason="startup")
@@ -383,112 +522,8 @@ class EventHubAsyncConsumer:
 
                 await self.client.receive(**receive_kwargs)
             except Exception as receive_error:
-                error_msg = str(receive_error).lower()
-                error_type = type(receive_error).__name__
-
-                # Log the full error for diagnostics
-                logger.error("")
-                logger.error("=" * 70)
-                logger.error("❌ EVENTHUB RECEIVE ERROR")
-                logger.error("=" * 70)
-                logger.error(f"Error type: {error_type}")
-                logger.error(f"Error message: {receive_error}")
-                logger.error("")
-
-                # Check for credential/authentication errors
-                if any(
-                    keyword in error_msg
-                    for keyword in [
-                        "credential",
-                        "failed to invoke azure cli",
-                        "failed to retrieve a token",
-                        "defaultazurecredential failed",
-                        "authentication unavailable",
-                    ]
-                ):
-                    logger.error("🔐 AZURE CREDENTIAL ERROR DETECTED!")
-                    logger.error("")
-                    logger.error(
-                        "This error occurs during EventProcessor's partition ownership claiming."
-                    )
-                    logger.error(
-                        "The SDK repeatedly tries to claim partition ownership and re-authenticates."
-                    )
-                    logger.error("")
-                    logger.error("Possible causes:")
-                    logger.error("  1. Azure CLI token expired and refresh failed")
-                    logger.error(
-                        "  2. Too many rapid authentication requests overwhelming the credential chain"
-                    )
-                    logger.error("  3. Network interruption preventing token refresh")
-                    logger.error("  4. Azure CLI process busy or locked")
-                    logger.error("")
-                    logger.error("Recommended solutions:")
-                    logger.error("  1. Run: az login --use-device-code (refresh auth)")
-                    logger.error(
-                        "  2. Set environment variables for faster auth (skip credential chain):"
-                    )
-                    logger.error("     export AZURE_TENANT_ID='your-tenant-id'")
-                    logger.error("     export AZURE_CLIENT_ID='your-client-id'")
-                    logger.error("     export AZURE_CLIENT_SECRET='your-secret'")
-                    logger.error(
-                        "  3. Check: az account get-access-token --resource https://eventhubs.azure.net"
-                    )
-                    logger.error("")
-                    logfire.error(
-                        "Azure credential error during EventHub receive",
-                        error_type=error_type,
-                        error_message=str(receive_error),
-                        namespace=self.eventhub_config.namespace,
-                        eventhub=self.eventhub_config.name,
-                    )
-
-                # Check if this is an authentication/permission error
-                elif (
-                    any(
-                        keyword in error_msg
-                        for keyword in [
-                            "unauthorized",
-                            "not authorized",
-                            "authenticationerror",
-                            "permission",
-                            "access denied",
-                            "forbidden",
-                        ]
-                    )
-                    or "401" in error_msg
-                    or "403" in error_msg
-                ):
-                    logger.error("")
-                    logger.error("❌ RBAC PERMISSION ERROR DETECTED!")
-                    logger.error(f"   Error type: {error_type}")
-                    logger.error(f"   Error message: {receive_error}")
-                    logger.error("")
-                    logger.error(
-                        "🔐 The authenticated identity lacks required Azure RBAC permissions!"
-                    )
-                    logger.error("")
-                    logger.error("Required Role:")
-                    logger.error("  • 'Azure Event Hubs Data Receiver' - to read EventHub messages")
-                    logger.error("")
-                    logger.error("How to Fix:")
-                    logger.error("  1. Check which authentication method was used (see logs above)")
-                    logger.error(
-                        "  2. If using Managed Identity, assign the role to the managed identity"
-                    )
-                    logger.error("  3. If using Azure CLI, assign the role to your Azure CLI user")
-                    logger.error("  4. Go to Azure Portal → Event Hubs")
-                    logger.error(f"  5. Find namespace: {self.eventhub_config.namespace}")
-                    logger.error(f"  6. Click on Event Hub: {self.eventhub_config.name}")
-                    logger.error("  7. Go to 'Access Control (IAM)' → 'Add role assignment'")
-                    logger.error("  8. Select role: 'Azure Event Hubs Data Receiver'")
-                    logger.error("  9. Assign to the correct identity (MSI or user)")
-                    logger.error("")
-                    raise RuntimeError(
-                        "Missing Azure RBAC permission: 'Azure Event Hubs Data Receiver' role required for the authenticated identity"
-                    ) from receive_error
-                else:
-                    # Different error, re-raise
+                handled = self._handle_receive_error(receive_error)
+                if not handled:
                     raise
 
         except Exception as e:
