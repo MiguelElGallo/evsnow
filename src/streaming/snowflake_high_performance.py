@@ -189,11 +189,18 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 with temporary_private_key_file(private_key_pem) as key_path:
                     profile["private_key_file"] = key_path
                     with temporary_profile_file(profile) as profile_path:
+                        pipe_name = self.connection_config.pipe_name
+                        if not pipe_name:
+                            raise ValueError(
+                                "pipe_name is required for high-performance streaming. "
+                                "Set SNOWFLAKE_PIPE_NAME environment variable."
+                            )
+
                         self.streaming_client = StreamingIngestClient(
                             client_name=client_name,
                             db_name=self.snowflake_config.database,
                             schema_name=self.snowflake_config.schema_name,
-                            pipe_name="EVENTS_TABLE_PIPE",  # Must match existing pipe name exactly (uppercase)
+                            pipe_name=pipe_name,
                             profile_json=profile_path,  # Pass file path, not JSON string
                         )
 
@@ -205,7 +212,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                             client_name=client_name,
                             database=self.snowflake_config.database,
                             schema=self.snowflake_config.schema_name,
-                            pipe="EVENTS_TABLE_PIPE",
+                            pipe=pipe_name,
                             table=self.snowflake_config.table_name,
                         )
 
