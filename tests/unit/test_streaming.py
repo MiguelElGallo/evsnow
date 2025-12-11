@@ -67,7 +67,7 @@ class TestSnowflakeStreamingClientBase:
             def start(self) -> None:
                 pass
 
-            # Missing: stop, ingest_batch, get_stats, is_started
+            # Missing: stop, ingest_batch, get_stats, health_check, is_started
 
         with pytest.raises(TypeError) as exc_info:
             IncompleteClient(
@@ -105,6 +105,9 @@ class TestSnowflakeStreamingClientBase:
 
             def get_stats(self) -> dict[str, Any]:
                 return {}
+
+            def health_check(self) -> dict[str, Any]:
+                return {"status": "ok"}
 
             @property
             def is_started(self) -> bool:
@@ -152,6 +155,9 @@ class TestSnowflakeStreamingClientBase:
 
             def get_stats(self) -> dict[str, Any]:
                 return {}
+
+            def health_check(self) -> dict[str, Any]:
+                return {"status": "ok"}
 
             @property
             def is_started(self) -> bool:
@@ -202,6 +208,9 @@ class TestSnowflakeStreamingClientBase:
 
             def get_stats(self) -> dict[str, Any]:
                 return {"started": self._started}
+
+            def health_check(self) -> dict[str, Any]:
+                return {"status": "ok", "started": self._started}
 
             @property
             def is_started(self) -> bool:
