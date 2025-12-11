@@ -17,15 +17,15 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
-from src.consumers.eventhub import EventHubMessage
-from src.utils.config import (
+from consumers.eventhub import EventHubMessage
+from utils.config import (
     EventHubConfig,
     EventHubSnowflakeMapping,
     EvSnowConfig,
-    SnowflakeConfig,
-    SnowflakeConnectionConfig,
     LogfireConfig,
     SmartRetryConfig,
+    SnowflakeConfig,
+    SnowflakeConnectionConfig,
 )
 
 
@@ -219,9 +219,9 @@ def mock_eventhub_client(mocker):
     mock_client.close = mocker.AsyncMock()
 
     # Patch the EventHub client creation - need to patch where it's USED not where it's defined
-    mocker.patch("src.consumers.eventhub.EventHubConsumerClient", return_value=mock_client)
+    mocker.patch("consumers.eventhub.EventHubConsumerClient", return_value=mock_client)
     mocker.patch(
-        "src.consumers.eventhub.EventHubConsumerClient.from_connection_string",
+        "consumers.eventhub.EventHubConsumerClient.from_connection_string",
         return_value=mock_client,
     )
 
@@ -291,7 +291,6 @@ def mock_snowflake_connection(mocker):
 
     # Patch the get_connection function
     mocker.patch("utils.snowflake.get_connection", return_value=mock_conn)
-    mocker.patch("src.utils.snowflake.get_connection", return_value=mock_conn)
 
     return mock_conn
 
@@ -307,7 +306,6 @@ def mock_snowpark_session(mocker):
     mock_session.close.return_value = None
 
     mocker.patch("utils.snowflake.get_snowpark_session", return_value=mock_session)
-    mocker.patch("src.utils.snowflake.get_snowpark_session", return_value=mock_session)
 
     return mock_session
 

@@ -24,8 +24,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 
-from src.utils.config import SnowflakeConnectionConfig
-import src.utils.snowflake as snowflake_utils
+from utils.config import SnowflakeConnectionConfig
+import utils.snowflake as snowflake_utils
 
 
 # ============================================================================
@@ -204,7 +204,7 @@ class TestPrivateKeyLoading:
 class TestConnectionManagement:
     """Tests for Snowflake connection creation and caching."""
 
-    @patch("src.utils.snowflake.sc.connect")
+    @patch("utils.snowflake.sc.connect")
     def test_get_connection_creates_new_connection(
         self, mock_connect, mock_snowflake_connection, snowflake_config
     ):
@@ -229,7 +229,7 @@ class TestConnectionManagement:
         assert call_kwargs["role"] == "TEST_ROLE"
         assert "private_key" in call_kwargs
 
-    @patch("src.utils.snowflake.sc.connect")
+    @patch("utils.snowflake.sc.connect")
     def test_get_connection_caches_connection(
         self, mock_connect, mock_snowflake_connection, snowflake_config
     ):
@@ -245,7 +245,7 @@ class TestConnectionManagement:
         assert conn1 is conn2
         mock_connect.assert_called_once()  # Should only connect once
 
-    @patch("src.utils.snowflake.sc.connect")
+    @patch("utils.snowflake.sc.connect")
     def test_get_connection_without_cache_creates_new_connection(
         self, mock_connect, mock_snowflake_connection, snowflake_config
     ):
@@ -261,7 +261,7 @@ class TestConnectionManagement:
         assert conn1 is conn2  # Same mock object returned
         assert mock_connect.call_count == 2  # But connected twice
 
-    @patch("src.utils.snowflake.sc.connect")
+    @patch("utils.snowflake.sc.connect")
     def test_get_connection_detects_stale_connection(
         self, mock_connect, mock_snowflake_cursor, snowflake_config
     ):
@@ -291,7 +291,7 @@ class TestConnectionManagement:
         assert conn2 is fresh_conn
         assert mock_connect.call_count == 2
 
-    @patch("src.utils.snowflake.sc.connect")
+    @patch("utils.snowflake.sc.connect")
     def test_get_connection_handles_connection_error(self, mock_connect, snowflake_config):
         """Test that get_connection propagates connection errors."""
         # Arrange
@@ -301,7 +301,7 @@ class TestConnectionManagement:
         with pytest.raises(Exception, match="Connection failed"):
             snowflake_utils.get_connection(snowflake_config)
 
-    @patch("src.utils.snowflake.sc.connect")
+    @patch("utils.snowflake.sc.connect")
     def test_get_connection_without_role_omits_role_parameter(
         self, mock_connect, mock_snowflake_connection, unencrypted_key_file
     ):
@@ -423,8 +423,8 @@ class TestCacheManagement:
 class TestSnowparkSessions:
     """Tests for Snowpark session creation."""
 
-    @patch("src.utils.snowflake.SNOWPARK_AVAILABLE", True)
-    @patch("src.utils.snowflake.Session")
+    @patch("utils.snowflake.SNOWPARK_AVAILABLE", True)
+    @patch("utils.snowflake.Session")
     def test_get_snowpark_session_creates_session_successfully(
         self, mock_session_class, snowflake_config
     ):
@@ -449,15 +449,15 @@ class TestSnowparkSessions:
         mock_session.sql.assert_called_once_with("USE WAREHOUSE TEST_WH")
         mock_sql_result.collect.assert_called_once()
 
-    @patch("src.utils.snowflake.SNOWPARK_AVAILABLE", False)
+    @patch("utils.snowflake.SNOWPARK_AVAILABLE", False)
     def test_get_snowpark_session_raises_error_when_snowpark_not_available(self, snowflake_config):
         """Test that get_snowpark_session raises ImportError when snowpark is not installed."""
         # Act & Assert
         with pytest.raises(ImportError, match="snowflake-snowpark is not installed"):
             snowflake_utils.get_snowpark_session(snowflake_config)
 
-    @patch("src.utils.snowflake.SNOWPARK_AVAILABLE", True)
-    @patch("src.utils.snowflake.Session")
+    @patch("utils.snowflake.SNOWPARK_AVAILABLE", True)
+    @patch("utils.snowflake.Session")
     def test_get_snowpark_session_handles_creation_error(
         self, mock_session_class, snowflake_config
     ):
@@ -471,8 +471,8 @@ class TestSnowparkSessions:
         with pytest.raises(Exception, match="Session creation failed"):
             snowflake_utils.get_snowpark_session(snowflake_config)
 
-    @patch("src.utils.snowflake.SNOWPARK_AVAILABLE", True)
-    @patch("src.utils.snowflake.Session")
+    @patch("utils.snowflake.SNOWPARK_AVAILABLE", True)
+    @patch("utils.snowflake.Session")
     def test_get_snowpark_session_includes_role_when_set(
         self, mock_session_class, snowflake_config
     ):
@@ -501,7 +501,7 @@ class TestSnowparkSessions:
 class TestConnectionTesting:
     """Tests for connection testing functionality."""
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_check_connection_returns_true_for_valid_connection(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -523,7 +523,7 @@ class TestConnectionTesting:
         assert mock_cursor.execute.call_count == 2
         mock_snowflake_connection.close.assert_called_once()
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_check_connection_verifies_database_context(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -545,7 +545,7 @@ class TestConnectionTesting:
         calls = mock_cursor.execute.call_args_list
         assert any("CURRENT_DATABASE" in str(call) for call in calls)
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_check_connection_warns_on_context_mismatch(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config, caplog
     ):
@@ -566,7 +566,7 @@ class TestConnectionTesting:
         # Check that warnings were logged
         assert "different database" in caplog.text.lower() or "WRONG_DB" in caplog.text
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_check_connection_handles_connection_failure(
         self, mock_get_connection, snowflake_config
     ):
@@ -578,7 +578,7 @@ class TestConnectionTesting:
         with pytest.raises(Exception, match="Connection failed"):
             snowflake_utils.check_connection(snowflake_config)
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_check_connection_returns_false_when_no_version(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -604,7 +604,7 @@ class TestConnectionTesting:
 class TestControlTable:
     """Tests for control table creation."""
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_create_control_table_creates_schema_and_table(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -638,7 +638,7 @@ class TestControlTable:
 
         mock_snowflake_connection.close.assert_called_once()
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_create_control_table_validates_identifiers(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -655,7 +655,7 @@ class TestControlTable:
                 config=snowflake_config,
             )
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_create_control_table_handles_creation_error(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -676,7 +676,7 @@ class TestControlTable:
 
         mock_snowflake_connection.close.assert_called_once()
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_create_control_table_with_special_characters_in_valid_identifiers(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -705,7 +705,7 @@ class TestControlTable:
 class TestCheckpointOperations:
     """Tests for checkpoint insert and retrieval operations."""
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_inserts_new_checkpoint(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -756,7 +756,7 @@ class TestCheckpointOperations:
         assert '"last_offset": "12345"' in metadata_json
         assert '"message_count": 100' in metadata_json
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_uses_cached_connection(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -782,7 +782,7 @@ class TestCheckpointOperations:
         # Connection should NOT be closed (it's cached for reuse)
         mock_snowflake_connection.close.assert_not_called()
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_activates_warehouse(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -807,7 +807,7 @@ class TestCheckpointOperations:
         execute_calls = [call[0][0] for call in mock_cursor.execute.call_args_list]
         assert any("USE WAREHOUSE TEST_WH" in call for call in execute_calls)
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_without_metadata(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -835,7 +835,7 @@ class TestCheckpointOperations:
         metadata_json = params[7]
         assert metadata_json is None
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_uses_default_control_table_location(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -866,7 +866,7 @@ class TestCheckpointOperations:
             in merge_query
         )
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_validates_identifiers(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -887,7 +887,7 @@ class TestCheckpointOperations:
                 config=snowflake_config,
             )
 
-    @patch("src.utils.snowflake.get_connection")
+    @patch("utils.snowflake.get_connection")
     def test_insert_partition_checkpoint_handles_merge_error(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -910,7 +910,7 @@ class TestCheckpointOperations:
                 config=snowflake_config,
             )
 
-    @patch("src.utils.snowflake.get_snowpark_session")
+    @patch("utils.snowflake.get_snowpark_session")
     def test_get_partition_checkpoints_handles_query_error(
         self, mock_get_session, snowflake_config
     ):

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from pydantic import ValidationError
 
-from src.utils.config import (
+from utils.config import (
     EventHubConfig,
     EventHubSnowflakeMapping,
     EvSnowConfig,

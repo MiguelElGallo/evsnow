@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 
-from src.consumers.eventhub import (
+from consumers.eventhub import (
     BytesEncoder,
     EventHubAsyncConsumer,
     EventHubMessage,
@@ -368,7 +368,6 @@ class TestSnowflakeCheckpointManager:
     ):
         """Test that missing checkpoints return None."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         manager = SnowflakeCheckpointManager(
             eventhub_namespace="test.servicebus.windows.net",
@@ -412,7 +411,6 @@ class TestSnowflakeCheckpointManager:
     ):
         """Test saving checkpoint to Snowflake."""
         mock_insert = mocker.patch("utils.snowflake.insert_partition_checkpoint")
-        mocker.patch("src.utils.snowflake.insert_partition_checkpoint")
 
         manager = SnowflakeCheckpointManager(
             eventhub_namespace="test.servicebus.windows.net",
@@ -436,7 +434,6 @@ class TestSnowflakeCheckpointManager:
     ):
         """Test saving checkpoints for multiple partitions."""
         mock_insert = mocker.patch("utils.snowflake.insert_partition_checkpoint")
-        mocker.patch("src.utils.snowflake.insert_partition_checkpoint")
 
         manager = SnowflakeCheckpointManager(
             eventhub_namespace="test.servicebus.windows.net",
@@ -459,7 +456,6 @@ class TestSnowflakeCheckpointManager:
     ):
         """Test that checkpoint save includes metadata."""
         mock_insert = mocker.patch("utils.snowflake.insert_partition_checkpoint")
-        mocker.patch("src.utils.snowflake.insert_partition_checkpoint")
 
         manager = SnowflakeCheckpointManager(
             eventhub_namespace="test.servicebus.windows.net",
@@ -743,10 +739,8 @@ class TestEventHubAsyncConsumer:
         mock_logfire,
     ):
         """Test that start() initializes checkpoint manager."""
-        # Mock Snowflake functions - patch both src. and non-src. versions
+        # Mock Snowflake functions
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         def mock_processor(messages):
             return True
@@ -772,7 +766,7 @@ class TestEventHubAsyncConsumer:
     @pytest.mark.asyncio
     async def test_start_creates_eventhub_client_with_connection_string(self, mocker, mock_logfire):
         """Test creating EventHub client with connection string."""
-        from src.utils.config import EventHubConfig
+        from utils.config import EventHubConfig
 
         config = EventHubConfig(
             name="test-hub",
@@ -788,8 +782,6 @@ class TestEventHubAsyncConsumer:
         )
 
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         mock_client = AsyncMock()
         mock_client.receive = AsyncMock(side_effect=asyncio.CancelledError())
@@ -797,7 +789,7 @@ class TestEventHubAsyncConsumer:
 
         # Patch where EventHubConsumerClient is USED, not where it's defined
         mock_from_conn = mocker.patch(
-            "src.consumers.eventhub.EventHubConsumerClient.from_connection_string",
+            "consumers.eventhub.EventHubConsumerClient.from_connection_string",
             return_value=mock_client,
         )
 
@@ -826,7 +818,6 @@ class TestEventHubAsyncConsumer:
     ):
         """Test creating EventHub client with Azure credential."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         mock_cred = AsyncMock()
         mock_cred.get_token = AsyncMock(
@@ -843,7 +834,7 @@ class TestEventHubAsyncConsumer:
 
         # Patch where EventHubConsumerClient is USED, not where it's defined
         mock_client_class = mocker.patch(
-            "src.consumers.eventhub.EventHubConsumerClient", return_value=mock_client
+            "consumers.eventhub.EventHubConsumerClient", return_value=mock_client
         )
 
         def mock_processor(messages):
@@ -876,7 +867,6 @@ class TestEventHubAsyncConsumer:
     ):
         """Test that messages are processed in batches."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         processed_batches = []
 
@@ -940,7 +930,6 @@ class TestEventHubAsyncConsumer:
     ):
         """Test that checkpoints are updated after batch processing."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         def mock_processor(messages):
             return True
@@ -987,7 +976,6 @@ class TestEventHubAsyncConsumer:
     ):
         """Test that stop() cleans up resources."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         def mock_processor(messages):
             return True
@@ -1029,7 +1017,6 @@ class TestEventHubAsyncConsumer:
     ):
         """Test that remaining messages are processed during shutdown."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         processed_messages = []
 
@@ -1073,7 +1060,6 @@ class TestEventHubAsyncConsumer:
     ):
         """Test that connection errors are handled gracefully."""
         mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
-        mocker.patch("src.utils.snowflake.get_partition_checkpoints", return_value=None)
 
         # Mock credential to raise error
         mock_cred = AsyncMock()

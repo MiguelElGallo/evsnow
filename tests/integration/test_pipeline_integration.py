@@ -20,10 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-from src.consumers.eventhub import EventHubAsyncConsumer, EventHubMessage
-from src.pipeline.orchestrator import PipelineMapping, PipelineOrchestrator, run_pipeline
-from src.streaming.snowflake import create_snowflake_streaming_client
-from src.utils.config import (
+from consumers.eventhub import EventHubAsyncConsumer, EventHubMessage
+from pipeline.orchestrator import PipelineMapping, PipelineOrchestrator, run_pipeline
+from streaming.snowflake import create_snowflake_streaming_client
+from utils.config import (
     EventHubConfig,
     EventHubSnowflakeMapping,
     EvSnowConfig,
@@ -57,8 +57,8 @@ def mock_snowflake_client_creation(mocker):
     )
 
     # Patch at the import location in orchestrator module
-    mocker.patch(
-        "src.pipeline.orchestrator.create_snowflake_streaming_client", return_value=mock_client
+        mocker.patch(
+            "pipeline.orchestrator.create_snowflake_streaming_client", return_value=mock_client
     )
 
     return mock_client
@@ -102,9 +102,9 @@ class TestEndToEndPipeline:
         mock_streaming_client.start.return_value = None
         mock_streaming_client.stop.return_value = None
 
-        mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
-            return_value=mock_streaming_client,
+            mocker.patch(
+                "pipeline.orchestrator.create_snowflake_streaming_client",
+                return_value=mock_streaming_client,
         )
 
         # Create mapping config
@@ -128,11 +128,11 @@ class TestEndToEndPipeline:
         mock_checkpoint_mgr.close = mocker.MagicMock()
 
         mocker.patch(
-            "src.consumers.eventhub.SnowflakeCheckpointManager", return_value=mock_checkpoint_mgr
+            "consumers.eventhub.SnowflakeCheckpointManager", return_value=mock_checkpoint_mgr
         )
 
         mocker.patch(
-            "src.consumers.eventhub.SnowflakeCheckpointStore", return_value=mocker.MagicMock()
+            "consumers.eventhub.SnowflakeCheckpointStore", return_value=mocker.MagicMock()
         )
 
         # Act: Create mapping and process messages
@@ -198,13 +198,13 @@ class TestEndToEndPipeline:
         mock_streaming_client.health_check.return_value = {"status": "healthy"}
 
         mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
+            "pipeline.orchestrator.create_snowflake_streaming_client",
             return_value=mock_streaming_client,
         )
 
         # Mock checkpoint dependencies
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointManager")
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointStore")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
 
         # Act: Create mapping and process messages
         mapping = PipelineMapping(
@@ -333,13 +333,13 @@ class TestMultiMappingPipeline:
         mock_streaming_client.health_check.return_value = {"status": "healthy"}
 
         mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
+            "pipeline.orchestrator.create_snowflake_streaming_client",
             return_value=mock_streaming_client,
         )
 
         # Mock checkpoint dependencies
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointManager")
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointStore")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
 
         # Track which mappings were started
         started_mappings = []
@@ -453,12 +453,12 @@ class TestMultiMappingPipeline:
         mock_streaming_client.health_check.return_value = {"status": "healthy"}
 
         mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
+            "pipeline.orchestrator.create_snowflake_streaming_client",
             return_value=mock_streaming_client,
         )
 
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointManager")
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointStore")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
 
         # Act: Create orchestrator and process messages independently
         orchestrator = PipelineOrchestrator(config=config)
@@ -575,7 +575,7 @@ class TestErrorRecovery:
         mock_streaming_client.stop.return_value = None
 
         mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
+            "pipeline.orchestrator.create_snowflake_streaming_client",
             return_value=mock_streaming_client,
         )
 
@@ -596,8 +596,8 @@ class TestErrorRecovery:
         pipeline_config.event_hubs["EVENTHUBNAME_1"] = sample_eventhub_config
         pipeline_config.snowflake_configs["SNOWFLAKE_1"] = sample_snowflake_config
 
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointManager")
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointStore")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
 
         # Act: Create mapping and process messages with retries
         mapping = PipelineMapping(
@@ -647,7 +647,7 @@ class TestErrorRecovery:
         mock_streaming_client.stop.return_value = None
 
         mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
+            "pipeline.orchestrator.create_snowflake_streaming_client",
             return_value=mock_streaming_client,
         )
 
@@ -663,8 +663,8 @@ class TestErrorRecovery:
         pipeline_config.event_hubs["EVENTHUBNAME_1"] = sample_eventhub_config
         pipeline_config.snowflake_configs["SNOWFLAKE_1"] = sample_snowflake_config
 
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointManager")
-        mocker.patch("src.consumers.eventhub.SnowflakeCheckpointStore")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
 
         # Act: Create mapping and try to process
         mapping = PipelineMapping(
@@ -802,7 +802,7 @@ class TestConfigurationFlow:
         mock_streaming_client.health_check.return_value = {"status": "healthy"}
 
         mocker.patch(
-            "src.pipeline.orchestrator.create_snowflake_streaming_client",
+            "pipeline.orchestrator.create_snowflake_streaming_client",
             return_value=mock_streaming_client,
         )
 
@@ -813,7 +813,7 @@ class TestConfigurationFlow:
         mock_checkpoint_mgr.close = mocker.MagicMock()
 
         mocker.patch(
-            "src.consumers.eventhub.SnowflakeCheckpointManager", return_value=mock_checkpoint_mgr
+            "consumers.eventhub.SnowflakeCheckpointManager", return_value=mock_checkpoint_mgr
         )
 
         mock_checkpoint_store = mocker.MagicMock()
@@ -823,7 +823,7 @@ class TestConfigurationFlow:
         mock_checkpoint_store.list_checkpoints = AsyncMock(return_value=[])
 
         mocker.patch(
-            "src.consumers.eventhub.SnowflakeCheckpointStore", return_value=mock_checkpoint_store
+            "consumers.eventhub.SnowflakeCheckpointStore", return_value=mock_checkpoint_store
         )
 
         # Act: Initialize orchestrator

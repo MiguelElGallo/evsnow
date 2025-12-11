@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
-from src.utils.smart_retry import (
+from utils.smart_retry import (
     ExceptionAnalyzer,
     RetryDecision,
     RetryManager,
@@ -96,7 +96,7 @@ class TestRetryDecision:
 class TestExceptionAnalyzer:
     """Tests for ExceptionAnalyzer class."""
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_initialize_with_openai_provider(self, mock_agent_class):
         """Test initializing analyzer with OpenAI provider."""
         analyzer = ExceptionAnalyzer(
@@ -109,7 +109,7 @@ class TestExceptionAnalyzer:
         assert analyzer.timeout_seconds == 10
         assert os.environ.get("OPENAI_API_KEY") == "test-key"
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_initialize_with_anthropic_provider(self, mock_agent_class):
         """Test initializing analyzer with Anthropic provider."""
         analyzer = ExceptionAnalyzer(
@@ -120,7 +120,7 @@ class TestExceptionAnalyzer:
         assert analyzer.llm_model == "claude-3-sonnet"
         assert os.environ.get("ANTHROPIC_API_KEY") == "anthropic-key"
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_initialize_with_caching_disabled(self, mock_agent_class):
         """Test initializing analyzer with caching disabled."""
         analyzer = ExceptionAnalyzer(enable_caching=False)
@@ -129,7 +129,7 @@ class TestExceptionAnalyzer:
         assert len(analyzer._decision_cache) == 0
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_analyze_retryable_exception(self, mock_span, mock_agent_class):
         """Test analyzing an exception that should be retried."""
@@ -163,7 +163,7 @@ class TestExceptionAnalyzer:
         assert mock_agent.run.called
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_analyze_fatal_exception(self, mock_span, mock_agent_class):
         """Test analyzing an exception that should not be retried."""
@@ -196,7 +196,7 @@ class TestExceptionAnalyzer:
         assert "fatal" in decision.reasoning.lower()
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_cache_decision_when_enabled(self, mock_span, mock_agent_class):
         """Test that decisions are cached when caching is enabled."""
@@ -232,7 +232,7 @@ class TestExceptionAnalyzer:
         assert decision1.reasoning == decision2.reasoning
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_no_cache_when_disabled(self, mock_span, mock_agent_class):
         """Test that decisions are not cached when caching is disabled."""
@@ -265,7 +265,7 @@ class TestExceptionAnalyzer:
 
     @pytest.mark.asyncio
     @patch("asyncio.wait_for")
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_handle_llm_timeout(self, mock_span, mock_agent_class, mock_wait_for):
         """Test handling LLM timeout with fallback decision."""
@@ -294,7 +294,7 @@ class TestExceptionAnalyzer:
         assert decision.confidence == 0.0
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_handle_llm_api_error(self, mock_span, mock_agent_class):
         """Test handling LLM API error with fallback decision."""
@@ -321,7 +321,7 @@ class TestExceptionAnalyzer:
         assert decision.confidence == 0.0
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_build_context_string_basic(self, mock_span, mock_agent_class):
         """Test building context string from exception."""
@@ -350,7 +350,7 @@ class TestExceptionAnalyzer:
         assert "Should this operation be retried?" in context_str
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_build_context_string_with_context(self, mock_span, mock_agent_class):
         """Test building context string with additional context."""
@@ -382,7 +382,7 @@ class TestExceptionAnalyzer:
         assert "elapsed_time: 30" in context_str
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_build_context_string_with_cause(self, mock_span, mock_agent_class):
         """Test building context string with exception cause."""
@@ -416,7 +416,7 @@ class TestExceptionAnalyzer:
             assert "Caused by: ConnectionError" in context_str
             assert "Network error" in context_str
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_get_stats(self, mock_agent_class):
         """Test getting analyzer statistics."""
         analyzer = ExceptionAnalyzer()
@@ -439,7 +439,7 @@ class TestExceptionAnalyzer:
 class TestRetryManager:
     """Tests for RetryManager class."""
 
-    @patch("src.utils.smart_retry.ExceptionAnalyzer")
+    @patch("utils.smart_retry.ExceptionAnalyzer")
     def test_create_manager_with_standard_mode(self, mock_analyzer_class):
         """Test creating RetryManager in standard mode."""
         manager = RetryManager(smart_enabled=False, max_attempts=5)
@@ -449,7 +449,7 @@ class TestRetryManager:
         assert manager.analyzer is None
         mock_analyzer_class.assert_not_called()
 
-    @patch("src.utils.smart_retry.ExceptionAnalyzer")
+    @patch("utils.smart_retry.ExceptionAnalyzer")
     def test_create_manager_with_smart_mode(self, mock_analyzer_class):
         """Test creating RetryManager in smart mode."""
         manager = RetryManager(
@@ -465,8 +465,8 @@ class TestRetryManager:
         assert manager.analyzer is not None
         mock_analyzer_class.assert_called_once()
 
-    @patch("src.utils.smart_retry.create_standard_retry_decorator")
-    @patch("src.utils.smart_retry.ExceptionAnalyzer")
+    @patch("utils.smart_retry.create_standard_retry_decorator")
+    @patch("utils.smart_retry.ExceptionAnalyzer")
     def test_get_standard_retry_decorator(self, mock_analyzer_class, mock_decorator):
         """Test getting standard retry decorator."""
         manager = RetryManager(smart_enabled=False, max_attempts=3)
@@ -475,8 +475,8 @@ class TestRetryManager:
 
         mock_decorator.assert_called_once_with(max_attempts=3)
 
-    @patch("src.utils.smart_retry.create_smart_retry_decorator")
-    @patch("src.utils.smart_retry.ExceptionAnalyzer")
+    @patch("utils.smart_retry.create_smart_retry_decorator")
+    @patch("utils.smart_retry.ExceptionAnalyzer")
     def test_get_smart_retry_decorator(self, mock_analyzer_class, mock_decorator):
         """Test getting smart retry decorator."""
         mock_analyzer = MagicMock()
@@ -488,7 +488,7 @@ class TestRetryManager:
 
         mock_decorator.assert_called_once_with(analyzer=mock_analyzer, max_attempts=5)
 
-    @patch("src.utils.smart_retry.ExceptionAnalyzer")
+    @patch("utils.smart_retry.ExceptionAnalyzer")
     def test_get_stats_standard_mode(self, mock_analyzer_class):
         """Test getting stats in standard mode."""
         manager = RetryManager(smart_enabled=False, max_attempts=3)
@@ -499,7 +499,7 @@ class TestRetryManager:
         assert stats["max_attempts"] == 3
         assert "analyzer" not in stats
 
-    @patch("src.utils.smart_retry.ExceptionAnalyzer")
+    @patch("utils.smart_retry.ExceptionAnalyzer")
     def test_get_stats_smart_mode(self, mock_analyzer_class):
         """Test getting stats in smart mode."""
         mock_analyzer = MagicMock()
@@ -561,7 +561,7 @@ class TestRetryDecorators:
         with pytest.raises(ValueError, match="Always fails"):
             always_failing_function()
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_create_smart_retry_decorator(self, mock_agent_class):
         """Test creating smart retry decorator."""
         mock_agent = MagicMock()
@@ -574,7 +574,7 @@ class TestRetryDecorators:
         assert callable(decorator)
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_smart_decorator_uses_llm_decision(self, mock_span, mock_agent_class):
         """Test that smart decorator uses LLM decision for retry."""
@@ -613,7 +613,7 @@ class TestRetryDecorators:
         assert attempt_count == 2
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_smart_decorator_stops_on_fatal_error(self, mock_span, mock_agent_class):
         """Test that smart decorator stops immediately on fatal error."""
@@ -650,7 +650,7 @@ class TestRetryDecorators:
         # Should only attempt once since LLM says don't retry
         assert attempt_count == 1
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_create_exception_analyzer_factory(self, mock_agent_class):
         """Test factory function for creating ExceptionAnalyzer."""
         analyzer = create_exception_analyzer(
@@ -677,7 +677,7 @@ class TestSmartRetryIntegration:
     """Integration tests for smart retry system."""
 
     @pytest.mark.asyncio
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     @patch("logfire.span")
     async def test_full_workflow_with_retry_success(self, mock_span, mock_agent_class):
         """Test complete workflow where retry eventually succeeds."""
@@ -719,7 +719,7 @@ class TestSmartRetryIntegration:
         stats = manager.get_stats()
         assert stats["smart_enabled"] is True
 
-    @patch("src.utils.smart_retry.Agent")
+    @patch("utils.smart_retry.Agent")
     def test_full_workflow_standard_mode(self, mock_agent_class):
         """Test complete workflow in standard retry mode."""
         # Create manager in standard mode

@@ -53,7 +53,7 @@ def mock_eventhub_consumer(mocker):
     mock_class = mocker.MagicMock(return_value=mock_consumer)
 
     # Patch the consumer class where it's USED (in orchestrator)
-    # Note: Due to sys.path.insert in this file, imports use "pipeline.orchestrator" not "src.pipeline.orchestrator"
+    # Note: Imports use "pipeline.orchestrator" ("src" is no longer used as an import prefix).
     mocker.patch("pipeline.orchestrator.EventHubAsyncConsumer", mock_class)
 
     return mock_consumer

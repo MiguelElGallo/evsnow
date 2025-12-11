@@ -15,11 +15,11 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
-from src.streaming.snowflake_high_performance import (
+from streaming.snowflake_high_performance import (
     SnowflakeHighPerformanceStreamingClient,
     create_snowflake_streaming_client,
 )
-from src.utils.config import SnowflakeConnectionConfig
+from utils.config import SnowflakeConnectionConfig
 
 
 class TestSnowflakeHighPerformanceStreamingClient:
@@ -335,7 +335,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Mock StreamingIngestClient to prevent real instantiation
         mock_streaming_client_class = mocker.patch(
-            "src.streaming.snowflake_high_performance.StreamingIngestClient"
+            "streaming.snowflake_high_performance.StreamingIngestClient"
         )
         mock_streaming_client_class.return_value = mock_snowflake_streaming_client
 
@@ -395,7 +395,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Mock StreamingIngestClient
         mock_streaming_client_class = mocker.patch(
-            "src.streaming.snowflake_high_performance.StreamingIngestClient"
+            "streaming.snowflake_high_performance.StreamingIngestClient"
         )
         mock_streaming_client_class.return_value = mock_snowflake_streaming_client
 
