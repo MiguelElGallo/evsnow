@@ -103,6 +103,11 @@ class SnowflakeStreamingClientBase(ABC):
         """
         pass
 
+    @abstractmethod
+    def health_check(self) -> dict[str, Any]:
+        """Return a lightweight health status for the client."""
+        pass
+
     @property
     @abstractmethod
     def is_started(self) -> bool:

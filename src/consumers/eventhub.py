@@ -376,10 +376,12 @@ class EventHubAsyncConsumer:
             logger.info("🔍 Checking for existing checkpoints...")
             partition_checkpoints = await self.checkpoint_manager.get_last_checkpoint()
 
-            # Determine starting position based on checkpoint existence
-            has_checkpoints = partition_checkpoints is not None and len(partition_checkpoints) > 0
+            has_checkpoints = bool(partition_checkpoints)
 
+            # Determine starting position based on checkpoint existence
+            # NOTE: keep the check inline so type-checkers can narrow `partition_checkpoints`.
             if has_checkpoints:
+                assert partition_checkpoints is not None
                 logger.info(f"✅ Found checkpoints in Snowflake: {partition_checkpoints}")
                 logger.info(
                     "   SDK will automatically resume from NEXT sequence after these checkpoints:"
