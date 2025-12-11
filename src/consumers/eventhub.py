@@ -169,9 +169,7 @@ class EventHubAsyncConsumer:
         logger.warning("⚠️  IMPORTANT: RBAC Permission Validation")
         logger.warning("")
         logger.warning("   Azure does NOT provide an API to pre-check data plane RBAC permissions.")
-        logger.warning(
-            "   Permission validation only happens when SDK tries to receive messages."
-        )
+        logger.warning("   Permission validation only happens when SDK tries to receive messages.")
         logger.warning("")
         logger.warning("   What happens next:")
         logger.warning("   1. SDK will attempt to connect to EventHub partitions via AMQP")
@@ -212,7 +210,9 @@ class EventHubAsyncConsumer:
         logger.error("")
         logger.error("Possible causes:")
         logger.error("  1. Azure CLI token expired and refresh failed")
-        logger.error("  2. Too many rapid authentication requests overwhelming the credential chain")
+        logger.error(
+            "  2. Too many rapid authentication requests overwhelming the credential chain"
+        )
         logger.error("  3. Network interruption preventing token refresh")
         logger.error("  4. Azure CLI process busy or locked")
         logger.error("")
