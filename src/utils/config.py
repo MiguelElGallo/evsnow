@@ -391,14 +391,14 @@ def load_config(env_file: str | None = None) -> EvSnowConfig:
 
 
 __all__ = [
-    # Facade exports for existing import sites
-    "SnowflakeConnectionConfig",
-    "SmartRetryConfig",
-    "LogfireConfig",
-    "EventHubConfig",
-    "SnowflakeConfig",
-    "EventHubSnowflakeMapping",
     "EvSnowConfig",
+    # Facade exports for existing import sites
+    "EventHubConfig",
+    "EventHubSnowflakeMapping",
+    "LogfireConfig",
+    "SmartRetryConfig",
+    "SnowflakeConfig",
+    "SnowflakeConnectionConfig",
     "load_config",
 ]
 

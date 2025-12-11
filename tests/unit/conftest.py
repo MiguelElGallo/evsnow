@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 # Mock minimal config classes needed for tests
 class MockSnowflakeConfig:
     """Mock SnowflakeConfig for testing."""
-    
+
     def __init__(self, **kwargs):
         self.database = kwargs.get("database", "TEST_DB")
         self.schema_name = kwargs.get("schema_name", "TEST_SCHEMA")
@@ -22,7 +22,7 @@ class MockSnowflakeConfig:
         self.max_retry_attempts = kwargs.get("max_retry_attempts", 3)
         self.retry_delay_seconds = kwargs.get("retry_delay_seconds", 5)
         self.connection_timeout_seconds = kwargs.get("connection_timeout_seconds", 30)
-    
+
     def model_dump(self):
         """Mock model_dump for pydantic-like behavior."""
         return {
@@ -38,7 +38,7 @@ class MockSnowflakeConfig:
 
 class MockSnowflakeConnectionConfig:
     """Mock SnowflakeConnectionConfig for testing."""
-    
+
     def __init__(self, **kwargs):
         self.account = kwargs.get("account", "test-account")
         self.user = kwargs.get("user", "test_user")
@@ -49,7 +49,7 @@ class MockSnowflakeConnectionConfig:
         self.schema_name = kwargs.get("schema_name", "TEST_SCHEMA")
         self.role = kwargs.get("role", "TEST_ROLE")
         self.pipe_name = kwargs.get("pipe_name", "TEST_PIPE")
-    
+
     def model_copy(self, update=None):
         """Mock model_copy for pydantic-like behavior."""
         data = {
@@ -66,7 +66,7 @@ class MockSnowflakeConnectionConfig:
         if update:
             data.update(update)
         return MockSnowflakeConnectionConfig(**data)
-    
+
     def model_dump(self):
         """Mock model_dump for pydantic-like behavior."""
         return {
@@ -102,7 +102,7 @@ def sample_snowflake_connection_config(tmp_path):
     # Create a temporary private key file
     key_file = tmp_path / "test_key.pem"
     key_file.write_text("-----BEGIN PRIVATE KEY-----\ntest_key_content\n-----END PRIVATE KEY-----")
-    
+
     return MockSnowflakeConnectionConfig(
         account="test-account",
         user="test_user",

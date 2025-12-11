@@ -16,6 +16,6 @@ __all__ = [
     "EventHubSnowflakeMapping",
     "LogfireConfig",
     "SmartRetryConfig",
-    "SnowflakeConnectionConfig",
     "SnowflakeConfig",
+    "SnowflakeConnectionConfig",
 ]

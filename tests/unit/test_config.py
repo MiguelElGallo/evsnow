@@ -912,7 +912,7 @@ class TestLoadConfig:
         for key in list(os.environ.keys()):
             if key.startswith(("EVENTHUB", "SNOWFLAKE_", "SMART_RETRY", "LOGFIRE")):
                 monkeypatch.delenv(key, raising=False)
-        
+
         env_file = tmp_path / ".env"
         env_file.write_text(
             "EVENTHUB_NAMESPACE=test.servicebus.windows.net\n"

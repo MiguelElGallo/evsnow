@@ -32,15 +32,15 @@ def mock_config():
         "errors": [],
         "warnings": [],
     }
-    
+
     # Create mock mapping
     mock_mapping = MagicMock()
     mock_mapping.event_hub_key = "EVENTHUBNAME_1"
     mock_mapping.snowflake_key = "SNOWFLAKE_1"
     mock_mapping.channel_name_pattern = "channel_{table}"
     config.mappings = [mock_mapping]
-    
-    # Create mock EventHub config  
+
+    # Create mock EventHub config
     mock_eh = MagicMock()
     type(mock_eh).name = PropertyMock(return_value="test-hub")
     type(mock_eh).namespace = PropertyMock(return_value="test-namespace.servicebus.windows.net")
@@ -49,7 +49,7 @@ def mock_config():
     type(mock_eh).max_wait_time = PropertyMock(return_value=60)
     type(mock_eh).prefetch_count = PropertyMock(return_value=300)
     config.event_hubs = {"EVENTHUBNAME_1": mock_eh}
-    
+
     # Create mock Snowflake config
     mock_sf = MagicMock()
     type(mock_sf).database = PropertyMock(return_value="TEST_DB")
@@ -57,7 +57,7 @@ def mock_config():
     type(mock_sf).table_name = PropertyMock(return_value="TEST_TABLE")
     type(mock_sf).batch_size = PropertyMock(return_value=1000)
     config.snowflake_configs = {"SNOWFLAKE_1": mock_sf}
-    
+
     config.snowflake_connection = None  # Set to None to skip control table creation
     config.logfire = MagicMock(
         enabled=False,
@@ -91,15 +91,16 @@ class TestCheckCredentialsCommand:
     def test_check_credentials_runs(self, cli_runner):
         """Test check-credentials command executes without errors."""
         # Patch the azure.identity imports that are done inside the function
-        with patch("azure.identity.EnvironmentCredential") as mock_env, \
-             patch("azure.identity.ManagedIdentityCredential") as mock_msi, \
-             patch("azure.identity.AzureCliCredential") as mock_cli:
-            
+        with (
+            patch("azure.identity.EnvironmentCredential") as mock_env,
+            patch("azure.identity.ManagedIdentityCredential") as mock_msi,
+            patch("azure.identity.AzureCliCredential") as mock_cli,
+        ):
             # Make all credentials fail so we get a simple output
             mock_env.side_effect = Exception("No env vars")
             mock_msi.side_effect = Exception("Not in Azure")
             mock_cli.side_effect = Exception("No CLI")
-            
+
             result = cli_runner.invoke(app, ["check-credentials"])
 
             assert result.exit_code == 0
@@ -111,7 +112,9 @@ class TestValidateConfigCommand:
 
     @patch("utils.snowflake.create_control_table")  # Prevent real control table creation
     @patch("main.load_config")
-    def test_validate_config_with_valid_configuration(self, mock_load_config, mock_create_table, cli_runner, mock_config):
+    def test_validate_config_with_valid_configuration(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config
+    ):
         """Test validate-config with a valid configuration."""
         mock_load_config.return_value = mock_config
         mock_create_table.return_value = None  # Success
@@ -124,7 +127,9 @@ class TestValidateConfigCommand:
 
     @patch("utils.snowflake.create_control_table")  # Prevent real control table creation
     @patch("main.load_config")
-    def test_validate_config_with_errors(self, mock_load_config, mock_create_table, cli_runner, mock_config):
+    def test_validate_config_with_errors(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config
+    ):
         """Test validate-config with configuration errors."""
         mock_config.validate_configuration.return_value = {
             "valid": False,
@@ -141,11 +146,16 @@ class TestValidateConfigCommand:
         result = cli_runner.invoke(app, ["validate-config"], input="n\n")
 
         assert result.exit_code == 0
-        assert "Configuration has errors" in result.stdout or "Missing EventHub configuration" in result.stdout
+        assert (
+            "Configuration has errors" in result.stdout
+            or "Missing EventHub configuration" in result.stdout
+        )
 
     @patch("utils.snowflake.create_control_table")  # Prevent real control table creation
     @patch("main.load_config")
-    def test_validate_config_with_warnings(self, mock_load_config, mock_create_table, cli_runner, mock_config):
+    def test_validate_config_with_warnings(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config
+    ):
         """Test validate-config with configuration warnings."""
         mock_config.validate_configuration.return_value = {
             "valid": True,
@@ -166,7 +176,9 @@ class TestValidateConfigCommand:
 
     @patch("utils.snowflake.create_control_table")  # Prevent real control table creation
     @patch("main.load_config")
-    def test_validate_config_with_env_file(self, mock_load_config, mock_create_table, cli_runner, mock_config):
+    def test_validate_config_with_env_file(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config
+    ):
         """Test validate-config with custom env file."""
         mock_load_config.return_value = mock_config
         mock_create_table.return_value = None  # Success
@@ -224,7 +236,7 @@ class TestRunCommand:
     def test_run_with_smart_retry_missing_api_key(self, mock_load_config, cli_runner, mock_config):
         """Test run command fails when --smart is enabled but API key is missing."""
         mock_load_config.return_value = mock_config
-        
+
         # Patch SmartRetryConfig from the module where it's imported
         with patch("utils.config.SmartRetryConfig") as mock_smart_config:
             smart_cfg = MagicMock()
@@ -259,7 +271,7 @@ class TestStatusCommand:
     def test_status_with_valid_config(self, mock_load_config, cli_runner, mock_config):
         """Test status command with valid configuration."""
         mock_load_config.return_value = mock_config
-        
+
         # Patch check_connection from the module where it's imported
         with patch("utils.snowflake.check_connection", return_value=True):
             result = cli_runner.invoke(app, ["status"])
@@ -373,7 +385,10 @@ class TestHelperFunctions:
         _initialize_logfire(logfire_config)
 
         # Should log warning but not raise
-        assert any("Failed to initialize Logfire" in str(call) for call in mock_logger.warning.call_args_list)
+        assert any(
+            "Failed to initialize Logfire" in str(call)
+            for call in mock_logger.warning.call_args_list
+        )
 
     @patch("main.console")
     def test_show_processing_plan(self, mock_console, mock_config):
@@ -385,7 +400,7 @@ class TestHelperFunctions:
         assert mock_console.print.called
         calls = [str(call) for call in mock_console.print.call_args_list]
         combined_output = " ".join(calls)
-        
+
         assert "Processing Plan" in combined_output or mock_console.print.call_count > 0
 
 
@@ -418,7 +433,7 @@ class TestEnvironmentSetup:
         import logging
 
         root_logger = logging.getLogger()
-        
+
         # Check that at least one handler exists
         assert len(root_logger.handlers) > 0
 
@@ -435,7 +450,9 @@ class TestConfigurationDisplay:
 
     @patch("utils.snowflake.create_control_table")  # Prevent real control table creation
     @patch("main.load_config")
-    def test_validate_config_displays_summary_table(self, mock_load_config, mock_create_table, cli_runner, mock_config):
+    def test_validate_config_displays_summary_table(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config
+    ):
         """Test that validate-config displays configuration summary table."""
         mock_load_config.return_value = mock_config
         mock_create_table.return_value = None  # Success

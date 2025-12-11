@@ -22,7 +22,9 @@ class EventHubConfig(BaseModel):
         description="Use connection string instead of DefaultAzureCredential",
     )
 
-    checkpoint_interval_seconds: int = Field(default=300, description="Checkpoint interval (seconds)")
+    checkpoint_interval_seconds: int = Field(
+        default=300, description="Checkpoint interval (seconds)"
+    )
     max_message_batch_size: int = Field(
         default=1000,
         description="Maximum messages per processing batch",

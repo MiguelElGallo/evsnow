@@ -42,17 +42,17 @@ jobs:
         run: |
           uv sync --all-groups
 
-      - name: Check formatting with black
+      - name: Check formatting with ruff
         run: |
-          uv run black --check src/ tests/ || true
+          uv run ruff format --check src/
 
-      - name: Check import sorting with isort
+      - name: Lint with ruff
         run: |
-          uv run isort --check-only src/ tests/ || true
+          uv run ruff check src/
 
-      - name: Lint with pylint
+      - name: Type check with mypy
         run: |
-          uv run pylint src/ --disable=all --enable=E,F,W || true
+          uv run mypy src/
 
   test-unit:
     name: Unit Tests

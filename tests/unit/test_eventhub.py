@@ -345,9 +345,7 @@ class TestSnowflakeCheckpointManager:
         """Test loading checkpoint from Snowflake returns dict."""
         # Mock the get_partition_checkpoints function (imported inside the method)
         mock_checkpoints = {"0": 100, "1": 200}
-        mocker.patch(
-            "utils.snowflake.get_partition_checkpoints", return_value=mock_checkpoints
-        )
+        mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=mock_checkpoints)
 
         manager = SnowflakeCheckpointManager(
             eventhub_namespace="test.servicebus.windows.net",
@@ -772,9 +770,7 @@ class TestEventHubAsyncConsumer:
         assert consumer.checkpoint_manager is not None
 
     @pytest.mark.asyncio
-    async def test_start_creates_eventhub_client_with_connection_string(
-        self, mocker, mock_logfire
-    ):
+    async def test_start_creates_eventhub_client_with_connection_string(self, mocker, mock_logfire):
         """Test creating EventHub client with connection string."""
         from src.utils.config import EventHubConfig
 
@@ -798,7 +794,7 @@ class TestEventHubAsyncConsumer:
         mock_client = AsyncMock()
         mock_client.receive = AsyncMock(side_effect=asyncio.CancelledError())
         mock_client.close = AsyncMock()
-        
+
         # Patch where EventHubConsumerClient is USED, not where it's defined
         mock_from_conn = mocker.patch(
             "src.consumers.eventhub.EventHubConsumerClient.from_connection_string",
@@ -837,14 +833,14 @@ class TestEventHubAsyncConsumer:
             return_value=MagicMock(token="test-token", expires_on=time.time() + 3600)
         )
         mock_cred.close = AsyncMock()
-        
+
         # AzureCliCredential is imported inside start(), so patch where it's imported from
         mocker.patch("azure.identity.aio.AzureCliCredential", return_value=mock_cred)
 
         mock_client = AsyncMock()
         mock_client.receive = AsyncMock(side_effect=asyncio.CancelledError())
         mock_client.close = AsyncMock()
-        
+
         # Patch where EventHubConsumerClient is USED, not where it's defined
         mock_client_class = mocker.patch(
             "src.consumers.eventhub.EventHubConsumerClient", return_value=mock_client

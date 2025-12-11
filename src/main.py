@@ -20,11 +20,10 @@ from utils.cli_bootstrap import (
     configure_logging,
     load_dotenv_if_present,
 )
+from utils.config import EvSnowConfig, load_config
 
 # Load .env file by default if it exists
 load_dotenv_if_present(caller_file=__file__)
-
-from utils.config import EvSnowConfig, load_config
 
 # Early Logfire initialization to prevent "LogfireNotConfiguredWarning".
 # Full configuration with user settings happens later during command execution.
