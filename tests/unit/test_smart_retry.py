@@ -273,8 +273,16 @@ class TestExceptionAnalyzer:
         mock_agent = MagicMock()
         mock_agent_class.return_value = mock_agent
 
+        def _raise_timeout(coro, *args, **kwargs):
+            # analyze_exception constructs the LLM coroutine before passing it to wait_for.
+            # If we raise immediately, we must close that coroutine to avoid
+            # "coroutine was never awaited" warnings.
+            if hasattr(coro, "close"):
+                coro.close()
+            raise TimeoutError("Timeout")
+
         # Mock wait_for to raise TimeoutError immediately
-        mock_wait_for.side_effect = TimeoutError("Timeout")
+        mock_wait_for.side_effect = _raise_timeout
 
         # Setup mock span
         mock_span_instance = MagicMock()

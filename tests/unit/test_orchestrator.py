@@ -611,22 +611,19 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker,
     ):
         """Test that run_async() starts async tasks for all mappings."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
 
-        # Make gather return immediately to avoid hanging
-        mock_gather = mocker.patch("asyncio.gather", side_effect=asyncio.CancelledError())
+        # Act: with mocked EventHub consumer start() returning immediately, the
+        # mapping task should complete quickly and gather should return.
+        await orchestrator.run_async()
 
-        # Act & Assert
-        with pytest.raises(asyncio.CancelledError):
-            await orchestrator.run_async()
-
-        # Verify tasks were created
+        # Assert
         assert len(orchestrator.tasks) == 1
+        assert all(task.done() for task in orchestrator.tasks)
 
     @pytest.mark.asyncio
     async def test_run_async_without_start_raises_error(
@@ -647,18 +644,21 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker,
     ):
         """Test that run_async() handles CancelledError properly."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
 
-        mocker.patch("asyncio.gather", side_effect=asyncio.CancelledError())
+        with patch("asyncio.gather", side_effect=asyncio.CancelledError()):
+            with pytest.raises(asyncio.CancelledError):
+                await orchestrator.run_async()
 
-        # Act & Assert
-        with pytest.raises(asyncio.CancelledError):
-            await orchestrator.run_async()
+        # Cleanup: cancel/await any created mapping tasks to avoid pending-task warnings
+        for task in orchestrator.tasks:
+            task.cancel()
+        if orchestrator.tasks:
+            await asyncio.gather(*orchestrator.tasks, return_exceptions=True)
 
     @pytest.mark.asyncio
     async def test_stop_cancels_all_tasks(
@@ -781,17 +781,15 @@ class TestPipelineOrchestrator:
         """Test that setup_signal_handlers() registers signal handlers."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        loop = asyncio.new_event_loop()
-
-        mock_add_signal_handler = mocker.patch.object(loop, "add_signal_handler")
+        loop = mocker.MagicMock(spec=asyncio.AbstractEventLoop)
 
         # Act
         orchestrator.setup_signal_handlers(loop)
 
         # Assert
         # Should register handlers for SIGINT and SIGTERM
-        assert mock_add_signal_handler.call_count == 2
-        calls = mock_add_signal_handler.call_args_list
+        assert loop.add_signal_handler.call_count == 2
+        calls = loop.add_signal_handler.call_args_list
         registered_signals = [call[0][0] for call in calls]
         assert signal.SIGINT in registered_signals
         assert signal.SIGTERM in registered_signals
@@ -808,7 +806,7 @@ class TestPipelineOrchestrator:
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        loop = asyncio.new_event_loop()
+        loop = mocker.MagicMock(spec=asyncio.AbstractEventLoop)
 
         # Create mock tasks
         mock_task = mocker.MagicMock()
@@ -823,8 +821,16 @@ class TestPipelineOrchestrator:
             # Store both handler and args so we can call handler(args[0]) later
             signal_handlers[sig] = (handler, args)
 
-        mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
-        mock_create_task = mocker.patch.object(loop, "create_task")
+        loop.add_signal_handler.side_effect = capture_handler
+
+        def _close_coro(coro, *args, **kwargs):
+            # The signal handler schedules orchestrator.stop() via loop.create_task.
+            # Ensure we close the coroutine to avoid leaks.
+            if hasattr(coro, "close"):
+                coro.close()
+            return None
+
+        loop.create_task.side_effect = _close_coro
 
         orchestrator.setup_signal_handlers(loop)
 
@@ -832,10 +838,9 @@ class TestPipelineOrchestrator:
         handler, args = signal_handlers[signal.SIGINT]
         handler(args[0])
 
-        # Assert - now verifies graceful shutdown by calling stop()
+        # Assert
         assert orchestrator.shutdown_requested
-        # Verify that stop() is scheduled via create_task (graceful shutdown)
-        mock_create_task.assert_called_once()
+        loop.create_task.assert_called_once()
 
     def test_signal_handler_forces_exit_on_second_signal(
         self, complete_pipeline_config, mock_logfire, mocker
@@ -843,7 +848,7 @@ class TestPipelineOrchestrator:
         """Test that signal handler forces exit on second signal."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        loop = asyncio.new_event_loop()
+        loop = mocker.MagicMock(spec=asyncio.AbstractEventLoop)
 
         # Capture the signal handler
         signal_handlers = {}
@@ -852,18 +857,20 @@ class TestPipelineOrchestrator:
             # Store both handler and args so we can call handler(args[0]) later
             signal_handlers[sig] = (handler, args)
 
-        mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
-        mock_exit = mocker.patch("sys.exit")
+        loop.add_signal_handler.side_effect = capture_handler
+        mock_exit = mocker.patch("sys.exit", side_effect=SystemExit(1))
 
         orchestrator.setup_signal_handlers(loop)
 
         # Act - trigger SIGINT twice
         orchestrator.shutdown_requested = True  # Simulate first signal
         handler, args = signal_handlers[signal.SIGINT]
-        handler(args[0])
+        with pytest.raises(SystemExit):
+            handler(args[0])
 
         # Assert
         mock_exit.assert_called_once_with(1)
+        loop.create_task.assert_not_called()
 
 
 # ============================================================================
