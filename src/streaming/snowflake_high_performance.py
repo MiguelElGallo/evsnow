@@ -19,7 +19,6 @@ from typing import Any
 import logfire
 
 # Snowflake High-Performance Streaming SDK (v1.1.0+)
-# ⚠️  Known Azure bug: expects AWS_KEY_ID field in API response
 from snowflake.ingest.streaming import StreamingIngestClient
 
 from streaming.base import SnowflakeStreamingClientBase
@@ -39,7 +38,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
     - PIPE object required
     - Server-side configuration
     - ~10 GB/s throughput per table
-    - ⚠️  Azure bug: AWS_KEY_ID deserialization error
+
     """
 
     def __init__(

@@ -277,26 +277,27 @@ class PipelineMapping:
 
     def health_check(self) -> dict[str, Any]:
         """Perform health check on mapping components."""
-        health = {
-            "mapping_key": self.stats["mapping_key"],
-            "running": self.running,
-            "components": {},
-            "errors": [],
-        }
+        components: dict[str, Any] = {}
+        errors: list[str] = []
 
         # Check Snowflake client
         if self.snowflake_client:
-            health["components"]["snowflake"] = self.snowflake_client.health_check()
+            components["snowflake"] = self.snowflake_client.health_check()
         else:
-            health["errors"].append("Snowflake client not initialized")
+            errors.append("Snowflake client not initialized")
 
         # Check EventHub consumer
         if self.eventhub_consumer:
-            health["components"]["eventhub"] = {"status": "initialized"}
+            components["eventhub"] = {"status": "initialized"}
         else:
-            health["errors"].append("EventHub consumer not initialized")
+            errors.append("EventHub consumer not initialized")
 
-        return health
+        return {
+            "mapping_key": self.stats["mapping_key"],
+            "running": self.running,
+            "components": components,
+            "errors": errors,
+        }
 
 
 class PipelineOrchestrator:
