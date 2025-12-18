@@ -227,15 +227,89 @@ SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
 
 > ⚠️ If you see `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`, rerun this block and ensure role `STREAM` has `OPERATE`/`MONITOR` on the PIPE.
 
-**How this relates to [`.env.example`](./.env.example):**
+#### Step 4 (Variation): Ingest into an Apache Iceberg table (Azure External Volume)
 
-| SQL Resource | `.env` Variable | Purpose |
-|--------------|-----------------|---------|
-| `TABLE EVENTS_TABLE` | `SNOWFLAKE_1_TABLE=events_table` | Target table for ingested events |
-| `PIPE EVENTS_TABLE_PIPE` | `SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE` | Required for high-performance SDK |
+If you prefer landing data into an **Iceberg table** (Snowflake-managed Iceberg) instead of a standard Snowflake table, use the setup below. You’ll create an **EXTERNAL VOLUME** (Azure), verify it, create an **ICEBERG TABLE** backed by that volume, and then create the **Snowpipe Streaming PIPE** that writes into the Iceberg table.
 
-> ⚠️ **Error `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`?** This means the PIPE hasn't been created or your role doesn't have permissions. Run the SQL above to fix it.
-> 📄 **Alternative:** You can also run the pre-made script: [`setup_snowpipe_streaming.sql`](./setup_snowpipe_streaming.sql)
+> Notes:
+>
+> - Replace placeholders (`<...>`) with your environment values.
+> - Your `STORAGE_BASE_URL` should point at the container/prefix you want Snowflake writing to (and must be reachable/authorized per your Snowflake/Azure setup).
+> - Keep the PIPE definition pattern the same—only the target table changes.
+
+```sql
+-- ============================================
+-- ICEBERG VARIATION (Azure External Volume + Iceberg table + Streaming PIPE)
+-- ============================================
+
+USE ROLE STREAM;  -- or ACCOUNTADMIN if needed for setup
+USE DATABASE INGESTION;
+USE SCHEMA PUBLIC;
+
+-- 1) Create an External Volume (Azure)
+CREATE OR REPLACE EXTERNAL VOLUME my_ext_volume
+  STORAGE_LOCATIONS = (
+    (
+      NAME = 'azure_main'
+      STORAGE_PROVIDER = 'AZURE'
+      STORAGE_BASE_URL = 'azure://<storage-account>.blob.core.windows.net/<container>/<optional-prefix>/'
+      AZURE_TENANT_ID = '<your-azure-tenant-id>'
+    )
+  )
+  ALLOW_WRITES = TRUE;
+
+-- (Optional) Inspect/verify the external volume
+DESC EXTERNAL VOLUME my_ext_volume;
+SELECT SYSTEM$VERIFY_EXTERNAL_VOLUME('my_ext_volume');
+
+-- 2) Create an Iceberg table backed by that external volume
+-- Snowflake as the Iceberg catalog, writing to our external volume:
+CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE (
+  EVENT_BODY VARCHAR(134217728),
+  PARTITION_ID VARCHAR(134217728),
+  SEQUENCE_NUMBER NUMBER(38,0),
+  OFFSET VARCHAR(134217728),
+  ENQUEUED_TIME TIMESTAMP_LTZ(6),
+  PROPERTIES VARCHAR(134217728),
+  SYSTEM_PROPERTIES VARCHAR(134217728),
+  INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT (CURRENT_TIMESTAMP()::TIMESTAMP_LTZ(6))
+)
+CATALOG = 'SNOWFLAKE'
+EXTERNAL_VOLUME = 'my_ext_volume'
+BASE_LOCATION = 'events/'  -- folder in the container for this table’s data
+STORAGE_SERIALIZATION_POLICY = 'COMPATIBLE';
+
+-- 3) Create PIPE for HIGH-PERFORMANCE Snowpipe Streaming (targets the Iceberg table)
+CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
+COPY INTO INGESTION.PUBLIC.EVENTS_TABLE (
+  EVENT_BODY,
+  PARTITION_ID,
+  SEQUENCE_NUMBER,
+  OFFSET,
+  ENQUEUED_TIME,
+  PROPERTIES,
+  SYSTEM_PROPERTIES
+)
+FROM (
+  SELECT
+    TO_VARCHAR($1:event_body) AS EVENT_BODY,
+    TO_VARCHAR($1:partition_id) AS PARTITION_ID,
+    $1:sequence_number::NUMBER(38,0) AS SEQUENCE_NUMBER,
+    TO_VARCHAR($1:offset) AS OFFSET,
+    $1:enqueued_time::TIMESTAMP_NTZ(6) AS ENQUEUED_TIME,
+    TO_VARCHAR($1:properties) AS PROPERTIES,
+    TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES
+  FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
+);
+
+-- 4) Grants (adjust to your role model)
+GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
+GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
+GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE TO ROLE STREAM;
+GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE TO ROLE STREAM;
+
+SHOW PIPES LIKE 'EVENTS_TABLE_PIPE';
+```
 
 ### Step 5: Update `.env` File
 

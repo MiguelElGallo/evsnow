@@ -28,10 +28,10 @@ __all__ = [
 class BytesEncoder(json.JSONEncoder):
     """Custom JSON encoder that converts bytes to strings."""
 
-    def default(self, obj):
-        if isinstance(obj, bytes):
-            return obj.decode("utf-8", errors="replace")
-        return super().default(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return o.decode("utf-8", errors="replace")
+        return super().default(o)
 
 
 def _convert_bytes_to_str(obj: Any) -> Any:
