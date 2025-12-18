@@ -1,0 +1,19 @@
+{
+    "timestamp_ns": 1766065325263145000,
+    "eventhub_namespace": "eventhu1.servicebus.windows.net",
+    "eventhub_name": "topic1",
+    "consumer_group": "$Default",
+    "partition_id": "12",
+    "offset": "137438953472",
+    "sequence_number": 76716,
+    "enqueued_time": "2025-12-18T13:42:05.182000+00:00",
+    "content_type": null,
+    "body": "{\"sequence_id\": 1, \"sent_at\": \"2025-12-18T13:42:05.174467+00:00\", \"source\": \"evsnow-cli-sender\", \"trace_id\": \"150eb71f9bbd42f2b3c28583c03d9b23\", \"message\": \"Test message 1\", \"payload\": {}}",
+    "properties": {},
+    "system_properties": {
+        "x-opt-sequence-number-epoch": -1,
+        "x-opt-sequence-number": 76716,
+        "x-opt-offset": "137438953472",
+        "x-opt-enqueued-time": 1766065325182
+    }
+}

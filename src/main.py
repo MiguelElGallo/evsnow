@@ -337,6 +337,11 @@ def run(
         "--smart",
         help="Enable LLM-powered smart retry analysis for failures",
     ),
+    capture: bool = typer.Option(
+        False,
+        "--capture",
+        help="Capture each raw Event Hub message to messages/f_{timestamp}.json",
+    ),
 ) -> None:
     """Run the ELT pipeline continuously."""
     try:
@@ -344,6 +349,9 @@ def run(
 
         # Load and validate configuration
         config = load_config(env_file)
+
+        # Optional runtime-only toggles
+        config.capture_messages = capture
         validation_results = config.validate_configuration()
 
         if not validation_results["valid"] and validation_results["errors"]:

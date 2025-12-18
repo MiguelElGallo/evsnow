@@ -12,11 +12,13 @@ Based on Azure EventHub SDK patterns but adapted for Snowflake checkpointing.
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, NoReturn
 
 import logfire
@@ -72,6 +74,8 @@ class EventHubAsyncConsumer:
         control_db: str | None = None,
         control_schema: str | None = None,
         control_table: str | None = None,
+        capture_messages: bool = False,
+        capture_messages_dir: str = "messages",
     ):
         self.eventhub_config = eventhub_config
         self.target_db = target_db
@@ -81,6 +85,13 @@ class EventHubAsyncConsumer:
         self.snowflake_config = snowflake_config
         self.batch_size = batch_size
         self.batch_timeout_seconds = batch_timeout_seconds
+
+        # Optional debug capture of raw messages (as received from Event Hub)
+        self.capture_messages = capture_messages
+        self.capture_messages_dir = capture_messages_dir
+        self._capture_queue: asyncio.Queue[tuple[int, dict[str, Any]] | None] | None = None
+        self._capture_task: asyncio.Task[None] | None = None
+        self._capture_dropped_messages = 0
 
         # Control table configuration (for checkpoints)
         self.control_db = control_db or target_db
@@ -111,6 +122,152 @@ class EventHubAsyncConsumer:
             "last_checkpoint": None,
             "start_time": None,
         }
+
+    def _capture_dir_path(self) -> Path:
+        return Path.cwd() / self.capture_messages_dir
+
+    @staticmethod
+    def _event_body_to_utf8(event: EventData) -> str:
+        """Decode Event Hub message body as UTF-8 (replacement for invalid sequences)."""
+        try:
+            body_bytes = b"".join(event.body)
+        except Exception:
+            # Fallback: some mocks or SDK versions may expose `body` differently
+            try:
+                body_bytes = bytes(event.body)  # type: ignore[arg-type]
+            except Exception:
+                body_bytes = b""
+        return body_bytes.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _to_jsonable(value: Any) -> Any:
+        """Convert values into a JSON-serializable structure.
+
+        Azure Event Hub `properties` / `system_properties` can include `bytes` keys.
+        Python's `json` requires keys to be str/int/float/bool/None, so we normalize.
+        """
+
+        if value is None:
+            return None
+
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+
+        if isinstance(value, (str, int, float, bool)):
+            return value
+
+        if isinstance(value, dict):
+            converted: dict[str, Any] = {}
+            for k, v in value.items():
+                if isinstance(k, bytes):
+                    key = k.decode("utf-8", errors="replace")
+                else:
+                    key = str(k)
+                converted[key] = EventHubAsyncConsumer._to_jsonable(v)
+            return converted
+
+        if isinstance(value, (list, tuple, set)):
+            return [EventHubAsyncConsumer._to_jsonable(v) for v in value]
+
+        # Fallback: stringify unknown objects (e.g., UUID, datetime in some contexts)
+        return str(value)
+
+    def _enqueue_capture(self, partition_id: str, event: EventData) -> None:
+        if not self.capture_messages:
+            return
+
+        if self._capture_queue is None:
+            return
+
+        timestamp_ns = time.time_ns()
+        payload: dict[str, Any] = {
+            "timestamp_ns": timestamp_ns,
+            "eventhub_namespace": self.eventhub_config.namespace,
+            "eventhub_name": self.eventhub_config.name,
+            "consumer_group": self.eventhub_config.consumer_group,
+            "partition_id": partition_id,
+            "offset": event.offset,
+            "sequence_number": event.sequence_number,
+            "enqueued_time": event.enqueued_time.isoformat() if event.enqueued_time else None,
+            "content_type": getattr(event, "content_type", None),
+            "body": self._event_body_to_utf8(event),
+            "properties": self._to_jsonable(event.properties),
+            "system_properties": self._to_jsonable(event.system_properties),
+        }
+
+        try:
+            self._capture_queue.put_nowait((timestamp_ns, payload))
+        except asyncio.QueueFull:
+            self._capture_dropped_messages += 1
+            # Avoid spamming logs
+            if self._capture_dropped_messages in (1, 10, 100, 1000):
+                logger.warning(
+                    "Capture queue full; dropped %s messages so far",
+                    self._capture_dropped_messages,
+                )
+
+    async def _capture_writer_loop(self) -> None:
+        if self._capture_queue is None:
+            return
+
+        capture_dir = self._capture_dir_path()
+        capture_dir.mkdir(parents=True, exist_ok=True)
+
+        while True:
+            item = await self._capture_queue.get()
+            if item is None:
+                self._capture_queue.task_done()
+                return
+
+            timestamp_ns, payload = item
+            try:
+                await asyncio.to_thread(
+                    self._write_capture_file, capture_dir, timestamp_ns, payload
+                )
+            except Exception as exc:
+                logger.warning("Failed to write captured message: %s", exc)
+            finally:
+                self._capture_queue.task_done()
+
+    @staticmethod
+    def _write_capture_file(
+        capture_dir: Path,
+        timestamp_ns: int,
+        payload: dict[str, Any],
+    ) -> None:
+        file_path = capture_dir / f"f_{timestamp_ns}.json"
+        tmp_path = capture_dir / f"f_{timestamp_ns}.json.tmp"
+        safe_payload = EventHubAsyncConsumer._to_jsonable(payload)
+        data = json.dumps(safe_payload, ensure_ascii=False, cls=BytesEncoder)
+        tmp_path.write_text(data, encoding="utf-8")
+        tmp_path.replace(file_path)
+
+    async def _start_capture_writer(self) -> None:
+        if not self.capture_messages:
+            return
+
+        if self._capture_task is not None:
+            return
+
+        # Keep queue bounded to avoid unbounded memory usage
+        self._capture_queue = asyncio.Queue(maxsize=10_000)
+        self._capture_task = asyncio.create_task(self._capture_writer_loop())
+        logger.info("📝 Capture enabled: writing raw messages to %s/", self.capture_messages_dir)
+
+    async def _stop_capture_writer(self) -> None:
+        if self._capture_queue is None or self._capture_task is None:
+            return
+
+        try:
+            await self._capture_queue.put(None)
+            await asyncio.wait_for(self._capture_task, timeout=30)
+        except TimeoutError:
+            logger.warning("Timed out waiting for capture writer to stop")
+        except Exception as exc:
+            logger.warning("Error stopping capture writer: %s", exc)
+        finally:
+            self._capture_task = None
+            self._capture_queue = None
 
     def _log_startup_summary(self) -> None:
         logger.info(f"🚀 Starting EventHub consumer for {self.eventhub_config.name}")
@@ -483,6 +640,9 @@ class EventHubAsyncConsumer:
             # Initialize batch
             self.current_batch = self._new_batch(reason="startup")
 
+            # Start capture writer (if enabled)
+            await self._start_capture_writer()
+
             self.running = True
             self.stats["start_time"] = datetime.now(UTC)
 
@@ -607,6 +767,9 @@ class EventHubAsyncConsumer:
                 self.checkpoint_manager.close()
                 self.checkpoint_manager = None
 
+            # Flush captured messages (if enabled)
+            await self._stop_capture_writer()
+
             logger.info("✅ EventHub consumer stopped gracefully")
         except Exception as e:
             logger.error(f"❌ Error during final cleanup: {e}", exc_info=True)
@@ -658,11 +821,17 @@ class EventHubAsyncConsumer:
                 )
                 return
 
+            # Optional capture of the raw message (as received)
+            self._enqueue_capture(partition_context.partition_id, event)
+
             # Create message wrapper
             message = EventHubMessage(
                 event_data=event,
                 partition_id=partition_context.partition_id,
                 sequence_number=event.sequence_number,
+                eventhub_namespace=self.eventhub_config.namespace,
+                eventhub_name=self.eventhub_config.name,
+                consumer_group=self.eventhub_config.consumer_group,
             )
 
             # Store partition_context with message for later checkpoint update

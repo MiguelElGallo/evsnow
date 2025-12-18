@@ -298,6 +298,16 @@ class TestRunCommand:
         assert "Processing Plan" in result.stdout
 
     @patch("main.load_config")
+    def test_run_with_capture_flag_sets_config(self, mock_load_config, cli_runner, mock_config):
+        """Test run command accepts --capture and stores it on config."""
+        mock_load_config.return_value = mock_config
+
+        result = cli_runner.invoke(app, ["run", "--capture", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert getattr(mock_config, "capture_messages") is True
+
+    @patch("main.load_config")
     def test_run_with_config_errors(self, mock_load_config, cli_runner, mock_config):
         """Test run command with configuration errors."""
         mock_config.validate_configuration.return_value = {

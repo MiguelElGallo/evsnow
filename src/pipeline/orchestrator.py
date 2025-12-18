@@ -112,6 +112,10 @@ class PipelineMapping:
                 control_db=self.pipeline_config.target_db,
                 control_schema=self.pipeline_config.target_schema,
                 control_table=self.pipeline_config.target_table,
+                capture_messages=bool(getattr(self.pipeline_config, "capture_messages", False)),
+                capture_messages_dir=str(
+                    getattr(self.pipeline_config, "capture_messages_dir", "messages")
+                ),
             )
 
             self.running = True

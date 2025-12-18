@@ -6,7 +6,9 @@ require real Azure or Snowflake connectivity.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 
 import pytest
 
@@ -82,3 +84,25 @@ def test_handle_receive_error_rbac_raises(sample_eventhub_config):
 
     with pytest.raises(RuntimeError, match="Azure RBAC"):
         consumer._handle_receive_error(exc)
+
+
+@pytest.mark.unit
+def test_capture_writer_normalizes_bytes_keys(sample_eventhub_config, tmp_path):
+    consumer = _make_consumer(sample_eventhub_config)
+
+    timestamp_ns = time.time_ns()
+    payload = {
+        "timestamp_ns": timestamp_ns,
+        "properties": {b"k": b"v", "nested": {b"inner": b"x"}},
+        "system_properties": {b"sys": 1},
+    }
+
+    consumer._write_capture_file(tmp_path, timestamp_ns, payload)
+
+    out_path = tmp_path / f"f_{timestamp_ns}.json"
+    assert out_path.exists()
+
+    loaded = json.loads(out_path.read_text(encoding="utf-8"))
+    assert loaded["properties"]["k"] == "v"
+    assert loaded["properties"]["nested"]["inner"] == "x"
+    assert loaded["system_properties"]["sys"] == 1

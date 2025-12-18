@@ -89,6 +89,16 @@ class EvSnowConfig(BaseSettings):
     )
     metrics_collection_enabled: bool = Field(default=True, description="Enable metrics collection")
 
+    # Debugging / diagnostics
+    capture_messages: bool = Field(
+        default=False,
+        description="Capture each raw Event Hub message to disk as JSON (messages/f_{timestamp}.json)",
+    )
+    capture_messages_dir: str = Field(
+        default="messages",
+        description="Directory (relative to repo-root/CWD) to store captured messages",
+    )
+
     # Observability
     logfire: LogfireConfig = Field(
         default_factory=LogfireConfig,

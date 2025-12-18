@@ -72,6 +72,7 @@ def _build_payload(sequence_id: int, base_payload: dict[str, Any]) -> str:
         "sent_at": datetime.now(UTC).isoformat(),
         "source": "evsnow-cli-sender",
         "trace_id": uuid.uuid4().hex,
+        "message": f"Test message {sequence_id}",
         "payload": base_payload,
     }
     return json.dumps(envelope)
@@ -166,7 +167,7 @@ def send(
     ] = None,
     count: Annotated[int, typer.Option(help="Number of messages to send")] = 10,
     start_id: Annotated[int, typer.Option(help="Starting sequence_id value")] = 1,
-    batch_size: Annotated[int, typer.Option(help="Max messages per batch before sending")] = 100,
+    batch_size: Annotated[int, typer.Option(help="Max messages per batch before sending")] = 100000,
     interval_seconds: Annotated[
         float,
         typer.Option(help="Optional delay between messages in seconds"),

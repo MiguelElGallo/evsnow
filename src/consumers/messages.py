@@ -48,7 +48,15 @@ def _convert_bytes_to_str(obj: Any) -> Any:
 class EventHubMessage:
     """Wrapper for EventHub message with additional metadata."""
 
-    def __init__(self, event_data: EventData, partition_id: str, sequence_number: int):
+    def __init__(
+        self,
+        event_data: EventData,
+        partition_id: str,
+        sequence_number: int,
+        eventhub_namespace: str | None = None,
+        eventhub_name: str | None = None,
+        consumer_group: str | None = None,
+    ):
         self.event_data = event_data
         self.partition_id = partition_id
         self.sequence_number = sequence_number
@@ -58,26 +66,46 @@ class EventHubMessage:
         self.system_properties = event_data.system_properties
         self.partition_context: PartitionContext | None = None
 
+        # EventHub metadata (available from config)
+        self.eventhub_namespace = eventhub_namespace
+        self.eventhub_name = eventhub_name
+        self.consumer_group = consumer_group
+
+        # Common EventData fields
+        self.offset = getattr(event_data, "offset", None)
+        self.content_type = getattr(event_data, "content_type", None)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert message to dictionary for Snowflake ingestion."""
-        properties_json = None
-        if self.properties:
+        properties_json: str | None = None
+        if self.properties is not None:
             clean_props = _convert_bytes_to_str(self.properties)
-            properties_json = json.dumps(clean_props, cls=BytesEncoder)
+            properties_json = json.dumps(clean_props or {}, cls=BytesEncoder)
 
-        system_props_json = None
-        if self.system_properties:
+        system_props_json: str | None = None
+        if self.system_properties is not None:
             clean_sys_props = _convert_bytes_to_str(dict(self.system_properties))
-            system_props_json = json.dumps(clean_sys_props, cls=BytesEncoder)
+            system_props_json = json.dumps(clean_sys_props or {}, cls=BytesEncoder)
+
+        timestamp_ns = time.time_ns()
 
         result = {
-            "event_body": self.body,
+            # Iceberg / MATCH_BY_COLUMN_NAME compatible column names
+            "timestamp_ns": timestamp_ns,
+            "eventhub_namespace": self.eventhub_namespace,
+            "eventhub_name": self.eventhub_name,
+            "consumer_group": self.consumer_group,
             "partition_id": self.partition_id,
+            "offset": self.offset,
             "sequence_number": self.sequence_number,
             "enqueued_time": self.enqueued_time.isoformat() if self.enqueued_time else None,
+            "content_type": self.content_type,
+            "body": self.body,
             "properties": properties_json,
             "system_properties": system_props_json,
             "ingestion_timestamp": datetime.now(UTC).isoformat(),
+            # Backwards-compatible name (older table schemas / tests)
+            "event_body": self.body,
         }
 
         for key, value in result.items():
