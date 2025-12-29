@@ -858,7 +858,7 @@ class TestPipelineOrchestrator:
             signal_handlers[sig] = (handler, args)
 
         loop.add_signal_handler.side_effect = capture_handler
-        mock_exit = mocker.patch("sys.exit", side_effect=SystemExit(1))
+        mock_exit = mocker.patch("pipeline.orchestrator.os._exit", side_effect=SystemExit(1))
 
         orchestrator.setup_signal_handlers(loop)
 

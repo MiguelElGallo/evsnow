@@ -14,6 +14,7 @@ The orchestrator:
 
 import asyncio
 import logging
+import os
 import signal
 from datetime import UTC, datetime
 from typing import Any
@@ -321,6 +322,7 @@ class PipelineOrchestrator:
         self.mappings: list[PipelineMapping] = []
         self.running = False
         self.shutdown_requested = False  # Flag to track shutdown requests
+        self.shutdown_task: asyncio.Task | None = None
         self.tasks: list[asyncio.Task] = []
 
         # Statistics
@@ -416,7 +418,34 @@ class PipelineOrchestrator:
 
         # Now wait for all tasks to complete
         if self.tasks:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+            pending_tasks = [task for task in self.tasks if not task.done()]
+            if pending_tasks:
+                logger.info(
+                    "⏳ Waiting for %d mapping tasks to finish...",
+                    len(pending_tasks),
+                )
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending_tasks, return_exceptions=True),
+                        timeout=5,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Timed out waiting for mapping tasks; cancelling pending tasks..."
+                    )
+                    for task in pending_tasks:
+                        if not task.done():
+                            task.cancel()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*pending_tasks, return_exceptions=True),
+                            timeout=5,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "Mapping tasks did not cancel; forcing exit to avoid hang"
+                        )
+                        os._exit(1)
 
         # Stop all mappings
         for mapping in self.mappings:
@@ -492,9 +521,7 @@ class PipelineOrchestrator:
                     f"Received signal {sig.name} ({sig.value}) again - forcing immediate shutdown"
                 )
                 # Force exit on second signal
-                import sys
-
-                sys.exit(1)
+                os._exit(1)
 
             logger.info(
                 f"Received signal {sig.name} ({sig.value}), initiating graceful shutdown..."
@@ -503,7 +530,8 @@ class PipelineOrchestrator:
 
             # Stop the orchestrator gracefully - DON'T cancel tasks
             # The stop() method will handle proper shutdown of all components
-            loop.create_task(self.stop())
+            if self.shutdown_task is None or self.shutdown_task.done():
+                self.shutdown_task = loop.create_task(self.stop())
 
         # Use asyncio's add_signal_handler for proper async signal handling
         for sig in (signal.SIGINT, signal.SIGTERM):

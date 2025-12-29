@@ -4,7 +4,6 @@ Tests for Snowflake connection and checkpoint utilities.
 This module tests the Snowflake utilities including:
 - Private key loading and encryption handling
 - Connection management and caching
-- Snowpark session creation
 - Connection testing and validation
 - Control table creation
 - Checkpoint operations (insert/merge/retrieve)
@@ -110,10 +109,8 @@ def snowflake_config(unencrypted_key_file):
 def clear_connection_cache():
     """Clear connection cache before each test."""
     snowflake_utils._connection_cache.clear()
-    snowflake_utils._session_cache.clear()
     yield
     snowflake_utils._connection_cache.clear()
-    snowflake_utils._session_cache.clear()
 
 
 # ============================================================================
@@ -340,14 +337,12 @@ class TestCacheManagement:
         # Arrange
         mock_conn1 = MagicMock()
         mock_conn2 = MagicMock()
-        mock_session1 = MagicMock()
 
         cache_key1 = ("account1", "user1", "db1", "schema1", "wh1", "role1")
         cache_key2 = ("account2", "user2", "db2", "schema2", "wh2", "role2")
 
         snowflake_utils._connection_cache[cache_key1] = mock_conn1
         snowflake_utils._connection_cache[cache_key2] = mock_conn2
-        snowflake_utils._session_cache[cache_key1] = mock_session1
 
         # Act
         snowflake_utils.close_all_cached_connections()
@@ -355,9 +350,7 @@ class TestCacheManagement:
         # Assert
         mock_conn1.close.assert_called_once()
         mock_conn2.close.assert_called_once()
-        mock_session1.close.assert_called_once()
         assert len(snowflake_utils._connection_cache) == 0
-        assert len(snowflake_utils._session_cache) == 0
 
     def test_close_all_cached_connections_handles_close_errors(self):
         """Test that close_all_cached_connections handles errors gracefully."""
@@ -413,84 +406,6 @@ class TestCacheManagement:
 
         # Assert
         assert result is False
-
-
-# ============================================================================
-# Test Snowpark Sessions
-# ============================================================================
-
-
-class TestSnowparkSessions:
-    """Tests for Snowpark session creation."""
-
-    @patch("utils.snowflake.SNOWPARK_AVAILABLE", True)
-    @patch("utils.snowflake.Session")
-    def test_get_snowpark_session_creates_session_successfully(
-        self, mock_session_class, snowflake_config
-    ):
-        """Test that get_snowpark_session creates a Snowpark session."""
-        # Arrange
-        mock_session = MagicMock()
-        mock_builder = MagicMock()
-        mock_builder.configs.return_value.create.return_value = mock_session
-        mock_session_class.builder = mock_builder
-
-        mock_sql_result = MagicMock()
-        mock_session.sql.return_value = mock_sql_result
-
-        # Act
-        session = snowflake_utils.get_snowpark_session(snowflake_config)
-
-        # Assert
-        assert session is mock_session
-        mock_builder.configs.assert_called_once()
-
-        # Verify warehouse activation
-        mock_session.sql.assert_called_once_with("USE WAREHOUSE TEST_WH")
-        mock_sql_result.collect.assert_called_once()
-
-    @patch("utils.snowflake.SNOWPARK_AVAILABLE", False)
-    def test_get_snowpark_session_raises_error_when_snowpark_not_available(self, snowflake_config):
-        """Test that get_snowpark_session raises ImportError when snowpark is not installed."""
-        # Act & Assert
-        with pytest.raises(ImportError, match="snowflake-snowpark is not installed"):
-            snowflake_utils.get_snowpark_session(snowflake_config)
-
-    @patch("utils.snowflake.SNOWPARK_AVAILABLE", True)
-    @patch("utils.snowflake.Session")
-    def test_get_snowpark_session_handles_creation_error(
-        self, mock_session_class, snowflake_config
-    ):
-        """Test that get_snowpark_session propagates session creation errors."""
-        # Arrange
-        mock_builder = MagicMock()
-        mock_builder.configs.return_value.create.side_effect = Exception("Session creation failed")
-        mock_session_class.builder = mock_builder
-
-        # Act & Assert
-        with pytest.raises(Exception, match="Session creation failed"):
-            snowflake_utils.get_snowpark_session(snowflake_config)
-
-    @patch("utils.snowflake.SNOWPARK_AVAILABLE", True)
-    @patch("utils.snowflake.Session")
-    def test_get_snowpark_session_includes_role_when_set(
-        self, mock_session_class, snowflake_config
-    ):
-        """Test that get_snowpark_session includes role in connection parameters."""
-        # Arrange
-        mock_session = MagicMock()
-        mock_builder = MagicMock()
-        mock_builder.configs.return_value.create.return_value = mock_session
-        mock_session_class.builder = mock_builder
-        mock_session.sql.return_value.collect.return_value = None
-
-        # Act
-        snowflake_utils.get_snowpark_session(snowflake_config)
-
-        # Assert
-        call_args = mock_builder.configs.call_args[0][0]
-        assert "role" in call_args
-        assert call_args["role"] == "TEST_ROLE"
 
 
 # ============================================================================
@@ -910,15 +825,14 @@ class TestCheckpointOperations:
                 config=snowflake_config,
             )
 
-    @patch("utils.snowflake.get_snowpark_session")
+    @patch("utils.snowflake.get_connection")
     def test_get_partition_checkpoints_handles_query_error(
-        self, mock_get_session, snowflake_config
+        self, mock_get_connection, mock_snowflake_connection, mock_snowflake_cursor, snowflake_config
     ):
         """Test that get_partition_checkpoints propagates query errors."""
         # Arrange
-        mock_session = MagicMock()
-        mock_session.table.side_effect = Exception("Query failed")
-        mock_get_session.return_value = mock_session
+        mock_get_connection.return_value = mock_snowflake_connection
+        mock_snowflake_cursor.execute.side_effect = [None, Exception("Query failed")]
 
         # Act & Assert
         with pytest.raises(Exception, match="Query failed"):
@@ -931,4 +845,4 @@ class TestCheckpointOperations:
                 config=snowflake_config,
             )
 
-        mock_session.close.assert_called_once()
+        mock_snowflake_cursor.close.assert_called_once()

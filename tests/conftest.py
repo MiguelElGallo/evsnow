@@ -296,21 +296,6 @@ def mock_snowflake_connection(mocker):
 
 
 @pytest.fixture
-def mock_snowpark_session(mocker):
-    """Mock Snowpark session."""
-    mock_session = mocker.MagicMock()
-    mock_df = mocker.MagicMock()
-    mock_df.collect.return_value = []
-    mock_session.sql.return_value = mock_df
-    mock_session.table.return_value = mock_df
-    mock_session.close.return_value = None
-
-    mocker.patch("utils.snowflake.get_snowpark_session", return_value=mock_session)
-
-    return mock_session
-
-
-@pytest.fixture
 def mock_snowflake_streaming_client(mocker):
     """Mock Snowflake StreamingIngestClient (high-performance SDK)."""
     mock_client = mocker.MagicMock()
