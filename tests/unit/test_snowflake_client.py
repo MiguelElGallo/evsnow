@@ -538,11 +538,11 @@ class TestSnowflakeHighPerformanceStreamingClient:
         client.streaming_client = mock_client
 
         # Act
-        channel = client._get_or_create_channel("test-channel", "partition_0")
+        channel = client._get_or_create_channel("test-channel")
 
         # Assert
         assert channel == mock_channel
-        assert "test-channel_partition_partition_0" in client.channels
+        assert "test-channel" in client.channels
         assert client.stats["channels_created"] == 1
         mock_client.open_channel.assert_called_once()
 
@@ -563,12 +563,12 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Set up mock streaming client and existing channel
         mock_client = MagicMock()
         mock_channel = MagicMock()
-        channel_name = "test-channel_partition_partition_0"
+        channel_name = "test-channel"
         client.channels[channel_name] = mock_channel
         client.streaming_client = mock_client
 
         # Act
-        channel = client._get_or_create_channel("test-channel", "partition_0")
+        channel = client._get_or_create_channel("test-channel")
 
         # Assert
         assert channel == mock_channel
@@ -590,7 +590,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Act & Assert
         with pytest.raises(RuntimeError, match="StreamingIngestClient not initialized"):
-            client._get_or_create_channel("test-channel", "partition_0")
+            client._get_or_create_channel("test-channel")
 
     def test_get_or_create_channel_handles_creation_error(
         self,
@@ -612,7 +612,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Act & Assert
         with pytest.raises(Exception, match="Channel creation failed"):
-            client._get_or_create_channel("test-channel", "partition_0")
+            client._get_or_create_channel("test-channel")
 
     # ========================================================================
     # Data Ingestion Tests

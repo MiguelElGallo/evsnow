@@ -16,7 +16,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
@@ -130,7 +130,21 @@ class EventHubAsyncConsumer:
     def _event_body_to_utf8(event: EventData) -> str:
         """Decode Event Hub message body as UTF-8 (replacement for invalid sequences)."""
         try:
-            body_bytes = b"".join(event.body)
+            body = event.body
+            if isinstance(body, (bytes, bytearray, memoryview)):
+                body_bytes = bytes(body)
+            elif isinstance(body, str):
+                body_bytes = body.encode("utf-8", errors="replace")
+            elif isinstance(body, Iterable):
+                chunks: list[bytes] = []
+                for chunk in body:
+                    if isinstance(chunk, (bytes, bytearray, memoryview)):
+                        chunks.append(bytes(chunk))
+                    else:
+                        chunks.append(str(chunk).encode("utf-8", errors="replace"))
+                body_bytes = b"".join(chunks)
+            else:
+                body_bytes = str(body).encode("utf-8", errors="replace")
         except Exception:
             # Fallback: some mocks or SDK versions may expose `body` differently
             try:
@@ -159,10 +173,7 @@ class EventHubAsyncConsumer:
         if isinstance(value, dict):
             converted: dict[str, Any] = {}
             for k, v in value.items():
-                if isinstance(k, bytes):
-                    key = k.decode("utf-8", errors="replace")
-                else:
-                    key = str(k)
+                key = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
                 converted[key] = EventHubAsyncConsumer._to_jsonable(v)
             return converted
 

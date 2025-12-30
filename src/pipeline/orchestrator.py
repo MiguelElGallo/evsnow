@@ -435,7 +435,7 @@ class PipelineOrchestrator:
                         asyncio.gather(*pending_tasks, return_exceptions=True),
                         timeout=5,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(
                         "Timed out waiting for mapping tasks; cancelling pending tasks..."
                     )
@@ -447,7 +447,7 @@ class PipelineOrchestrator:
                             asyncio.gather(*pending_tasks, return_exceptions=True),
                             timeout=5,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.error(
                             "Mapping tasks did not cancel; forcing exit to avoid hang"
                         )

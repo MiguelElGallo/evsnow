@@ -241,6 +241,9 @@ class EvSnowConfig(BaseSettings):
                     schema_name=settings["schema"],
                     table_name=settings["table"],
                     batch_size=int(settings.get("batch", "1000")),
+                    channel_status_interval_seconds=int(
+                        settings.get("channel_status_interval_seconds", "60")
+                    ),
                 )
 
         # Parse mappings - look for explicit mapping lines in env file
