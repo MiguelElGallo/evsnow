@@ -12,6 +12,7 @@ Best Practices Incorporated:
 
 import os
 import re
+import socket
 from typing import Any
 
 from pydantic import Field, field_validator, model_validator
@@ -39,6 +40,7 @@ class EvSnowConfig(BaseSettings):
 
     Environment Variables:
     - EVENTHUB_NAMESPACE: Event Hub namespace
+    - EVSNOW_CLIENT_ID: Optional stable client identifier for channel naming
     - EVENTHUBNAME_{N}: Event Hub names (where N is a number)
     - SNOWFLAKE_{N}_DATABASE: Snowflake database name
     - SNOWFLAKE_{N}_SCHEMA: Snowflake schema name
@@ -59,6 +61,11 @@ class EvSnowConfig(BaseSettings):
     # Environment and deployment settings
     environment: str = Field("development", description="Deployment environment")
     region: str = Field("default", description="Deployment region")
+    client_id: str = Field(
+        default_factory=socket.gethostname,
+        validation_alias="EVSNOW_CLIENT_ID",
+        description="Stable identifier for this EvSnow instance (used in channel naming).",
+    )
 
     # Performance settings
     max_concurrent_channels: int = Field(50, description="Maximum concurrent channels")
@@ -277,6 +284,14 @@ class EvSnowConfig(BaseSettings):
             raise ValueError("Event Hub namespace must end with .servicebus.windows.net")
         return v
 
+    @field_validator("client_id")
+    @classmethod
+    def normalize_client_id(cls, v: str) -> str:
+        """Normalize client identifier for safe channel naming."""
+        cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", v.strip())
+        cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+        return cleaned or "client"
+
     @model_validator(mode="after")
     def validate_mappings_exist(self):
         """Validate that all mappings reference existing configurations."""
@@ -321,7 +336,25 @@ class EvSnowConfig(BaseSettings):
         if not event_hub_config:
             raise ValueError(f"No Event Hub config found: {event_hub_key}")
 
-        return f"{event_hub_config.name}-{self.environment}-{self.region}-{client_id}"
+        values = {
+            "event_hub": self._sanitize_channel_segment(event_hub_config.name),
+            "env": self._sanitize_channel_segment(self.environment),
+            "region": self._sanitize_channel_segment(self.region),
+            "client_id": self._sanitize_channel_segment(client_id),
+        }
+
+        try:
+            return mapping.channel_name_pattern.format(**values)
+        except KeyError as exc:
+            raise ValueError(
+                "channel_name_pattern must use {event_hub}, {env}, {region}, {client_id}"
+            ) from exc
+
+    @staticmethod
+    def _sanitize_channel_segment(value: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", value.strip())
+        cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+        return cleaned or "unknown"
 
     def validate_configuration(self) -> dict[str, Any]:
         """

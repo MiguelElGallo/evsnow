@@ -57,6 +57,11 @@ class PipelineMapping:
         if not self.eventhub_config or not self.snowflake_config:
             raise ValueError(f"Invalid mapping configuration: {mapping_config}")
 
+        self.channel_name = pipeline_config.generate_channel_name(
+            mapping_config.event_hub_key,
+            pipeline_config.client_id,
+        )
+
         # Initialize components
         self.eventhub_consumer: EventHubAsyncConsumer | None = None
         self.snowflake_client: SnowflakeStreamingClient | None = None
@@ -93,6 +98,7 @@ class PipelineMapping:
             self.snowflake_client = create_snowflake_streaming_client(
                 snowflake_config=self.snowflake_config,
                 connection_config=self.pipeline_config.snowflake_connection,
+                client_name_suffix=self.pipeline_config.client_id,
                 retry_manager=self.retry_manager,
             )
             self.snowflake_client.start()
@@ -216,7 +222,7 @@ class PipelineMapping:
                     logger.debug(f"Sample message: {str(data_batch[0])[:200]}...")
 
                 # Ingest data with channel name (for logging/tracking)
-                channel_name = f"{self.eventhub_config.namespace}/{self.eventhub_config.name}"
+                channel_name = self.channel_name
                 span.set_attribute("channel_name", channel_name)
 
                 # Get partition_id from first message for Snowflake channel management
