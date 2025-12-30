@@ -91,7 +91,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
 
         For the NEW high-performance architecture (v1.0.2+), the profile requires:
         - user: Snowflake username
-        - account: Account identifier (e.g., "KPWHYJX-YU88540")
+        - account: Account identifier (e.g., "ZZZZUUUU-YU88540")
         - url: Full Snowflake URL with port
         - private_key_file: Path to PEM private key file (we write temp file in start())
         - role: Role to use (optional)
@@ -299,14 +299,13 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             # For now, we assume the table exists
             logfire.info("Target table assumed to exist", table=self.snowflake_config.table_name)
 
-    def _get_or_create_channel(self, channel_name: str, partition_id: str) -> Any:
+    def _get_or_create_channel(self, partition_id: str) -> Any:
         """
         Get or create a channel for the specified partition.
 
         Snowflake Streaming API recommends one channel per partition for optimal parallelism.
 
         Args:
-            channel_name: Base channel name for deterministic identification
             partition_id: EventHub partition ID
 
         Returns:
@@ -318,7 +317,9 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         if self.streaming_client is None:
             raise RuntimeError("StreamingIngestClient not initialized. Call start() first.")
 
-        channel_name = f"{channel_name}_partition_{partition_id}"
+        channel_name = (
+            f"{self.snowflake_config.table_name}_partition_{partition_id}_{self.client_name_suffix}"
+        )
 
         # Check if channel already exists
         if channel_name in self.channels:
@@ -401,7 +402,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             )
 
             # Get or create channel for this partition
-            channel = self._get_or_create_channel(channel_name, partition_id)
+            channel = self._get_or_create_channel(partition_id)
 
             if channel is None:
                 raise RuntimeError(
