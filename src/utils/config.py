@@ -347,7 +347,8 @@ class EvSnowConfig(BaseSettings):
         }
 
         try:
-            return mapping.channel_name_pattern.format(**values)
+            pattern = str(mapping.channel_name_pattern)
+            return pattern.format(**values)
         except KeyError as exc:
             raise ValueError(
                 "channel_name_pattern must use {event_hub}, {env}, {region}, {client_id}"
