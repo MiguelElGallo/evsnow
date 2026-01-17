@@ -1,9 +1,15 @@
 # evsnow
 
+[![EvSnow video](media/videoevsnow.png)](https://www.youtube.com/watch?v=zX3K-rfNZIU)
+
+Video: Click the image above for a walkthrough of this repo.
+
 [![Tests](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml)
 [![CI/CD Pipeline](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml)
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
+
+Now supports streaming directly to Iceberg tables.
 
 EvSnow can also stream-ingest into **Apache Iceberg tables in Snowflake** (Snowflake-managed Iceberg) using **Snowpipe Streaming**—so you can land Event Hub events directly into Iceberg-backed storage while keeping the same pipeline, checkpointing, and operational workflow.
 
