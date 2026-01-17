@@ -737,6 +737,48 @@ class TestPipelineOrchestrator:
         # Assert
         assert not orchestrator.running
 
+    @pytest.mark.asyncio
+    async def test_stop_cancels_pending_tasks_after_timeout(
+        self,
+        complete_pipeline_config,
+        mock_eventhub_consumer,
+        mock_snowflake_client,
+        mock_logfire,
+        mocker,
+    ):
+        """Test that stop() cancels pending tasks after initial timeout."""
+        orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
+        orchestrator.start()
+
+        for mapping in orchestrator.mappings:
+            mapping.stop = AsyncMock()
+
+        mock_task = mocker.MagicMock()
+        mock_task.done.return_value = False
+        orchestrator.tasks = [mock_task]
+
+        async def fake_gather(*_args, **_kwargs):
+            return None
+
+        wait_calls = {"count": 0}
+
+        async def fake_wait_for(awaitable, *_args, **_kwargs):
+            wait_calls["count"] += 1
+            if wait_calls["count"] == 1:
+                if hasattr(awaitable, "cancel"):
+                    awaitable.cancel()
+                raise TimeoutError
+            return None
+
+        mocker.patch("asyncio.gather", side_effect=fake_gather)
+        mocker.patch("asyncio.wait_for", side_effect=fake_wait_for)
+        mock_exit = mocker.patch("os._exit")
+
+        await orchestrator.stop()
+
+        assert mock_task.cancel.called
+        mock_exit.assert_not_called()
+
     def test_get_stats_aggregates_mapping_stats(
         self, complete_pipeline_config, mock_eventhub_consumer, mock_snowflake_client, mock_logfire
     ):

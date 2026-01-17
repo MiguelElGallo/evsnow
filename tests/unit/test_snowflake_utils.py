@@ -68,6 +68,23 @@ def encrypted_key_file(tmp_path, sample_private_key):
     return str(key_file), "test_password"
 
 
+def test_temporary_private_key_file_creates_and_cleans():
+    key_pem = "TEST-KEY"
+    with snowflake_utils.temporary_private_key_file(key_pem) as path:
+        assert Path(path).exists()
+        assert Path(path).read_text(encoding="utf-8") == key_pem
+    assert not Path(path).exists()
+
+
+def test_temporary_profile_file_creates_and_cleans():
+    profile = {"account": "test-account", "user": "tester"}
+    with snowflake_utils.temporary_profile_file(profile) as path:
+        assert Path(path).exists()
+        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert loaded == profile
+    assert not Path(path).exists()
+
+
 @pytest.fixture
 def mock_snowflake_cursor():
     """Create a mock Snowflake cursor."""

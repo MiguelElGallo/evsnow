@@ -110,6 +110,38 @@ class TestExceptionAnalyzer:
         assert os.environ.get("OPENAI_API_KEY") == "test-key"
 
     @patch("utils.smart_retry.Agent")
+    def test_initialize_with_azure_provider_uses_openai_chat_model(
+        self, mock_agent_class, monkeypatch
+    ):
+        """Test initializing analyzer with Azure provider."""
+        import types
+
+        chat_model_calls: list[tuple[tuple, dict]] = []
+
+        class DummyChatModel:
+            def __init__(self, *args, **kwargs):
+                chat_model_calls.append((args, kwargs))
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "pydantic_ai.models.openai",
+            types.SimpleNamespace(OpenAIChatModel=DummyChatModel),
+        )
+
+        analyzer = ExceptionAnalyzer(
+            llm_provider="azure",
+            llm_model="gpt-4o-mini",
+            llm_api_key="test-key",
+            llm_endpoint="https://example.openai.azure.com/",
+        )
+
+        assert chat_model_calls == [((), {"model_name": "gpt-4o-mini", "provider": "azure"})]
+        mock_agent_class.assert_called_once()
+        assert analyzer.agent is not None
+        assert os.environ["AZURE_OPENAI_ENDPOINT"] == "https://example.openai.azure.com"
+        assert os.environ["AZURE_OPENAI_API_VERSION"] == "2024-08-01-preview"
+
+    @patch("utils.smart_retry.Agent")
     def test_initialize_with_anthropic_provider(self, mock_agent_class):
         """Test initializing analyzer with Anthropic provider."""
         analyzer = ExceptionAnalyzer(

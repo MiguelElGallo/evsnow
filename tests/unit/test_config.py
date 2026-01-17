@@ -66,6 +66,27 @@ class TestSnowflakeConnectionConfig:
 
         assert "Private key file not found" in str(exc_info.value)
 
+    def test_validate_private_key_file_not_readable(self, monkeypatch, tmp_path):
+        """Test that validation fails when private key file is not readable."""
+        key_file = tmp_path / "test_key.pem"
+        key_file.write_text("test key")
+        key_file.chmod(0o000)
+
+        monkeypatch.setenv("SNOWFLAKE_ACCOUNT", "test-account")
+        monkeypatch.setenv("SNOWFLAKE_USER", "test_user")
+        monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_FILE", str(key_file))
+        monkeypatch.setenv("SNOWFLAKE_WAREHOUSE", "test_warehouse")
+        monkeypatch.setenv("SNOWFLAKE_DATABASE", "test_db")
+        monkeypatch.setenv("SNOWFLAKE_SCHEMA_NAME", "test_schema")
+        monkeypatch.setenv("SNOWFLAKE_PIPE_NAME", "TEST_PIPE")
+
+        try:
+            with pytest.raises(ValidationError) as exc_info:
+                SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            assert "not readable" in str(exc_info.value)
+        finally:
+            key_file.chmod(0o600)
+
     def test_validate_account_format_valid(self, monkeypatch, tmp_path):
         """Test that valid account formats are accepted."""
         key_file = tmp_path / "test_key.pem"
@@ -497,6 +518,18 @@ class TestEventHubConfig:
         assert config.checkpoint_interval_seconds == 300
         assert config.max_message_batch_size == 1000
         assert config.batch_timeout_seconds == 300
+
+    def test_validate_starting_position_invalid(self):
+        """Test that invalid starting positions are rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            EventHubConfig(
+                name="test-hub",
+                namespace="test.servicebus.windows.net",
+                consumer_group="$Default",
+                starting_position_on_no_checkpoint="invalid",
+            )
+
+        assert "Invalid starting_position" in str(exc_info.value)
 
     def test_use_connection_string_default(self):
         """Test that use_connection_string defaults to False."""

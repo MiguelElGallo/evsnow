@@ -6,9 +6,11 @@ require real Azure or Snowflake connectivity.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
+from datetime import UTC, datetime
 
 import pytest
 
@@ -106,3 +108,60 @@ def test_capture_writer_normalizes_bytes_keys(sample_eventhub_config, tmp_path):
     assert loaded["properties"]["k"] == "v"
     assert loaded["properties"]["nested"]["inner"] == "x"
     assert loaded["system_properties"]["sys"] == 1
+
+
+@pytest.mark.unit
+def test_event_body_to_utf8_handles_iterable_and_fallback():
+    class DummyEvent:
+        def __init__(self, body):
+            self.body = body
+
+    event = DummyEvent([b"hello", " ", b"world"])
+    assert EventHubAsyncConsumer._event_body_to_utf8(event) == "hello world"
+
+    class BadEvent:
+        @property
+        def body(self):
+            raise ValueError("boom")
+
+    assert EventHubAsyncConsumer._event_body_to_utf8(BadEvent()) == ""
+
+
+@pytest.mark.unit
+def test_to_jsonable_converts_sets_and_unknown(sample_eventhub_config):
+    converted = EventHubAsyncConsumer._to_jsonable({b"a"})
+    assert converted == ["a"]
+
+    class Custom:
+        def __str__(self):
+            return "custom"
+
+    assert EventHubAsyncConsumer._to_jsonable(Custom()) == "custom"
+
+
+@pytest.mark.unit
+def test_enqueue_capture_queue_full_increments_drop(sample_eventhub_config):
+    consumer = _make_consumer(sample_eventhub_config)
+    consumer.capture_messages = True
+    consumer._capture_queue = asyncio.Queue(maxsize=1)
+    consumer._capture_queue.put_nowait((0, {}))
+
+    class DummyEvent:
+        def __init__(self):
+            self.offset = "1"
+            self.sequence_number = 2
+            self.enqueued_time = datetime.now(UTC)
+            self.properties = {b"k": b"v"}
+            self.system_properties = {"sys": "ok"}
+            self.content_type = "application/json"
+            self.body = b"payload"
+
+    consumer._enqueue_capture("0", DummyEvent())
+
+    assert consumer._capture_dropped_messages == 1
+
+
+@pytest.mark.asyncio
+async def test_capture_writer_loop_returns_when_queue_none(sample_eventhub_config):
+    consumer = _make_consumer(sample_eventhub_config)
+    await consumer._capture_writer_loop()

@@ -136,3 +136,70 @@ def test_initialize_logfire_enabled_configures_without_console(monkeypatch):
     assert configure_calls[0]["service_name"] == "evsnow-test"
     assert configure_calls[0]["send_to_logfire"] is True
     assert configure_calls[0]["console"] is False
+
+
+def test_load_dotenv_if_present_ignores_missing_dotenv(monkeypatch, tmp_path):
+    """Missing python-dotenv should not raise."""
+    from utils import cli_bootstrap
+    import builtins
+
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "dotenv":
+            raise ImportError("missing")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.chdir(tmp_path)
+
+    cli_bootstrap.load_dotenv_if_present(caller_file=str(tmp_path / "caller.py"))
+
+
+def test_initialize_logfire_enabled_with_console_adds_handler(monkeypatch):
+    """When console logging is enabled, it should add a Logfire logging handler."""
+    from utils import cli_bootstrap
+
+    configure_calls: list[dict] = []
+
+    def fake_configure(**kwargs):
+        configure_calls.append(kwargs)
+
+    console_calls: list[dict] = []
+
+    def fake_console_options(**kwargs):
+        console_calls.append(kwargs)
+        return {"console": True}
+
+    class DummyHandler(logging.Handler):
+        def emit(self, record):
+            return None
+
+    monkeypatch.setattr(cli_bootstrap.logfire, "configure", fake_configure)
+    monkeypatch.setattr(cli_bootstrap.logfire, "ConsoleOptions", fake_console_options)
+    monkeypatch.setattr(cli_bootstrap.logfire, "LogfireLoggingHandler", DummyHandler)
+
+    config = SimpleNamespace(
+        enabled=True,
+        token="test-token",
+        service_name="evsnow-test",
+        environment="test",
+        send_to_logfire=False,
+        console_logging=True,
+        log_level="INFO",
+    )
+
+    logger = logging.getLogger("test")
+    root_logger = logging.getLogger()
+    before_handlers = len(root_logger.handlers)
+
+    cli_bootstrap.initialize_logfire(logfire_config=config, logger=logger)
+
+    assert configure_calls
+    assert console_calls
+    assert configure_calls[0]["console"] == {"console": True}
+    assert len(root_logger.handlers) == before_handlers + 1
+
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, DummyHandler):
+            root_logger.removeHandler(handler)

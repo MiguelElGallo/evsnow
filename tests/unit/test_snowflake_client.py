@@ -106,6 +106,33 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Act & Assert
         assert not client.is_started
 
+    def test_maybe_refresh_client_sets_last_refresh_when_missing(
+        self,
+        sample_snowflake_config,
+        sample_snowflake_connection_config,
+        mocker,
+    ):
+        """Sets last refresh timestamp when none is recorded yet."""
+        client = SnowflakeHighPerformanceStreamingClient(
+            snowflake_config=sample_snowflake_config,
+            connection_config=sample_snowflake_connection_config,
+            client_name_suffix="test-123",
+        )
+
+        client.streaming_client = mocker.MagicMock()
+        client.stats["client_created_at"] = None
+        client._last_client_refresh_at = None
+        client.snowflake_config.client_refresh_interval_seconds = 300
+
+        client.stop = mocker.MagicMock()
+        client.start = mocker.MagicMock()
+
+        client._maybe_refresh_client()
+
+        assert client._last_client_refresh_at is not None
+        client.stop.assert_not_called()
+        client.start.assert_not_called()
+
     # ========================================================================
     # Connection Profile Building Tests
     # ========================================================================

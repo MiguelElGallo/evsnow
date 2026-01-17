@@ -13,6 +13,7 @@ Based on TESTING_STANDARDS.md - all tests use mocks for external dependencies.
 
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, UTC, timedelta
 from typing import Any
@@ -179,6 +180,21 @@ class TestEventHubMessage:
         assert result["enqueued_time"] is None
         assert result["properties"] is None
         assert result["system_properties"] is None
+
+    def test_to_dict_logs_bytes_in_result(self, caplog):
+        """Logs an error if bytes leak into the output payload."""
+        mock_event = MagicMock()
+        mock_event.body_as_str.return_value = b"bytes-body"
+        mock_event.enqueued_time = None
+        mock_event.properties = None
+        mock_event.system_properties = None
+
+        message = EventHubMessage(event_data=mock_event, partition_id="0", sequence_number=1)
+
+        caplog.set_level(logging.ERROR)
+        message.to_dict()
+
+        assert "FOUND BYTES" in caplog.text
 
     def test_to_dict_handles_none_enqueued_time(self):
         """Test that None enqueued_time is handled."""
