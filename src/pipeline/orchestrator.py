@@ -448,9 +448,7 @@ class PipelineOrchestrator:
                             timeout=5,
                         )
                     except TimeoutError:
-                        logger.error(
-                            "Mapping tasks did not cancel; forcing exit to avoid hang"
-                        )
+                        logger.error("Mapping tasks did not cancel; forcing exit to avoid hang")
                         os._exit(1)
 
         # Stop all mappings
