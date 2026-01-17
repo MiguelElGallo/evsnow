@@ -96,10 +96,10 @@ class ExceptionAnalyzer:
             os.environ["AZURE_OPENAI_ENDPOINT"] = base_url
             os.environ["AZURE_OPENAI_API_VERSION"] = "2024-08-01-preview"
 
-            # Use OpenAIModel with 'azure' provider string
-            from pydantic_ai.models.openai import OpenAIModel
+            # Use OpenAIChatModel with 'azure' provider string
+            from pydantic_ai.models.openai import OpenAIChatModel
 
-            model = OpenAIModel(
+            model = OpenAIChatModel(
                 model_name=llm_model,
                 provider="azure",  # Use built-in Azure provider
             )
@@ -264,7 +264,7 @@ prefer NOT to retry to avoid wasting resources on hopeless operations.
                 output_type=RetryDecision,  # Specify output type at runtime
             )
             # Type assertion: output_type=RetryDecision ensures this is RetryDecision
-            decision: RetryDecision = result.output  # type: ignore[assignment]
+            decision: RetryDecision = result.output
 
             span.set_attribute("decision", decision.should_retry)
             span.set_attribute("confidence", decision.confidence)

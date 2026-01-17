@@ -166,7 +166,7 @@ def get_connection(
         Exception: If connection fails
     """
     if config is None:
-        config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+        config = SnowflakeConnectionConfig()
 
     # Check cache first
     if use_cache:
@@ -233,7 +233,7 @@ def check_connection(config: SnowflakeConnectionConfig | None = None) -> bool:
     """
     try:
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         logger.info(f"Testing connection to Snowflake account: {config.account}")
 
@@ -324,7 +324,7 @@ def create_control_table(
     """
     try:
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         table_type = "HYBRID TABLE" if use_hybrid_table else "TABLE"
         logger.info(
@@ -443,7 +443,7 @@ def insert_partition_checkpoint(
     try:
         # Load config if not provided
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         # Get cached connection (don't close it!)
         conn = get_connection(config, use_cache=True)
@@ -584,7 +584,7 @@ def get_partition_checkpoints(
     try:
         # Load config if not provided
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         # Determine control table location (where checkpoints are stored)
         actual_control_db = control_db or config.database

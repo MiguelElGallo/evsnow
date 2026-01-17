@@ -22,6 +22,7 @@ class MockSnowflakeConfig:
         self.max_retry_attempts = kwargs.get("max_retry_attempts", 3)
         self.retry_delay_seconds = kwargs.get("retry_delay_seconds", 5)
         self.connection_timeout_seconds = kwargs.get("connection_timeout_seconds", 30)
+        self.client_refresh_interval_seconds = kwargs.get("client_refresh_interval_seconds", 300)
 
     def model_dump(self):
         """Mock model_dump for pydantic-like behavior."""
@@ -33,6 +34,7 @@ class MockSnowflakeConfig:
             "max_retry_attempts": self.max_retry_attempts,
             "retry_delay_seconds": self.retry_delay_seconds,
             "connection_timeout_seconds": self.connection_timeout_seconds,
+            "client_refresh_interval_seconds": self.client_refresh_interval_seconds,
         }
 
 
@@ -93,6 +95,7 @@ def sample_snowflake_config():
         max_retry_attempts=3,
         retry_delay_seconds=5,
         connection_timeout_seconds=30,
+        client_refresh_interval_seconds=300,
     )
 
 

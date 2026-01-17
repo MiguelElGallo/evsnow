@@ -82,9 +82,9 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         # Apply retry decorator to implementation if retry manager is provided
         if self.retry_manager:
             decorator = self.retry_manager.get_retry_decorator()
-            self._ingest_with_retry = decorator(self._ingest_batch_impl)  # type: ignore[method-assign]
+            self._ingest_with_retry = decorator(self._ingest_batch_impl)
         else:
-            self._ingest_with_retry = self._ingest_batch_impl  # type: ignore[assignment]
+            self._ingest_with_retry = self._ingest_batch_impl
 
     @property
     def is_started(self) -> bool:

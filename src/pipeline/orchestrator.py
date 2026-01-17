@@ -356,7 +356,7 @@ class PipelineOrchestrator:
                 mapping.start()
 
                 self.mappings.append(mapping)
-                mappings_count = int(self.stats.get("mappings_count", 0))  # type: ignore[arg-type]
+                mappings_count = int(self.stats.get("mappings_count", 0))
                 self.stats["mappings_count"] = mappings_count + 1
 
                 logger.info(f"✓ Initialized mapping: {mapping.stats['mapping_key']}")

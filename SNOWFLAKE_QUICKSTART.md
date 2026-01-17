@@ -141,7 +141,7 @@ GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
 | `USER STREAMEV` | `SNOWFLAKE_USER=STREAMEV` | User connecting to Snowflake |
 | `DATABASE CONTROL` | `TARGET_DB=CONTROL` | Stores checkpoint/control table |
 | `SCHEMA CONTROL.PUBLIC` | `TARGET_SCHEMA=PUBLIC` | Schema for control table |
-| `TABLE INGESTION_STATUS` | `TARGET_TABLE=INGESTION_STATUS` | Created automatically by EvSnow |
+| `TABLE INGESTION_STATUS` | `TARGET_TABLE=INGESTION_STATUS` | Create via the SQL in Step 4 |
 | `DATABASE INGESTION` | `SNOWFLAKE_DATABASE=INGESTION`, `SNOWFLAKE_1_DATABASE=INGESTION` | Stores ingested event data |
 | `SCHEMA INGESTION.PUBLIC` | `SNOWFLAKE_SCHEMA=PUBLIC`, `SNOWFLAKE_1_SCHEMA=PUBLIC` | Schema for event tables |
 | `WAREHOUSE COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE=compute_wh` | Warehouse for query execution |
@@ -154,11 +154,11 @@ Note: Snowflake identifiers are case-insensitive unless quoted; `COMPUTE_WH` and
 - Replace `COMPUTE_WH` with your warehouse name
 - Add additional databases/schemas if you're using different ones in your `.env`
 
-### Step 4: Create Target Table and PIPE Object (Required for High-Performance SDK)
+### Step 4: Create Target Tables and PIPE Object (Required for High-Performance SDK)
 
-Purpose: create the target table and the Snowpipe Streaming PIPE required by the high-performance SDK.
+Purpose: create the Iceberg target table, the control table, and the Snowpipe Streaming PIPE required by the high-performance SDK.
 
-Run this SQL to create the target table and PIPE:
+Run this SQL to create both tables and the PIPE:
 
 ```sql
 -- ============================================================================
@@ -167,22 +167,42 @@ Run this SQL to create the target table and PIPE:
 -- ============================================================================
 
 USE ROLE STREAM;  -- Or ACCOUNTADMIN if STREAM doesn't have create privileges yet
-USE DATABASE INGESTION;
-USE SCHEMA PUBLIC;
 USE WAREHOUSE COMPUTE_WH;
 
 -- ============================================================================
--- Create the target table for Event Hub data
--- Matches: SNOWFLAKE_1_TABLE=events_table in .env
+-- Create the Iceberg target table for Event Hub data
+-- Matches: SNOWFLAKE_1_TABLE=EVENTS_TABLE1 in .env
+-- Requires an existing external volume named EXVOL
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS EVENTS_TABLE (
-    EVENT_BODY VARIANT,
-    PARTITION_ID VARCHAR(50),
-    SEQUENCE_NUMBER NUMBER(38,0),
-    ENQUEUED_TIME TIMESTAMP_NTZ,
-    PROPERTIES VARIANT,
-    SYSTEM_PROPERTIES VARIANT,
-    INGESTION_TIMESTAMP TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 CLUSTER BY (ENQUEUED_TIME)(
+    EVENT_BODY STRING,
+    PARTITION_ID STRING,
+    SEQUENCE_NUMBER DECIMAL(38, 0),
+    OFFSET STRING,
+    ENQUEUED_TIME TIMESTAMP_LTZ(6),
+    PROPERTIES STRING,
+    SYSTEM_PROPERTIES STRING,
+    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
+)
+EXTERNAL_VOLUME = 'EXVOL'
+CATALOG = 'SNOWFLAKE'
+BASE_LOCATION = 'events/';
+
+-- ============================================================================
+-- Create the control table for checkpointing
+-- Matches: TARGET_TABLE=INGESTION_STATUS in .env
+-- ============================================================================
+CREATE OR REPLACE TABLE CONTROL.PUBLIC.INGESTION_STATUS (
+    TS_INSERTED TIMESTAMP_LTZ(9) DEFAULT CURRENT_TIMESTAMP(),
+    EVENTHUB_NAMESPACE VARCHAR(500) NOT NULL,
+    EVENTHUB VARCHAR(200) NOT NULL,
+    TARGET_DB VARCHAR(200) NOT NULL,
+    TARGET_SCHEMA VARCHAR(200) NOT NULL,
+    TARGET_TABLE VARCHAR(200) NOT NULL,
+    WATERLEVEL NUMBER(38,0),
+    PARTITION_ID VARCHAR(50) NOT NULL,
+    METADATA VARIANT,
+    PRIMARY KEY (EVENTHUB_NAMESPACE, EVENTHUB, TARGET_DB, TARGET_SCHEMA, TARGET_TABLE, PARTITION_ID)
 );
 
 -- ============================================================================
@@ -192,19 +212,27 @@ CREATE TABLE IF NOT EXISTS EVENTS_TABLE (
 -- IMPORTANT: High-performance architecture REQUIRES a PIPE object
 -- The PIPE uses DATA_SOURCE(TYPE => 'STREAMING') as the source
 -- ============================================================================
-CREATE OR REPLACE PIPE EVENTS_TABLE_PIPE
-AS
-    COPY INTO EVENTS_TABLE (EVENT_BODY, PARTITION_ID, SEQUENCE_NUMBER, ENQUEUED_TIME, PROPERTIES, SYSTEM_PROPERTIES)
-    FROM (
-        SELECT 
-            $1:event_body::VARIANT,
-            $1:partition_id::VARCHAR,
-            $1:sequence_number::NUMBER,
-            $1:enqueued_time::TIMESTAMP_NTZ,
-            $1:properties::VARIANT,
-            $1:system_properties::VARIANT
-        FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
-    );
+CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
+COPY INTO INGESTION.PUBLIC.EVENTS_TABLE1 (
+    EVENT_BODY,
+    PARTITION_ID,
+    SEQUENCE_NUMBER,
+    OFFSET,
+    ENQUEUED_TIME,
+    PROPERTIES,
+    SYSTEM_PROPERTIES
+)
+FROM (
+    SELECT
+        TO_VARCHAR($1:event_body) AS EVENT_BODY,
+        TO_VARCHAR($1:partition_id) AS PARTITION_ID,
+        $1:sequence_number::NUMBER(38,0) AS SEQUENCE_NUMBER,
+        TO_VARCHAR($1:offset) AS OFFSET,
+        $1:enqueued_time::TIMESTAMP_NTZ(6) AS ENQUEUED_TIME,
+        TO_VARCHAR($1:properties) AS PROPERTIES,
+        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES
+    FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
+);
 
 -- ============================================================================
 -- Verify the PIPE was created
@@ -214,102 +242,22 @@ SHOW PIPES LIKE 'EVENTS_TABLE_PIPE';
 -- ============================================================================
 -- Grant permissions to STREAM role
 -- ============================================================================
-GRANT OPERATE ON PIPE EVENTS_TABLE_PIPE TO ROLE STREAM;
-GRANT MONITOR ON PIPE EVENTS_TABLE_PIPE TO ROLE STREAM;
-GRANT INSERT ON TABLE EVENTS_TABLE TO ROLE STREAM;
-GRANT SELECT ON TABLE EVENTS_TABLE TO ROLE STREAM;
+GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
+GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
+GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
+GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
 
 -- Verify grants
-SHOW GRANTS ON PIPE EVENTS_TABLE_PIPE;
+SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE;
 
 SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
 ```
 
 > ⚠️ If you see `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`, rerun this block and ensure role `STREAM` has `OPERATE`/`MONITOR` on the PIPE.
 
-#### Step 4 (Variation): Ingest into an Apache Iceberg table (Azure External Volume)
+#### External Volume Note
 
-If you prefer landing data into an **Iceberg table** (Snowflake-managed Iceberg) instead of a standard Snowflake table, use the setup below. You’ll create an **EXTERNAL VOLUME** (Azure), verify it, create an **ICEBERG TABLE** backed by that volume, and then create the **Snowpipe Streaming PIPE** that writes into the Iceberg table.
-
-> Notes:
->
-> - Replace placeholders (`<...>`) with your environment values.
-> - Your `STORAGE_BASE_URL` should point at the container/prefix you want Snowflake writing to (and must be reachable/authorized per your Snowflake/Azure setup).
-> - Keep the PIPE definition pattern the same—only the target table changes.
-
-```sql
--- ============================================
--- ICEBERG VARIATION (Azure External Volume + Iceberg table + Streaming PIPE)
--- ============================================
-
-USE ROLE STREAM;  -- or ACCOUNTADMIN if needed for setup
-USE DATABASE INGESTION;
-USE SCHEMA PUBLIC;
-
--- 1) Create an External Volume (Azure)
-CREATE OR REPLACE EXTERNAL VOLUME my_ext_volume
-  STORAGE_LOCATIONS = (
-    (
-      NAME = 'azure_main'
-      STORAGE_PROVIDER = 'AZURE'
-      STORAGE_BASE_URL = 'azure://<storage-account>.blob.core.windows.net/<container>/<optional-prefix>/'
-      AZURE_TENANT_ID = '<your-azure-tenant-id>'
-    )
-  )
-  ALLOW_WRITES = TRUE;
-
--- (Optional) Inspect/verify the external volume
-DESC EXTERNAL VOLUME my_ext_volume;
-SELECT SYSTEM$VERIFY_EXTERNAL_VOLUME('my_ext_volume');
-
--- 2) Create an Iceberg table backed by that external volume
--- Snowflake as the Iceberg catalog, writing to our external volume:
-CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE (
-  EVENT_BODY VARCHAR(134217728),
-  PARTITION_ID VARCHAR(134217728),
-  SEQUENCE_NUMBER NUMBER(38,0),
-  OFFSET VARCHAR(134217728),
-  ENQUEUED_TIME TIMESTAMP_LTZ(6),
-  PROPERTIES VARCHAR(134217728),
-  SYSTEM_PROPERTIES VARCHAR(134217728),
-  INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT (CURRENT_TIMESTAMP()::TIMESTAMP_LTZ(6))
-)
-CATALOG = 'SNOWFLAKE'
-EXTERNAL_VOLUME = 'my_ext_volume'
-BASE_LOCATION = 'events/'  -- folder in the container for this table’s data
-STORAGE_SERIALIZATION_POLICY = 'COMPATIBLE';
-
--- 3) Create PIPE for HIGH-PERFORMANCE Snowpipe Streaming (targets the Iceberg table)
-CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
-COPY INTO INGESTION.PUBLIC.EVENTS_TABLE (
-  EVENT_BODY,
-  PARTITION_ID,
-  SEQUENCE_NUMBER,
-  OFFSET,
-  ENQUEUED_TIME,
-  PROPERTIES,
-  SYSTEM_PROPERTIES
-)
-FROM (
-  SELECT
-    TO_VARCHAR($1:event_body) AS EVENT_BODY,
-    TO_VARCHAR($1:partition_id) AS PARTITION_ID,
-    $1:sequence_number::NUMBER(38,0) AS SEQUENCE_NUMBER,
-    TO_VARCHAR($1:offset) AS OFFSET,
-    $1:enqueued_time::TIMESTAMP_NTZ(6) AS ENQUEUED_TIME,
-    TO_VARCHAR($1:properties) AS PROPERTIES,
-    TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES
-  FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
-);
-
--- 4) Grants (adjust to your role model)
-GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
-GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
-GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE TO ROLE STREAM;
-GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE TO ROLE STREAM;
-
-SHOW PIPES LIKE 'EVENTS_TABLE_PIPE';
-```
+The Iceberg table definition above assumes an external volume named `EXVOL` already exists. If you need to create one, follow the Snowflake external volume documentation and ensure the role you use has permission to write to it.
 
 ### Step 5: Update `.env` File
 
@@ -336,7 +284,7 @@ TARGET_TABLE=INGESTION_STATUS                    # Leave as-is
 # Ingestion configuration
 SNOWFLAKE_1_DATABASE=MYDB                        # Where to ingest EventHub data
 SNOWFLAKE_1_SCHEMA=INGEST                        # Schema for ingested data
-SNOWFLAKE_1_TABLE=events_table                   # Table name for ingested data
+SNOWFLAKE_1_TABLE=EVENTS_TABLE1                  # Table name for ingested data
 SNOWFLAKE_1_BATCH=1000                           # Batch size (leave as-is)
 ```
 

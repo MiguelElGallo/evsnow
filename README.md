@@ -75,7 +75,7 @@ TARGET_TABLE=INGESTION_STATUS
 # Topic → Table Mapping
 SNOWFLAKE_1_DATABASE=INGESTION
 SNOWFLAKE_1_SCHEMA=PUBLIC
-SNOWFLAKE_1_TABLE=events_table
+SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 SNOWFLAKE_1_BATCH=100
 ```
 
@@ -129,7 +129,7 @@ When starting the pipeline **without existing checkpoints** (e.g., after truncat
 
 ```bash
 # Example: Starting fresh after truncating tables
-snowsql -q "truncate table ingestion.public.events_table;"
+snowsql -q "truncate table ingestion.public.events_table1;"
 snowsql -q "truncate table control.public.ingestion_status;"
 
 # Consumer will process based on STARTING_POSITION_ON_NO_CHECKPOINT setting

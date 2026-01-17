@@ -164,7 +164,7 @@ class EvSnowConfig(BaseSettings):
                     ]
                     for key in os.environ
                 ):
-                    self.snowflake_connection = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+                    self.snowflake_connection = SnowflakeConnectionConfig()
                 else:
                     self.snowflake_connection = None
             except Exception:
