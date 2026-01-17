@@ -60,6 +60,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         self.streaming_client: StreamingIngestClient | None = None
         self.channels: dict[str, Any] = {}  # channel_name -> channel object
         self._last_channel_status_check_at: datetime | None = None
+        self._last_client_refresh_at: datetime | None = None
 
         # Statistics
         self.stats: dict[str, Any] = {
@@ -224,6 +225,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 self._ensure_target_table()
 
                 self.stats["client_created_at"] = datetime.now(UTC)
+                self._last_client_refresh_at = self.stats["client_created_at"]
                 logger.info(
                     "✅ Snowflake streaming client started successfully (high-performance SDK v1.0.2+)"
                 )
@@ -504,11 +506,123 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             status=str(status),
         )
 
+    def _recover_streaming_state(self, channel_name: str, error: Exception) -> bool:
+        """
+        Attempt to recover the streaming client/channel after a fatal streaming error.
+
+        Returns True if recovery actions were executed, False otherwise.
+        """
+        if self._should_recreate_client(error):
+            logger.warning(
+                "Streaming client requires recreation after error; restarting client.",
+                exc_info=True,
+            )
+            logfire.warning(
+                "Streaming client requires recreation; restarting client",
+                channel_name=channel_name,
+                error=str(error),
+            )
+            try:
+                self.stop()
+                self.start()
+                return True
+            except Exception as restart_error:
+                logger.error(
+                    "Failed to restart StreamingIngestClient: %s",
+                    restart_error,
+                    exc_info=True,
+                )
+                logfire.error(
+                    "Failed to restart StreamingIngestClient",
+                    error=str(restart_error),
+                )
+                return False
+
+        if self._should_reopen_channel(error):
+            logger.warning(
+                "Streaming channel requires reopen after error; reopening channel.",
+                exc_info=True,
+            )
+            logfire.warning(
+                "Streaming channel requires reopen; reopening channel",
+                channel_name=channel_name,
+                error=str(error),
+            )
+            try:
+                self._reopen_channel(channel_name)
+                return True
+            except Exception as reopen_error:
+                logger.error(
+                    "Failed to reopen channel %s: %s",
+                    channel_name,
+                    reopen_error,
+                    exc_info=True,
+                )
+                logfire.error(
+                    "Failed to reopen Snowflake channel",
+                    channel_name=channel_name,
+                    error=str(reopen_error),
+                )
+                return False
+
+        return False
+
+    def _maybe_refresh_client(self) -> None:
+        interval_seconds = self.snowflake_config.client_refresh_interval_seconds
+        if interval_seconds <= 0:
+            return
+
+        if self.streaming_client is None:
+            return
+
+        now = datetime.now(UTC)
+        last_refresh = self._last_client_refresh_at or self.stats.get("client_created_at")
+        if last_refresh is None:
+            self._last_client_refresh_at = now
+            return
+
+        elapsed = (now - last_refresh).total_seconds()
+        if elapsed < interval_seconds:
+            return
+
+        logger.warning(
+            "Proactively refreshing Snowflake streaming client after %s seconds.",
+            int(elapsed),
+        )
+        logfire.warning(
+            "Proactively refreshing Snowflake streaming client",
+            elapsed_seconds=int(elapsed),
+            interval_seconds=interval_seconds,
+        )
+
+        self.stop()
+        self.start()
+
+    @staticmethod
+    def _should_recreate_client(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            "token has expired" in message
+            or "fail to create authorization token" in message
+            or "re-create the client" in message
+            or ("client" in message and "invalid state" in message)
+        )
+
+    @staticmethod
+    def _should_reopen_channel(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            "invalidchannelerror" in message
+            or "must be reopened" in message
+            or ("channel" in message and "invalid state" in message)
+        )
+
     def _ingest_batch_impl(
         self,
         channel_name: str,
         data_batch: list[dict[str, Any]],
         partition_id: str = "0",
+        _recovery_attempted: bool = False,
     ) -> bool:
         """
         Internal implementation of batch ingestion.
@@ -543,6 +657,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             )
 
             # Get or create shared channel for all partitions
+            self._maybe_refresh_client()
             channel = self._get_or_create_channel(channel_name)
 
             if channel is None:
@@ -597,6 +712,24 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 self._maybe_check_channel_status(channel_name)
 
             except Exception as e:
+                if not _recovery_attempted and self._recover_streaming_state(channel_name, e):
+                    logger.warning(
+                        "Recovered Snowflake streaming state after error; retrying batch once."
+                    )
+                    logfire.warning(
+                        "Recovered Snowflake streaming state; retrying batch",
+                        channel_name=channel_name,
+                        partition_id=partition_id,
+                        batch_size=len(data_batch),
+                        error=str(e),
+                    )
+                    return self._ingest_batch_impl(
+                        channel_name=channel_name,
+                        data_batch=data_batch,
+                        partition_id=partition_id,
+                        _recovery_attempted=True,
+                    )
+
                 logger.error(
                     f"Failed to insert rows into channel {channel_name}: {e}",
                     exc_info=True,

@@ -244,6 +244,9 @@ class EvSnowConfig(BaseSettings):
                     channel_status_interval_seconds=int(
                         settings.get("channel_status_interval_seconds", "60")
                     ),
+                    client_refresh_interval_seconds=int(
+                        settings.get("client_refresh_interval_seconds", "0")
+                    ),
                 )
 
         # Parse mappings - look for explicit mapping lines in env file

@@ -973,27 +973,38 @@ class EventHubAsyncConsumer:
                         f"🔖 Updating EventHub SDK checkpoints for {len(last_message_by_partition)} partitions..."
                     )
                     checkpoints_updated = 0
+                    max_checkpoint_attempts = 3
                     for partition_id, last_message in last_message_by_partition.items():
                         if last_message.partition_context:
-                            try:
-                                await last_message.partition_context.update_checkpoint(
-                                    last_message.event_data
-                                )
-                                checkpoints_updated += 1
-                                logger.info(
-                                    f"✅ Updated SDK checkpoint for partition {partition_id}: "
-                                    f"offset={last_message.event_data.offset}, sequence={last_message.sequence_number}"
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    f"❌ Failed to update SDK checkpoint for partition {partition_id}: {e}",
-                                    exc_info=True,
-                                )
-                                logfire.error(
-                                    "Checkpoint update failed",
-                                    partition_id=partition_id,
-                                    error=str(e),
-                                )
+                            for attempt in range(1, max_checkpoint_attempts + 1):
+                                try:
+                                    await last_message.partition_context.update_checkpoint(
+                                        last_message.event_data
+                                    )
+                                    checkpoints_updated += 1
+                                    logger.info(
+                                        f"✅ Updated SDK checkpoint for partition {partition_id}: "
+                                        f"offset={last_message.event_data.offset}, sequence={last_message.sequence_number}"
+                                    )
+                                    break
+                                except Exception as e:
+                                    logger.error(
+                                        "❌ Failed to update SDK checkpoint for partition %s (attempt %s/%s): %s",
+                                        partition_id,
+                                        attempt,
+                                        max_checkpoint_attempts,
+                                        e,
+                                        exc_info=True,
+                                    )
+                                    logfire.error(
+                                        "Checkpoint update failed",
+                                        partition_id=partition_id,
+                                        attempt=attempt,
+                                        max_attempts=max_checkpoint_attempts,
+                                        error=str(e),
+                                    )
+                                    if attempt < max_checkpoint_attempts:
+                                        await asyncio.sleep(2 ** (attempt - 1))
                         else:
                             logger.warning(
                                 f"⚠️ No partition_context for partition {partition_id}, cannot update SDK checkpoint"

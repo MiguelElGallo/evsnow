@@ -12,6 +12,8 @@ import asyncio
 import json
 import logging
 import os
+import random
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -21,6 +23,7 @@ from typing import Annotated, Any
 import typer
 from azure.eventhub import EventData
 from azure.eventhub.aio import EventHubProducerClient
+from azure.eventhub.exceptions import EventHubError
 from azure.identity.aio import DefaultAzureCredential
 from dotenv import load_dotenv
 
@@ -31,6 +34,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+
+_RETRY_WAIT_PATTERN = re.compile(r"wait\s+(\d+(?:\.\d+)?)\s+seconds", re.IGNORECASE)
 
 
 def _load_env(env_file: Path | None) -> None:
@@ -78,6 +83,72 @@ def _build_payload(sequence_id: int, base_payload: dict[str, Any]) -> str:
     return json.dumps(envelope)
 
 
+def _is_retryable_error(exc: Exception) -> bool:
+    """Best-effort detection of retryable/throttling errors."""
+    if isinstance(exc, EventHubError):
+        retryable = getattr(exc, "retryable", None)
+        if retryable is True:
+            return True
+
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in (
+            "server-busy",
+            "throttl",
+            "50002",
+            "timeout",
+            "temporar",
+        )
+    )
+
+
+def _get_retry_delay_seconds(
+    exc: Exception,
+    base_delay: float,
+    max_delay: float,
+    attempt: int,
+) -> float:
+    """Compute delay for retries, honoring server suggested wait when present."""
+    text = str(exc)
+    match = _RETRY_WAIT_PATTERN.search(text)
+    if match:
+        suggested = float(match.group(1))
+        return max(0.0, min(max_delay, suggested))
+
+    exp_delay = base_delay * (2**attempt)
+    exp_delay = min(max_delay, exp_delay)
+    jitter = exp_delay * random.uniform(0.0, 0.2)
+    return exp_delay + jitter
+
+
+async def _send_batch_with_retry(
+    producer: EventHubProducerClient,
+    batch: Any,
+    max_retries: int,
+    base_delay: float,
+    max_delay: float,
+) -> None:
+    """Send a batch with exponential backoff for throttling errors."""
+    attempt = 0
+    while True:
+        try:
+            await producer.send_batch(batch)
+            return
+        except Exception as exc:
+            if attempt >= max_retries or not _is_retryable_error(exc):
+                raise
+            delay = _get_retry_delay_seconds(exc, base_delay, max_delay, attempt)
+            logger.warning(
+                "Send throttled, retrying in %.2fs (attempt %d/%d)",
+                delay,
+                attempt + 1,
+                max_retries,
+            )
+            await asyncio.sleep(delay)
+            attempt += 1
+
+
 async def send_messages(
     connection_string: str | None,
     namespace: str | None,
@@ -86,6 +157,11 @@ async def send_messages(
     start_id: int,
     batch_size: int,
     interval_seconds: float,
+    max_messages_per_second: float,
+    batch_pause_seconds: float,
+    max_retries: int,
+    retry_base_delay_seconds: float,
+    retry_max_delay_seconds: float,
     partition_key: str | None,
     payload_json: str | None,
 ) -> None:
@@ -115,14 +191,30 @@ async def send_messages(
                 batch_count += 1
             except ValueError:
                 logger.info("Sending batch of %d messages", batch_count)
-                await producer.send_batch(batch)
+                await _send_batch_with_retry(
+                    producer,
+                    batch,
+                    max_retries=max_retries,
+                    base_delay=retry_base_delay_seconds,
+                    max_delay=retry_max_delay_seconds,
+                )
+                if batch_pause_seconds > 0:
+                    await asyncio.sleep(batch_pause_seconds)
                 batch = await producer.create_batch(partition_key=partition_key)
                 batch.add(event)
                 batch_count = 1
 
             if batch_count >= batch_size:
                 logger.info("Sending batch of %d messages (size threshold)", batch_count)
-                await producer.send_batch(batch)
+                await _send_batch_with_retry(
+                    producer,
+                    batch,
+                    max_retries=max_retries,
+                    base_delay=retry_base_delay_seconds,
+                    max_delay=retry_max_delay_seconds,
+                )
+                if batch_pause_seconds > 0:
+                    await asyncio.sleep(batch_pause_seconds)
                 batch = await producer.create_batch(partition_key=partition_key)
                 batch_count = 0
 
@@ -132,9 +224,23 @@ async def send_messages(
             if interval_seconds > 0:
                 await asyncio.sleep(interval_seconds)
 
+            if max_messages_per_second > 0:
+                target_time = start_time + (sent / max_messages_per_second)
+                now = time.time()
+                if target_time > now:
+                    await asyncio.sleep(target_time - now)
+
         if batch_count > 0:
             logger.info("Sending final batch of %d messages", batch_count)
-            await producer.send_batch(batch)
+            await _send_batch_with_retry(
+                producer,
+                batch,
+                max_retries=max_retries,
+                base_delay=retry_base_delay_seconds,
+                max_delay=retry_max_delay_seconds,
+            )
+            if batch_pause_seconds > 0:
+                await asyncio.sleep(batch_pause_seconds)
 
         duration = time.time() - start_time
         logger.info("Completed sending %d messages in %.2fs", sent, duration)
@@ -172,6 +278,26 @@ def send(
         float,
         typer.Option(help="Optional delay between messages in seconds"),
     ] = 0.0,
+    max_messages_per_second: Annotated[
+        float,
+        typer.Option(help="Rate limit total send throughput (0 disables)"),
+    ] = 0.0,
+    batch_pause_seconds: Annotated[
+        float,
+        typer.Option(help="Delay after each batch send to reduce throttling"),
+    ] = 0.0,
+    max_retries: Annotated[
+        int,
+        typer.Option(help="Max retry attempts when throttled"),
+    ] = 8,
+    retry_base_delay_seconds: Annotated[
+        float,
+        typer.Option(help="Base delay for retry backoff (seconds)"),
+    ] = 1.0,
+    retry_max_delay_seconds: Annotated[
+        float,
+        typer.Option(help="Max delay for retry backoff (seconds)"),
+    ] = 30.0,
     partition_key: Annotated[str | None, typer.Option(help="Partition key to pin messages")] = None,
     payload: Annotated[
         str | None,
@@ -208,6 +334,11 @@ def send(
                 start_id=start_id,
                 batch_size=batch_size,
                 interval_seconds=interval_seconds,
+                max_messages_per_second=max_messages_per_second,
+                batch_pause_seconds=batch_pause_seconds,
+                max_retries=max_retries,
+                retry_base_delay_seconds=retry_base_delay_seconds,
+                retry_max_delay_seconds=retry_max_delay_seconds,
                 partition_key=partition_key,
                 payload_json=payload,
             )

@@ -19,6 +19,13 @@ class SnowflakeConfig(BaseModel):
         default=60,
         description="Interval in seconds between Snowflake channel status checks (0 to disable)",
     )
+    client_refresh_interval_seconds: int = Field(
+        default=0,
+        description=(
+            "Interval in seconds to proactively recreate the Snowflake streaming client "
+            "(0 to disable)."
+        ),
+    )
 
     @field_validator("database", "schema_name", "table_name")
     @classmethod
