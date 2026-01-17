@@ -121,6 +121,7 @@ class TestEndToEndPipeline:
         )
         pipeline_config.event_hubs["EVENTHUBNAME_1"] = sample_eventhub_config
         pipeline_config.snowflake_configs["SNOWFLAKE_1"] = sample_snowflake_config
+        pipeline_config.mappings.append(mapping_config)
 
         # Mock checkpoint manager
         mock_checkpoint_mgr = mocker.MagicMock()
@@ -190,6 +191,7 @@ class TestEndToEndPipeline:
         )
         pipeline_config.event_hubs["EVENTHUBNAME_1"] = sample_eventhub_config
         pipeline_config.snowflake_configs["SNOWFLAKE_1"] = sample_snowflake_config
+        pipeline_config.mappings.append(mapping_config)
 
         # Mock Snowflake client
         mock_streaming_client = mocker.MagicMock()
@@ -596,6 +598,7 @@ class TestErrorRecovery:
         )
         pipeline_config.event_hubs["EVENTHUBNAME_1"] = sample_eventhub_config
         pipeline_config.snowflake_configs["SNOWFLAKE_1"] = sample_snowflake_config
+        pipeline_config.mappings.append(mapping_config)
 
         mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
         mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
@@ -663,6 +666,7 @@ class TestErrorRecovery:
         )
         pipeline_config.event_hubs["EVENTHUBNAME_1"] = sample_eventhub_config
         pipeline_config.snowflake_configs["SNOWFLAKE_1"] = sample_snowflake_config
+        pipeline_config.mappings.append(mapping_config)
 
         mocker.patch("consumers.eventhub.SnowflakeCheckpointManager")
         mocker.patch("consumers.eventhub.SnowflakeCheckpointStore")
