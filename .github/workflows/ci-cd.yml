@@ -56,7 +56,7 @@ jobs:
 
       - name: Type check with ty
         run: |
-          uv run ty check src/
+          uv tool run ty check src/
 
   test-unit:
     name: Unit Tests

@@ -161,7 +161,7 @@ jobs:
 
       - name: Run type checking
         run: |
-          uv run ty check src/
+          uv tool run ty check src/
 
       - name: Run coverage check
         run: |
