@@ -71,6 +71,15 @@ SNOWFLAKE_ROLE=STREAM
 TARGET_DB=CONTROL
 TARGET_SCHEMA=PUBLIC
 TARGET_TABLE=INGESTION_STATUS
+CONTROL_TABLE_BACKEND=snowflake  # snowflake | postgres
+
+# Postgres control table (only if CONTROL_TABLE_BACKEND=postgres)
+CONTROL_PG_HOST=localhost
+CONTROL_PG_PORT=5432
+CONTROL_PG_USER=checkpoint_user
+CONTROL_PG_PASSWORD=checkpoint_password
+CONTROL_PG_SSLMODE=require
+CONTROL_PG_AUTH_MODE=password  # password | azure_token
 
 # Topic → Table Mapping
 SNOWFLAKE_1_DATABASE=INGESTION

@@ -1,0 +1,103 @@
+"""Tests for Postgres control table utilities."""
+
+from unittest.mock import MagicMock
+
+from utils.config_models import PostgresConnectionConfig
+from utils import postgres as pg
+
+
+def test_get_connection_password_auth_uses_password(mocker):
+    """Ensure password auth passes password to psycopg.connect."""
+    dummy_conn = MagicMock()
+    dummy_conn.closed = False
+
+    mock_connect = mocker.patch("utils.postgres.psycopg.connect", return_value=dummy_conn)
+
+    config = PostgresConnectionConfig(
+        host="localhost",
+        port=5432,
+        user="pguser",
+        password="secret",
+        sslmode="require",
+        auth_mode="password",
+    )
+
+    conn = pg.get_connection(config, "control_db", use_cache=False)
+
+    assert conn is dummy_conn
+    mock_connect.assert_called_once()
+    call_kwargs = mock_connect.call_args.kwargs
+    assert call_kwargs["password"] == "secret"
+    assert call_kwargs["dbname"] == "control_db"
+
+
+def test_get_partition_checkpoints_returns_dict(monkeypatch):
+    """Verify checkpoint query returns partition dict."""
+
+    class DummyCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *args, **kwargs):
+            return None
+
+        def fetchall(self):
+            return [("0", 123), ("1", 456)]
+
+    class DummyConn:
+        def cursor(self):
+            return DummyCursor()
+
+    monkeypatch.setattr(pg, "get_connection", lambda *args, **kwargs: DummyConn())
+
+    result = pg.get_partition_checkpoints(
+        eventhub_namespace="test.servicebus.windows.net",
+        eventhub="test-hub",
+        target_db="CONTROL",
+        target_schema="public",
+        target_table="INGESTION_STATUS",
+        config=MagicMock(),
+    )
+
+    assert result == {"0": 123, "1": 456}
+
+
+def test_insert_partition_checkpoint_executes(monkeypatch):
+    """Verify insert checkpoint executes statement."""
+    executed = {}
+
+    class DummyCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *args, **kwargs):
+            executed["called"] = True
+
+    class DummyConn:
+        def cursor(self):
+            return DummyCursor()
+
+    monkeypatch.setattr(pg, "get_connection", lambda *args, **kwargs: DummyConn())
+
+    pg.insert_partition_checkpoint(
+        eventhub_namespace="test.servicebus.windows.net",
+        eventhub="test-hub",
+        target_db="SNOW_DB",
+        target_schema="PUBLIC",
+        target_table="EVENTS",
+        partition_id="0",
+        waterlevel=123,
+        metadata={"offset": "123"},
+        config=MagicMock(),
+        control_db="CONTROL",
+        control_schema="public",
+        control_table="INGESTION_STATUS",
+    )
+
+    assert executed.get("called") is True

@@ -13,7 +13,7 @@ Best Practices Incorporated:
 import os
 import re
 import socket
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -24,6 +24,7 @@ from .config_models import (
     EventHubConfig,
     EventHubSnowflakeMapping,
     LogfireConfig,
+    PostgresConnectionConfig,
     SmartRetryConfig,
     SnowflakeConfig,
     SnowflakeConnectionConfig,
@@ -53,6 +54,7 @@ class EvSnowConfig(BaseSettings):
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
         "extra": "ignore",
+        "populate_by_name": True,
     }
 
     # Core Event Hub settings
@@ -136,6 +138,15 @@ class EvSnowConfig(BaseSettings):
         validation_alias="USE_HYBRID_TABLE",
         description="Use Hybrid Table for control table (requires paid Snowflake account)",
     )
+    control_table_backend: Literal["snowflake", "postgres"] = Field(
+        default="snowflake",
+        validation_alias="CONTROL_TABLE_BACKEND",
+        description="Backend for control/checkpoint table (snowflake or postgres).",
+    )
+    control_postgres: PostgresConnectionConfig | None = Field(
+        default=None,
+        description="Postgres control table connection configuration",
+    )
 
     # Configuration storage
     event_hubs: dict[str, EventHubConfig] = Field(default_factory=dict)
@@ -171,6 +182,13 @@ class EvSnowConfig(BaseSettings):
                 # Snowflake connection is optional, may not be configured
                 self.snowflake_connection = None
         self._parse_dynamic_config()
+        self._configure_control_backend()
+
+    def _configure_control_backend(self) -> None:
+        if self.control_table_backend == "postgres":
+            if self.control_postgres is None:
+                self.control_postgres = PostgresConnectionConfig()
+            self.target_schema = self._normalize_postgres_schema(self.target_schema)
 
     def _parse_dynamic_config(self):
         """Parse dynamic Event Hub and Snowflake configurations from environment variables."""
@@ -298,6 +316,13 @@ class EvSnowConfig(BaseSettings):
         cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
         return cleaned or "client"
 
+    @field_validator("control_table_backend", mode="before")
+    @classmethod
+    def normalize_control_table_backend(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
     @model_validator(mode="after")
     def validate_mappings_exist(self):
         """Validate that all mappings reference existing configurations."""
@@ -362,6 +387,13 @@ class EvSnowConfig(BaseSettings):
         cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", value.strip())
         cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
         return cleaned or "unknown"
+
+    @staticmethod
+    def _normalize_postgres_schema(value: str) -> str:
+        cleaned = value.strip()
+        if cleaned.startswith('"') and cleaned.endswith('"') and len(cleaned) > 1:
+            return cleaned[1:-1]
+        return cleaned.lower()
 
     def validate_configuration(self) -> dict[str, Any]:
         """
@@ -446,6 +478,7 @@ __all__ = [
     "EventHubConfig",
     "EventHubSnowflakeMapping",
     "LogfireConfig",
+    "PostgresConnectionConfig",
     "SmartRetryConfig",
     "SnowflakeConfig",
     "SnowflakeConnectionConfig",

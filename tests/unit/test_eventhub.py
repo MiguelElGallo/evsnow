@@ -4,8 +4,8 @@ Tests for EventHub async consumer.
 This module tests the EventHub consumer functionality including:
 - EventHubMessage wrapper class
 - MessageBatch container
-- SnowflakeCheckpointManager for checkpoint management
-- SnowflakeCheckpointStore for Azure SDK compatibility
+- Checkpoint managers for Snowflake/Postgres
+- Checkpoint store adapters for Azure SDK compatibility
 - EventHubAsyncConsumer main consumer class
 
 Based on TESTING_STANDARDS.md - all tests use mocks for external dependencies.
@@ -26,6 +26,8 @@ from consumers.eventhub import (
     EventHubAsyncConsumer,
     EventHubMessage,
     MessageBatch,
+    PostgresCheckpointManager,
+    PostgresCheckpointStore,
     SnowflakeCheckpointManager,
     SnowflakeCheckpointStore,
     _convert_bytes_to_str,
@@ -558,6 +560,71 @@ class TestSnowflakeCheckpointManager:
 
 
 # ============================================================================
+# Tests for PostgresCheckpointManager
+# ============================================================================
+
+
+class TestPostgresCheckpointManager:
+    """Tests for PostgresCheckpointManager."""
+
+    @pytest.mark.asyncio
+    async def test_get_last_checkpoint_returns_dict(self, mocker):
+        """Test loading checkpoint from Postgres returns dict."""
+        mock_checkpoints = {"0": 100, "1": 200}
+        mocker.patch("utils.postgres.get_partition_checkpoints", return_value=mock_checkpoints)
+
+        manager = PostgresCheckpointManager(
+            eventhub_namespace="test.servicebus.windows.net",
+            eventhub_name="test-hub",
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            postgres_config=MagicMock(),
+        )
+
+        result = await manager.get_last_checkpoint()
+
+        assert result == mock_checkpoints
+        assert result["0"] == 100
+
+    @pytest.mark.asyncio
+    async def test_save_checkpoint_to_postgres(self, mocker, mock_logfire):
+        """Test saving checkpoint to Postgres."""
+        mock_insert = mocker.patch("utils.postgres.insert_partition_checkpoint")
+
+        manager = PostgresCheckpointManager(
+            eventhub_namespace="test.servicebus.windows.net",
+            eventhub_name="test-hub",
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            postgres_config=MagicMock(),
+        )
+
+        partition_checkpoints = {"0": 100, "1": 200}
+        result = await manager.save_checkpoint(partition_checkpoints)
+
+        assert result is True
+        assert mock_insert.call_count == 2
+
+    def test_close_calls_postgres_cleanup(self, mocker):
+        """Test close() triggers Postgres connection cleanup."""
+        mock_close = mocker.patch("utils.postgres.close_cached_connections")
+
+        manager = PostgresCheckpointManager(
+            eventhub_namespace="test.servicebus.windows.net",
+            eventhub_name="test-hub",
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            postgres_config=MagicMock(),
+        )
+
+        manager.close()
+        mock_close.assert_called_once()
+
+
+# ============================================================================
 # Tests for SnowflakeCheckpointStore
 # ============================================================================
 
@@ -711,6 +778,20 @@ class TestSnowflakeCheckpointStore:
 
 
 # ============================================================================
+# Tests for PostgresCheckpointStore
+# ============================================================================
+
+
+class TestPostgresCheckpointStore:
+    """Tests for PostgresCheckpointStore."""
+
+    def test_backend_label(self):
+        """Test that backend label is set for Postgres store."""
+        store = PostgresCheckpointStore(MagicMock())
+        assert store.backend_label == "Postgres"
+
+
+# ============================================================================
 # Tests for EventHubAsyncConsumer
 # ============================================================================
 
@@ -778,6 +859,38 @@ class TestEventHubAsyncConsumer:
             pass
 
         assert consumer.checkpoint_manager is not None
+
+    @pytest.mark.asyncio
+    async def test_start_initializes_postgres_checkpoint_manager(
+        self,
+        mocker,
+        sample_eventhub_config,
+        mock_eventhub_client,
+        mock_azure_credential,
+        mock_logfire,
+    ):
+        """Test that start() initializes Postgres checkpoint manager."""
+        mocker.patch("utils.postgres.get_partition_checkpoints", return_value=None)
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+            control_table_backend="postgres",
+            control_postgres_config=MagicMock(),
+        )
+
+        try:
+            await consumer.start()
+        except asyncio.CancelledError:
+            pass
+
+        assert isinstance(consumer.checkpoint_manager, PostgresCheckpointManager)
 
     @pytest.mark.asyncio
     async def test_start_creates_eventhub_client_with_connection_string(self, mocker, mock_logfire):
