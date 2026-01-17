@@ -14,6 +14,7 @@ The orchestrator:
 
 import asyncio
 import logging
+import os
 import signal
 from datetime import UTC, datetime
 from typing import Any
@@ -56,6 +57,11 @@ class PipelineMapping:
         if not self.eventhub_config or not self.snowflake_config:
             raise ValueError(f"Invalid mapping configuration: {mapping_config}")
 
+        self.channel_name = pipeline_config.generate_channel_name(
+            mapping_config.event_hub_key,
+            pipeline_config.client_id,
+        )
+
         # Initialize components
         self.eventhub_consumer: EventHubAsyncConsumer | None = None
         self.snowflake_client: SnowflakeStreamingClient | None = None
@@ -92,6 +98,7 @@ class PipelineMapping:
             self.snowflake_client = create_snowflake_streaming_client(
                 snowflake_config=self.snowflake_config,
                 connection_config=self.pipeline_config.snowflake_connection,
+                client_name_suffix=self.pipeline_config.client_id,
                 retry_manager=self.retry_manager,
             )
             self.snowflake_client.start()
@@ -112,6 +119,10 @@ class PipelineMapping:
                 control_db=self.pipeline_config.target_db,
                 control_schema=self.pipeline_config.target_schema,
                 control_table=self.pipeline_config.target_table,
+                capture_messages=bool(getattr(self.pipeline_config, "capture_messages", False)),
+                capture_messages_dir=str(
+                    getattr(self.pipeline_config, "capture_messages_dir", "messages")
+                ),
             )
 
             self.running = True
@@ -211,7 +222,7 @@ class PipelineMapping:
                     logger.debug(f"Sample message: {str(data_batch[0])[:200]}...")
 
                 # Ingest data with channel name (for logging/tracking)
-                channel_name = f"{self.eventhub_config.namespace}/{self.eventhub_config.name}"
+                channel_name = self.channel_name
                 span.set_attribute("channel_name", channel_name)
 
                 # Get partition_id from first message for Snowflake channel management
@@ -277,26 +288,27 @@ class PipelineMapping:
 
     def health_check(self) -> dict[str, Any]:
         """Perform health check on mapping components."""
-        health = {
-            "mapping_key": self.stats["mapping_key"],
-            "running": self.running,
-            "components": {},
-            "errors": [],
-        }
+        components: dict[str, Any] = {}
+        errors: list[str] = []
 
         # Check Snowflake client
         if self.snowflake_client:
-            health["components"]["snowflake"] = self.snowflake_client.health_check()
+            components["snowflake"] = self.snowflake_client.health_check()
         else:
-            health["errors"].append("Snowflake client not initialized")
+            errors.append("Snowflake client not initialized")
 
         # Check EventHub consumer
         if self.eventhub_consumer:
-            health["components"]["eventhub"] = {"status": "initialized"}
+            components["eventhub"] = {"status": "initialized"}
         else:
-            health["errors"].append("EventHub consumer not initialized")
+            errors.append("EventHub consumer not initialized")
 
-        return health
+        return {
+            "mapping_key": self.stats["mapping_key"],
+            "running": self.running,
+            "components": components,
+            "errors": errors,
+        }
 
 
 class PipelineOrchestrator:
@@ -316,6 +328,7 @@ class PipelineOrchestrator:
         self.mappings: list[PipelineMapping] = []
         self.running = False
         self.shutdown_requested = False  # Flag to track shutdown requests
+        self.shutdown_task: asyncio.Task | None = None
         self.tasks: list[asyncio.Task] = []
 
         # Statistics
@@ -343,7 +356,7 @@ class PipelineOrchestrator:
                 mapping.start()
 
                 self.mappings.append(mapping)
-                mappings_count = int(self.stats.get("mappings_count", 0))  # type: ignore[arg-type]
+                mappings_count = int(self.stats.get("mappings_count", 0))
                 self.stats["mappings_count"] = mappings_count + 1
 
                 logger.info(f"✓ Initialized mapping: {mapping.stats['mapping_key']}")
@@ -411,7 +424,32 @@ class PipelineOrchestrator:
 
         # Now wait for all tasks to complete
         if self.tasks:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+            pending_tasks = [task for task in self.tasks if not task.done()]
+            if pending_tasks:
+                logger.info(
+                    "⏳ Waiting for %d mapping tasks to finish...",
+                    len(pending_tasks),
+                )
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending_tasks, return_exceptions=True),
+                        timeout=5,
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "Timed out waiting for mapping tasks; cancelling pending tasks..."
+                    )
+                    for task in pending_tasks:
+                        if not task.done():
+                            task.cancel()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*pending_tasks, return_exceptions=True),
+                            timeout=5,
+                        )
+                    except TimeoutError:
+                        logger.error("Mapping tasks did not cancel; forcing exit to avoid hang")
+                        os._exit(1)
 
         # Stop all mappings
         for mapping in self.mappings:
@@ -487,9 +525,7 @@ class PipelineOrchestrator:
                     f"Received signal {sig.name} ({sig.value}) again - forcing immediate shutdown"
                 )
                 # Force exit on second signal
-                import sys
-
-                sys.exit(1)
+                os._exit(1)
 
             logger.info(
                 f"Received signal {sig.name} ({sig.value}), initiating graceful shutdown..."
@@ -498,7 +534,8 @@ class PipelineOrchestrator:
 
             # Stop the orchestrator gracefully - DON'T cancel tasks
             # The stop() method will handle proper shutdown of all components
-            loop.create_task(self.stop())
+            if self.shutdown_task is None or self.shutdown_task.done():
+                self.shutdown_task = loop.create_task(self.stop())
 
         # Use asyncio's add_signal_handler for proper async signal handling
         for sig in (signal.SIGINT, signal.SIGTERM):

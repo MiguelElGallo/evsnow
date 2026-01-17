@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 import pytest
 
 # Add src to path for imports
-sys.path.insert(0, '/home/runner/work/evsnow/evsnow/src')
+sys.path.insert(0, "/home/runner/work/evsnow/evsnow/src")
 
 from pipeline.orchestrator import (
     PipelineMapping,
@@ -48,17 +48,14 @@ def mock_eventhub_consumer(mocker):
     mock_consumer.start = mocker.AsyncMock(return_value=None)
     mock_consumer.stop = mocker.AsyncMock(return_value=None)
     mock_consumer.running = False
-    
+
     # Create a mock class that returns our mock_consumer when instantiated with ANY arguments
     mock_class = mocker.MagicMock(return_value=mock_consumer)
-    
+
     # Patch the consumer class where it's USED (in orchestrator)
-    # Note: Due to sys.path.insert in this file, imports use "pipeline.orchestrator" not "src.pipeline.orchestrator"
-    mocker.patch(
-        "pipeline.orchestrator.EventHubAsyncConsumer",
-        mock_class
-    )
-    
+    # Note: Imports use "pipeline.orchestrator" ("src" is no longer used as an import prefix).
+    mocker.patch("pipeline.orchestrator.EventHubAsyncConsumer", mock_class)
+
     return mock_consumer
 
 
@@ -69,21 +66,18 @@ def mock_snowflake_client(mocker):
     mock_client.start = mocker.MagicMock()
     mock_client.stop = mocker.MagicMock()
     mock_client.ingest_batch = mocker.MagicMock(return_value=True)
-    mock_client.health_check = mocker.MagicMock(return_value={
-        "status": "healthy",
-        "channels_open": 1
-    })
-    mock_client.get_stats = mocker.MagicMock(return_value={
-        "messages_processed": 0,
-        "batches_processed": 0
-    })
-    
+    mock_client.health_check = mocker.MagicMock(
+        return_value={"status": "healthy", "channels_open": 1}
+    )
+    mock_client.get_stats = mocker.MagicMock(
+        return_value={"messages_processed": 0, "batches_processed": 0}
+    )
+
     # Patch where the client class is USED (in factory), not where it's DEFINED
     mocker.patch(
-        "streaming.factory.SnowflakeHighPerformanceStreamingClient",
-        return_value=mock_client
+        "streaming.factory.SnowflakeHighPerformanceStreamingClient", return_value=mock_client
     )
-    
+
     return mock_client
 
 
@@ -94,7 +88,7 @@ def complete_pipeline_config(
     sample_snowflake_connection_config,
     sample_mapping,
     sample_logfire_config,
-    sample_smart_retry_config
+    sample_smart_retry_config,
 ):
     """Create a complete EvSnowConfig for testing."""
     config = EvSnowConfig(
@@ -121,10 +115,7 @@ class TestPipelineMapping:
     """Tests for PipelineMapping class."""
 
     def test_init_with_valid_config_creates_mapping(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, mock_logfire
     ):
         """Test that PipelineMapping initializes successfully with valid config."""
         # Act
@@ -132,7 +123,7 @@ class TestPipelineMapping:
             mapping_config=sample_mapping,
             pipeline_config=complete_pipeline_config,
         )
-        
+
         # Assert
         assert mapping.mapping_config == sample_mapping
         assert mapping.pipeline_config == complete_pipeline_config
@@ -146,9 +137,7 @@ class TestPipelineMapping:
         assert mapping.stats["batches_processed"] == 0
 
     def test_init_with_invalid_eventhub_key_raises_error(
-        self,
-        complete_pipeline_config,
-        mock_logfire
+        self, complete_pipeline_config, mock_logfire
     ):
         """Test that PipelineMapping raises error for invalid EventHub key."""
         # Arrange
@@ -156,7 +145,7 @@ class TestPipelineMapping:
             event_hub_key="INVALID_KEY",
             snowflake_key="SNOWFLAKE_1",
         )
-        
+
         # Act & Assert
         with pytest.raises(ValueError, match="Invalid mapping configuration"):
             PipelineMapping(
@@ -165,9 +154,7 @@ class TestPipelineMapping:
             )
 
     def test_init_with_invalid_snowflake_key_raises_error(
-        self,
-        complete_pipeline_config,
-        mock_logfire
+        self, complete_pipeline_config, mock_logfire
     ):
         """Test that PipelineMapping raises error for invalid Snowflake key."""
         # Arrange
@@ -175,7 +162,7 @@ class TestPipelineMapping:
             event_hub_key="EVENTHUBNAME_1",
             snowflake_key="INVALID_KEY",
         )
-        
+
         # Act & Assert
         with pytest.raises(ValueError, match="Invalid mapping configuration"):
             PipelineMapping(
@@ -189,7 +176,7 @@ class TestPipelineMapping:
         sample_mapping,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that start() initializes EventHub and Snowflake components."""
         # Arrange
@@ -197,10 +184,10 @@ class TestPipelineMapping:
             mapping_config=sample_mapping,
             pipeline_config=complete_pipeline_config,
         )
-        
+
         # Act
         mapping.start()
-        
+
         # Assert
         assert mapping.running
         assert mapping.snowflake_client is not None
@@ -215,7 +202,7 @@ class TestPipelineMapping:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        caplog
+        caplog,
     ):
         """Test that calling start() when already running logs a warning."""
         # Arrange
@@ -224,19 +211,16 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         mapping.start()
-        
+
         # Act
         with caplog.at_level("WARNING"):
             mapping.start()
-        
+
         # Assert
         assert "already running" in caplog.text.lower()
 
     def test_start_without_snowflake_connection_raises_error(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, mock_logfire
     ):
         """Test that start() raises error when Snowflake connection is missing."""
         # Arrange
@@ -245,7 +229,7 @@ class TestPipelineMapping:
             mapping_config=sample_mapping,
             pipeline_config=complete_pipeline_config,
         )
-        
+
         # Act & Assert
         with pytest.raises(ValueError, match="Snowflake connection configuration is required"):
             mapping.start()
@@ -257,7 +241,7 @@ class TestPipelineMapping:
         sample_mapping,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that start_async() starts the EventHub consumer."""
         # Arrange
@@ -266,19 +250,16 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         mapping.start()
-        
+
         # Act
         await mapping.start_async()
-        
+
         # Assert
         mock_eventhub_consumer.start.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_start_async_without_start_raises_error(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, mock_logfire
     ):
         """Test that start_async() raises error if start() not called first."""
         # Arrange
@@ -286,7 +267,7 @@ class TestPipelineMapping:
             mapping_config=sample_mapping,
             pipeline_config=complete_pipeline_config,
         )
-        
+
         # Act & Assert
         with pytest.raises(RuntimeError, match="Mapping must be started"):
             await mapping.start_async()
@@ -298,7 +279,7 @@ class TestPipelineMapping:
         sample_eventhub_messages,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that _process_messages() successfully ingests messages to Snowflake."""
         # Arrange
@@ -307,10 +288,10 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         mapping.start()
-        
+
         # Act
         result = mapping._process_messages(sample_eventhub_messages)
-        
+
         # Assert
         assert result is True
         assert mapping.stats["messages_processed"] == len(sample_eventhub_messages)
@@ -319,11 +300,7 @@ class TestPipelineMapping:
         mock_snowflake_client.ingest_batch.assert_called_once()
 
     def test_process_messages_without_snowflake_client_returns_false(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        sample_eventhub_messages,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, sample_eventhub_messages, mock_logfire
     ):
         """Test that _process_messages() returns False when Snowflake client is missing."""
         # Arrange
@@ -332,10 +309,10 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         # Don't call start() so client is None
-        
+
         # Act
         result = mapping._process_messages(sample_eventhub_messages)
-        
+
         # Assert
         assert result is False
         assert mapping.stats["messages_processed"] == 0
@@ -347,7 +324,7 @@ class TestPipelineMapping:
         sample_eventhub_messages,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that _process_messages() handles Snowflake ingestion failure."""
         # Arrange
@@ -357,10 +334,10 @@ class TestPipelineMapping:
         )
         mapping.start()
         mock_snowflake_client.ingest_batch.return_value = False
-        
+
         # Act
         result = mapping._process_messages(sample_eventhub_messages)
-        
+
         # Assert
         assert result is False
         assert mapping.stats["messages_processed"] == 0
@@ -373,7 +350,7 @@ class TestPipelineMapping:
         sample_eventhub_messages,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that _process_messages() handles exceptions gracefully."""
         # Arrange
@@ -383,10 +360,10 @@ class TestPipelineMapping:
         )
         mapping.start()
         mock_snowflake_client.ingest_batch.side_effect = RuntimeError("Ingestion error")
-        
+
         # Act
         result = mapping._process_messages(sample_eventhub_messages)
-        
+
         # Assert
         assert result is False
         assert len(mapping.stats["errors"]) == 1
@@ -399,7 +376,7 @@ class TestPipelineMapping:
         sample_mapping,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that stop() properly cleans up EventHub and Snowflake resources."""
         # Arrange
@@ -408,10 +385,10 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         mapping.start()
-        
+
         # Act
         await mapping.stop()
-        
+
         # Assert
         assert not mapping.running
         assert mapping.eventhub_consumer is None
@@ -421,10 +398,7 @@ class TestPipelineMapping:
 
     @pytest.mark.asyncio
     async def test_stop_when_not_running_does_nothing(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, mock_logfire
     ):
         """Test that stop() does nothing when mapping is not running."""
         # Arrange
@@ -432,10 +406,10 @@ class TestPipelineMapping:
             mapping_config=sample_mapping,
             pipeline_config=complete_pipeline_config,
         )
-        
+
         # Act (should not raise)
         await mapping.stop()
-        
+
         # Assert
         assert not mapping.running
 
@@ -445,7 +419,7 @@ class TestPipelineMapping:
         sample_mapping,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that get_stats() returns accurate statistics."""
         # Arrange
@@ -456,10 +430,10 @@ class TestPipelineMapping:
         mapping.start()
         mapping.stats["messages_processed"] = 100
         mapping.stats["batches_processed"] = 10
-        
+
         # Act
         stats = mapping.get_stats()
-        
+
         # Assert
         assert stats["mapping_key"] == "EVENTHUBNAME_1->SNOWFLAKE_1"
         assert stats["messages_processed"] == 100
@@ -468,10 +442,7 @@ class TestPipelineMapping:
         assert "messages_per_second" in stats
 
     def test_get_stats_without_started_excludes_runtime(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, mock_logfire
     ):
         """Test that get_stats() excludes runtime when not started."""
         # Arrange
@@ -479,10 +450,10 @@ class TestPipelineMapping:
             mapping_config=sample_mapping,
             pipeline_config=complete_pipeline_config,
         )
-        
+
         # Act
         stats = mapping.get_stats()
-        
+
         # Assert
         assert "runtime_seconds" not in stats
         assert "messages_per_second" not in stats
@@ -493,7 +464,7 @@ class TestPipelineMapping:
         sample_mapping,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that health_check() returns component health status."""
         # Arrange
@@ -502,10 +473,10 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         mapping.start()
-        
+
         # Act
         health = mapping.health_check()
-        
+
         # Assert
         assert health["mapping_key"] == "EVENTHUBNAME_1->SNOWFLAKE_1"
         assert health["running"] is True
@@ -514,10 +485,7 @@ class TestPipelineMapping:
         assert len(health["errors"]) == 0
 
     def test_health_check_reports_missing_components(
-        self,
-        complete_pipeline_config,
-        sample_mapping,
-        mock_logfire
+        self, complete_pipeline_config, sample_mapping, mock_logfire
     ):
         """Test that health_check() reports missing components."""
         # Arrange
@@ -526,10 +494,10 @@ class TestPipelineMapping:
             pipeline_config=complete_pipeline_config,
         )
         # Don't start, so components are None
-        
+
         # Act
         health = mapping.health_check()
-        
+
         # Assert
         assert health["running"] is False
         assert len(health["errors"]) == 2
@@ -545,15 +513,11 @@ class TestPipelineMapping:
 class TestPipelineOrchestrator:
     """Tests for PipelineOrchestrator class."""
 
-    def test_init_creates_orchestrator(
-        self,
-        complete_pipeline_config,
-        mock_logfire
-    ):
+    def test_init_creates_orchestrator(self, complete_pipeline_config, mock_logfire):
         """Test that PipelineOrchestrator initializes successfully."""
         # Act
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        
+
         # Assert
         assert orchestrator.config == complete_pipeline_config
         assert len(orchestrator.mappings) == 0
@@ -562,19 +526,15 @@ class TestPipelineOrchestrator:
         assert orchestrator.stats["mappings_count"] == 0
 
     def test_initialize_creates_all_mappings(
-        self,
-        complete_pipeline_config,
-        mock_eventhub_consumer,
-        mock_snowflake_client,
-        mock_logfire
+        self, complete_pipeline_config, mock_eventhub_consumer, mock_snowflake_client, mock_logfire
     ):
         """Test that initialize() creates all configured mappings."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        
+
         # Act
         orchestrator.initialize()
-        
+
         # Assert
         assert len(orchestrator.mappings) == 1
         assert orchestrator.stats["mappings_count"] == 1
@@ -587,7 +547,7 @@ class TestPipelineOrchestrator:
         sample_snowflake_config,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
     ):
         """Test that initialize() handles multiple mappings."""
         # Arrange
@@ -600,30 +560,26 @@ class TestPipelineOrchestrator:
                 snowflake_key="SNOWFLAKE_2",
             )
         )
-        
+
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        
+
         # Act
         orchestrator.initialize()
-        
+
         # Assert
         assert len(orchestrator.mappings) == 2
         assert orchestrator.stats["mappings_count"] == 2
 
     def test_start_initializes_and_sets_running(
-        self,
-        complete_pipeline_config,
-        mock_eventhub_consumer,
-        mock_snowflake_client,
-        mock_logfire
+        self, complete_pipeline_config, mock_eventhub_consumer, mock_snowflake_client, mock_logfire
     ):
         """Test that start() initializes mappings and sets running flag."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        
+
         # Act
         orchestrator.start()
-        
+
         # Assert
         assert orchestrator.running
         assert len(orchestrator.mappings) == 1
@@ -634,17 +590,17 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        caplog
+        caplog,
     ):
         """Test that start() logs warning when already running."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
+
         # Act
         with caplog.at_level("WARNING"):
             orchestrator.start()
-        
+
         # Assert
         assert "already running" in caplog.text.lower()
 
@@ -655,36 +611,28 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
     ):
         """Test that run_async() starts async tasks for all mappings."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
-        # Make gather return immediately to avoid hanging
-        mock_gather = mocker.patch(
-            "asyncio.gather",
-            side_effect=asyncio.CancelledError()
-        )
-        
-        # Act & Assert
-        with pytest.raises(asyncio.CancelledError):
-            await orchestrator.run_async()
-        
-        # Verify tasks were created
+
+        # Act: with mocked EventHub consumer start() returning immediately, the
+        # mapping task should complete quickly and gather should return.
+        await orchestrator.run_async()
+
+        # Assert
         assert len(orchestrator.tasks) == 1
+        assert all(task.done() for task in orchestrator.tasks)
 
     @pytest.mark.asyncio
     async def test_run_async_without_start_raises_error(
-        self,
-        complete_pipeline_config,
-        mock_logfire
+        self, complete_pipeline_config, mock_logfire
     ):
         """Test that run_async() raises error if start() not called."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        
+
         # Act & Assert
         with pytest.raises(RuntimeError, match="Orchestrator must be started"):
             await orchestrator.run_async()
@@ -696,21 +644,21 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
     ):
         """Test that run_async() handles CancelledError properly."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
-        mocker.patch(
-            "asyncio.gather",
-            side_effect=asyncio.CancelledError()
-        )
-        
-        # Act & Assert
-        with pytest.raises(asyncio.CancelledError):
-            await orchestrator.run_async()
+
+        with patch("asyncio.gather", side_effect=asyncio.CancelledError()):
+            with pytest.raises(asyncio.CancelledError):
+                await orchestrator.run_async()
+
+        # Cleanup: cancel/await any created mapping tasks to avoid pending-task warnings
+        for task in orchestrator.tasks:
+            task.cancel()
+        if orchestrator.tasks:
+            await asyncio.gather(*orchestrator.tasks, return_exceptions=True)
 
     @pytest.mark.asyncio
     async def test_stop_cancels_all_tasks(
@@ -719,26 +667,27 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that stop() cancels all running tasks."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
+
         # Create mock tasks
         mock_task1 = mocker.MagicMock()
         mock_task1.done.return_value = False
         orchestrator.tasks = [mock_task1]
-        
+
         # Mock asyncio.gather to return immediately with completed future
         async def mock_gather(*args, **kwargs):
             return None
+
         mocker.patch("asyncio.gather", side_effect=mock_gather)
-        
+
         # Act
         await orchestrator.stop()
-        
+
         # Assert - now verifies graceful shutdown without task cancellation
         assert not orchestrator.running
         # Verify mapping.stop() was called on each mapping
@@ -752,64 +701,99 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that stop() properly stops all mappings."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
+
         # Mock asyncio.gather to return immediately
         async def mock_gather(*args, **kwargs):
             return None
+
         mocker.patch("asyncio.gather", side_effect=mock_gather)
-        
+
         # Spy on mapping.stop()
         for mapping in orchestrator.mappings:
             mapping.stop = AsyncMock()
-        
+
         # Act
         await orchestrator.stop()
-        
+
         # Assert
         assert len(orchestrator.mappings) == 0
         assert len(orchestrator.tasks) == 0
 
     @pytest.mark.asyncio
-    async def test_stop_when_not_running_does_nothing(
-        self,
-        complete_pipeline_config,
-        mock_logfire
-    ):
+    async def test_stop_when_not_running_does_nothing(self, complete_pipeline_config, mock_logfire):
         """Test that stop() does nothing when not running."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        
+
         # Act (should not raise)
         await orchestrator.stop()
-        
+
         # Assert
         assert not orchestrator.running
 
-    def test_get_stats_aggregates_mapping_stats(
+    @pytest.mark.asyncio
+    async def test_stop_cancels_pending_tasks_after_timeout(
         self,
         complete_pipeline_config,
         mock_eventhub_consumer,
         mock_snowflake_client,
-        mock_logfire
+        mock_logfire,
+        mocker,
+    ):
+        """Test that stop() cancels pending tasks after initial timeout."""
+        orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
+        orchestrator.start()
+
+        for mapping in orchestrator.mappings:
+            mapping.stop = AsyncMock()
+
+        mock_task = mocker.MagicMock()
+        mock_task.done.return_value = False
+        orchestrator.tasks = [mock_task]
+
+        async def fake_gather(*_args, **_kwargs):
+            return None
+
+        wait_calls = {"count": 0}
+
+        async def fake_wait_for(awaitable, *_args, **_kwargs):
+            wait_calls["count"] += 1
+            if wait_calls["count"] == 1:
+                if hasattr(awaitable, "cancel"):
+                    awaitable.cancel()
+                raise TimeoutError
+            return None
+
+        mocker.patch("asyncio.gather", side_effect=fake_gather)
+        mocker.patch("asyncio.wait_for", side_effect=fake_wait_for)
+        mock_exit = mocker.patch("os._exit")
+
+        await orchestrator.stop()
+
+        assert mock_task.cancel.called
+        mock_exit.assert_not_called()
+
+    def test_get_stats_aggregates_mapping_stats(
+        self, complete_pipeline_config, mock_eventhub_consumer, mock_snowflake_client, mock_logfire
     ):
         """Test that get_stats() aggregates statistics from all mappings."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
+
         # Set some stats on mappings
         orchestrator.mappings[0].stats["messages_processed"] = 100
         orchestrator.mappings[0].stats["batches_processed"] = 10
-        
+
         # Act
         stats = orchestrator.get_stats()
-        
+
         # Assert
         assert stats["mappings_count"] == 1
         assert stats["total_messages_processed"] == 100
@@ -818,45 +802,36 @@ class TestPipelineOrchestrator:
         assert len(stats["mappings"]) == 1
 
     def test_health_check_aggregates_mapping_health(
-        self,
-        complete_pipeline_config,
-        mock_eventhub_consumer,
-        mock_snowflake_client,
-        mock_logfire
+        self, complete_pipeline_config, mock_eventhub_consumer, mock_snowflake_client, mock_logfire
     ):
         """Test that health_check() aggregates health from all mappings."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        
+
         # Act
         health = orchestrator.health_check()
-        
+
         # Assert
         assert health["orchestrator_status"] == "running"
         assert health["mappings_count"] == 1
         assert len(health["mappings"]) == 1
 
     def test_setup_signal_handlers_registers_handlers(
-        self,
-        complete_pipeline_config,
-        mock_logfire,
-        mocker
+        self, complete_pipeline_config, mock_logfire, mocker
     ):
         """Test that setup_signal_handlers() registers signal handlers."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        loop = asyncio.new_event_loop()
-        
-        mock_add_signal_handler = mocker.patch.object(loop, "add_signal_handler")
-        
+        loop = mocker.MagicMock(spec=asyncio.AbstractEventLoop)
+
         # Act
         orchestrator.setup_signal_handlers(loop)
-        
+
         # Assert
         # Should register handlers for SIGINT and SIGTERM
-        assert mock_add_signal_handler.call_count == 2
-        calls = mock_add_signal_handler.call_args_list
+        assert loop.add_signal_handler.call_count == 2
+        calls = loop.add_signal_handler.call_args_list
         registered_signals = [call[0][0] for call in calls]
         assert signal.SIGINT in registered_signals
         assert signal.SIGTERM in registered_signals
@@ -867,71 +842,77 @@ class TestPipelineOrchestrator:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that signal handler cancels tasks on first signal."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
         orchestrator.start()
-        loop = asyncio.new_event_loop()
-        
+        loop = mocker.MagicMock(spec=asyncio.AbstractEventLoop)
+
         # Create mock tasks
         mock_task = mocker.MagicMock()
         mock_task.done.return_value = False
         mock_task.get_name.return_value = "test_task"
         orchestrator.tasks = [mock_task]
-        
+
         # Capture the signal handler
         signal_handlers = {}
-        
+
         def capture_handler(sig, handler, *args):
             # Store both handler and args so we can call handler(args[0]) later
             signal_handlers[sig] = (handler, args)
-        
-        mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
-        mock_create_task = mocker.patch.object(loop, "create_task")
-        
+
+        loop.add_signal_handler.side_effect = capture_handler
+
+        def _close_coro(coro, *args, **kwargs):
+            # The signal handler schedules orchestrator.stop() via loop.create_task.
+            # Ensure we close the coroutine to avoid leaks.
+            if hasattr(coro, "close"):
+                coro.close()
+            return None
+
+        loop.create_task.side_effect = _close_coro
+
         orchestrator.setup_signal_handlers(loop)
-        
+
         # Act - trigger SIGINT (call handler with the captured signal arg)
         handler, args = signal_handlers[signal.SIGINT]
         handler(args[0])
-        
-        # Assert - now verifies graceful shutdown by calling stop()
+
+        # Assert
         assert orchestrator.shutdown_requested
-        # Verify that stop() is scheduled via create_task (graceful shutdown)
-        mock_create_task.assert_called_once()
+        loop.create_task.assert_called_once()
 
     def test_signal_handler_forces_exit_on_second_signal(
-        self,
-        complete_pipeline_config,
-        mock_logfire,
-        mocker
+        self, complete_pipeline_config, mock_logfire, mocker
     ):
         """Test that signal handler forces exit on second signal."""
         # Arrange
         orchestrator = PipelineOrchestrator(config=complete_pipeline_config)
-        loop = asyncio.new_event_loop()
-        
+        loop = mocker.MagicMock(spec=asyncio.AbstractEventLoop)
+
         # Capture the signal handler
         signal_handlers = {}
-        
+
         def capture_handler(sig, handler, *args):
             # Store both handler and args so we can call handler(args[0]) later
             signal_handlers[sig] = (handler, args)
-        
-        mocker.patch.object(loop, "add_signal_handler", side_effect=capture_handler)
-        mock_exit = mocker.patch("sys.exit")
-        
+
+        loop.add_signal_handler.side_effect = capture_handler
+        mock_exit = mocker.patch("pipeline.orchestrator.os._exit", side_effect=SystemExit(1))
+
         orchestrator.setup_signal_handlers(loop)
-        
+
         # Act - trigger SIGINT twice
         orchestrator.shutdown_requested = True  # Simulate first signal
         handler, args = signal_handlers[signal.SIGINT]
-        handler(args[0])
-        
+        with pytest.raises(SystemExit):
+            handler(args[0])
+
         # Assert
         mock_exit.assert_called_once_with(1)
+        loop.create_task.assert_not_called()
 
 
 # ============================================================================
@@ -949,7 +930,7 @@ class TestRunPipeline:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that run_pipeline() creates an orchestrator."""
         # Arrange
@@ -959,15 +940,12 @@ class TestRunPipeline:
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=asyncio.CancelledError())
         mock_orchestrator.stop = mocker.AsyncMock()
-        
-        mocker.patch(
-            "pipeline.orchestrator.PipelineOrchestrator",
-            return_value=mock_orchestrator
-        )
-        
+
+        mocker.patch("pipeline.orchestrator.PipelineOrchestrator", return_value=mock_orchestrator)
+
         # Act
         await run_pipeline(config=complete_pipeline_config)
-        
+
         # Assert
         mock_orchestrator.start.assert_called_once()
         mock_orchestrator.setup_signal_handlers.assert_called_once()
@@ -982,7 +960,7 @@ class TestRunPipeline:
         mock_snowflake_client,
         mock_logfire,
         mocker,
-        caplog
+        caplog,
     ):
         """Test that run_pipeline() handles CancelledError gracefully."""
         # Arrange
@@ -991,16 +969,13 @@ class TestRunPipeline:
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=asyncio.CancelledError())
         mock_orchestrator.stop = mocker.AsyncMock()
-        
-        mocker.patch(
-            "pipeline.orchestrator.PipelineOrchestrator",
-            return_value=mock_orchestrator
-        )
-        
+
+        mocker.patch("pipeline.orchestrator.PipelineOrchestrator", return_value=mock_orchestrator)
+
         # Act
         with caplog.at_level("INFO"):
             await run_pipeline(config=complete_pipeline_config)
-        
+
         # Assert
         assert "cancelled" in caplog.text.lower() or "shutdown" in caplog.text.lower()
         mock_orchestrator.stop.assert_called_once()
@@ -1013,7 +988,7 @@ class TestRunPipeline:
         mock_snowflake_client,
         mock_logfire,
         mocker,
-        caplog
+        caplog,
     ):
         """Test that run_pipeline() handles KeyboardInterrupt gracefully."""
         # Arrange
@@ -1022,16 +997,13 @@ class TestRunPipeline:
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=KeyboardInterrupt())
         mock_orchestrator.stop = mocker.AsyncMock()
-        
-        mocker.patch(
-            "pipeline.orchestrator.PipelineOrchestrator",
-            return_value=mock_orchestrator
-        )
-        
+
+        mocker.patch("pipeline.orchestrator.PipelineOrchestrator", return_value=mock_orchestrator)
+
         # Act
         with caplog.at_level("INFO"):
             await run_pipeline(config=complete_pipeline_config)
-        
+
         # Assert
         assert "keyboard interrupt" in caplog.text.lower() or "shutdown" in caplog.text.lower()
         mock_orchestrator.stop.assert_called_once()
@@ -1043,27 +1015,22 @@ class TestRunPipeline:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that run_pipeline() handles generic exceptions and cleans up."""
         # Arrange
         mock_orchestrator = mocker.MagicMock()
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
-        mock_orchestrator.run_async = mocker.AsyncMock(
-            side_effect=RuntimeError("Pipeline error")
-        )
+        mock_orchestrator.run_async = mocker.AsyncMock(side_effect=RuntimeError("Pipeline error"))
         mock_orchestrator.stop = mocker.AsyncMock()
-        
-        mocker.patch(
-            "pipeline.orchestrator.PipelineOrchestrator",
-            return_value=mock_orchestrator
-        )
-        
+
+        mocker.patch("pipeline.orchestrator.PipelineOrchestrator", return_value=mock_orchestrator)
+
         # Act & Assert
         with pytest.raises(RuntimeError, match="Pipeline error"):
             await run_pipeline(config=complete_pipeline_config)
-        
+
         # Verify cleanup was called
         mock_orchestrator.stop.assert_called_once()
 
@@ -1074,7 +1041,7 @@ class TestRunPipeline:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that run_pipeline() always calls stop() in finally block."""
         # Arrange
@@ -1083,16 +1050,13 @@ class TestRunPipeline:
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=ValueError("Test error"))
         mock_orchestrator.stop = mocker.AsyncMock()
-        
-        mocker.patch(
-            "pipeline.orchestrator.PipelineOrchestrator",
-            return_value=mock_orchestrator
-        )
-        
+
+        mocker.patch("pipeline.orchestrator.PipelineOrchestrator", return_value=mock_orchestrator)
+
         # Act & Assert
         with pytest.raises(ValueError):
             await run_pipeline(config=complete_pipeline_config)
-        
+
         # Verify stop was called despite exception
         mock_orchestrator.stop.assert_called_once()
 
@@ -1103,31 +1067,26 @@ class TestRunPipeline:
         mock_eventhub_consumer,
         mock_snowflake_client,
         mock_logfire,
-        mocker
+        mocker,
     ):
         """Test that run_pipeline() accepts and uses retry_manager."""
         # Arrange
         mock_retry_manager = mocker.MagicMock()
-        
+
         mock_orchestrator = mocker.MagicMock()
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=asyncio.CancelledError())
         mock_orchestrator.stop = mocker.AsyncMock()
-        
+
         mock_orchestrator_class = mocker.patch(
-            "pipeline.orchestrator.PipelineOrchestrator",
-            return_value=mock_orchestrator
+            "pipeline.orchestrator.PipelineOrchestrator", return_value=mock_orchestrator
         )
-        
+
         # Act
-        await run_pipeline(
-            config=complete_pipeline_config,
-            retry_manager=mock_retry_manager
-        )
-        
+        await run_pipeline(config=complete_pipeline_config, retry_manager=mock_retry_manager)
+
         # Assert
         mock_orchestrator_class.assert_called_once_with(
-            config=complete_pipeline_config,
-            retry_manager=mock_retry_manager
+            config=complete_pipeline_config, retry_manager=mock_retry_manager
         )

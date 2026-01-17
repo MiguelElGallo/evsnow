@@ -12,12 +12,14 @@ Based on Azure EventHub SDK patterns but adapted for Snowflake checkpointing.
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, NoReturn
 
 import logfire
 from azure.eventhub import EventData
@@ -72,6 +74,8 @@ class EventHubAsyncConsumer:
         control_db: str | None = None,
         control_schema: str | None = None,
         control_table: str | None = None,
+        capture_messages: bool = False,
+        capture_messages_dir: str = "messages",
     ):
         self.eventhub_config = eventhub_config
         self.target_db = target_db
@@ -81,6 +85,13 @@ class EventHubAsyncConsumer:
         self.snowflake_config = snowflake_config
         self.batch_size = batch_size
         self.batch_timeout_seconds = batch_timeout_seconds
+
+        # Optional debug capture of raw messages (as received from Event Hub)
+        self.capture_messages = capture_messages
+        self.capture_messages_dir = capture_messages_dir
+        self._capture_queue: asyncio.Queue[tuple[int, dict[str, Any]] | None] | None = None
+        self._capture_task: asyncio.Task[None] | None = None
+        self._capture_dropped_messages = 0
 
         # Control table configuration (for checkpoints)
         self.control_db = control_db or target_db
@@ -112,6 +123,370 @@ class EventHubAsyncConsumer:
             "start_time": None,
         }
 
+    def _capture_dir_path(self) -> Path:
+        return Path.cwd() / self.capture_messages_dir
+
+    @staticmethod
+    def _event_body_to_utf8(event: EventData) -> str:
+        """Decode Event Hub message body as UTF-8 (replacement for invalid sequences)."""
+        try:
+            body = event.body
+            if isinstance(body, (bytes, bytearray, memoryview)):
+                body_bytes = bytes(body)
+            elif isinstance(body, str):
+                body_bytes = body.encode("utf-8", errors="replace")
+            elif isinstance(body, Iterable):
+                chunks: list[bytes] = []
+                for chunk in body:
+                    if isinstance(chunk, (bytes, bytearray, memoryview)):
+                        chunks.append(bytes(chunk))
+                    else:
+                        chunks.append(str(chunk).encode("utf-8", errors="replace"))
+                body_bytes = b"".join(chunks)
+            else:
+                body_bytes = str(body).encode("utf-8", errors="replace")
+        except Exception:
+            # Fallback: some mocks or SDK versions may expose `body` differently
+            try:
+                body_bytes = bytes(event.body)  # type: ignore[arg-type]
+            except Exception:
+                body_bytes = b""
+        return body_bytes.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _to_jsonable(value: Any) -> Any:
+        """Convert values into a JSON-serializable structure.
+
+        Azure Event Hub `properties` / `system_properties` can include `bytes` keys.
+        Python's `json` requires keys to be str/int/float/bool/None, so we normalize.
+        """
+
+        if value is None:
+            return None
+
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+
+        if isinstance(value, (str, int, float, bool)):
+            return value
+
+        if isinstance(value, dict):
+            converted: dict[str, Any] = {}
+            for k, v in value.items():
+                key = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
+                converted[key] = EventHubAsyncConsumer._to_jsonable(v)
+            return converted
+
+        if isinstance(value, (list, tuple, set)):
+            return [EventHubAsyncConsumer._to_jsonable(v) for v in value]
+
+        # Fallback: stringify unknown objects (e.g., UUID, datetime in some contexts)
+        return str(value)
+
+    def _enqueue_capture(self, partition_id: str, event: EventData) -> None:
+        if not self.capture_messages:
+            return
+
+        if self._capture_queue is None:
+            return
+
+        timestamp_ns = time.time_ns()
+        payload: dict[str, Any] = {
+            "timestamp_ns": timestamp_ns,
+            "eventhub_namespace": self.eventhub_config.namespace,
+            "eventhub_name": self.eventhub_config.name,
+            "consumer_group": self.eventhub_config.consumer_group,
+            "partition_id": partition_id,
+            "offset": event.offset,
+            "sequence_number": event.sequence_number,
+            "enqueued_time": event.enqueued_time.isoformat() if event.enqueued_time else None,
+            "content_type": getattr(event, "content_type", None),
+            "body": self._event_body_to_utf8(event),
+            "properties": self._to_jsonable(event.properties),
+            "system_properties": self._to_jsonable(event.system_properties),
+        }
+
+        try:
+            self._capture_queue.put_nowait((timestamp_ns, payload))
+        except asyncio.QueueFull:
+            self._capture_dropped_messages += 1
+            # Avoid spamming logs
+            if self._capture_dropped_messages in (1, 10, 100, 1000):
+                logger.warning(
+                    "Capture queue full; dropped %s messages so far",
+                    self._capture_dropped_messages,
+                )
+
+    async def _capture_writer_loop(self) -> None:
+        if self._capture_queue is None:
+            return
+
+        capture_dir = self._capture_dir_path()
+        capture_dir.mkdir(parents=True, exist_ok=True)
+
+        while True:
+            item = await self._capture_queue.get()
+            if item is None:
+                self._capture_queue.task_done()
+                return
+
+            timestamp_ns, payload = item
+            try:
+                await asyncio.to_thread(
+                    self._write_capture_file, capture_dir, timestamp_ns, payload
+                )
+            except Exception as exc:
+                logger.warning("Failed to write captured message: %s", exc)
+            finally:
+                self._capture_queue.task_done()
+
+    @staticmethod
+    def _write_capture_file(
+        capture_dir: Path,
+        timestamp_ns: int,
+        payload: dict[str, Any],
+    ) -> None:
+        file_path = capture_dir / f"f_{timestamp_ns}.json"
+        tmp_path = capture_dir / f"f_{timestamp_ns}.json.tmp"
+        safe_payload = EventHubAsyncConsumer._to_jsonable(payload)
+        data = json.dumps(safe_payload, ensure_ascii=False, cls=BytesEncoder)
+        tmp_path.write_text(data, encoding="utf-8")
+        tmp_path.replace(file_path)
+
+    async def _start_capture_writer(self) -> None:
+        if not self.capture_messages:
+            return
+
+        if self._capture_task is not None:
+            return
+
+        # Keep queue bounded to avoid unbounded memory usage
+        self._capture_queue = asyncio.Queue(maxsize=10_000)
+        self._capture_task = asyncio.create_task(self._capture_writer_loop())
+        logger.info("📝 Capture enabled: writing raw messages to %s/", self.capture_messages_dir)
+
+    async def _stop_capture_writer(self) -> None:
+        if self._capture_queue is None or self._capture_task is None:
+            return
+
+        try:
+            await self._capture_queue.put(None)
+            await asyncio.wait_for(self._capture_task, timeout=30)
+        except TimeoutError:
+            logger.warning("Timed out waiting for capture writer to stop")
+        except Exception as exc:
+            logger.warning("Error stopping capture writer: %s", exc)
+        finally:
+            self._capture_task = None
+            self._capture_queue = None
+
+    def _log_startup_summary(self) -> None:
+        logger.info(f"🚀 Starting EventHub consumer for {self.eventhub_config.name}")
+        logger.info(f"   Namespace: {self.eventhub_config.namespace}")
+        logger.info(f"   Consumer Group: {self.eventhub_config.consumer_group}")
+        logger.info(f"   Consumer ID: {self.consumer_id}")
+        logger.info(f"   Batch Size: {self.batch_size}")
+        logger.info(f"   Batch Timeout: {self.batch_timeout_seconds}s")
+        logger.info("")
+
+    def _log_competing_consumer_guidance(self) -> None:
+        logger.warning("⚠️  IMPORTANT: Competing Consumer Detection")
+        logger.warning("")
+        logger.warning(
+            f"   This consumer ({self.consumer_id}) is using consumer group '{self.eventhub_config.consumer_group}'"
+        )
+        logger.warning(
+            "   EventHub allows ONLY ONE consumer per partition per consumer group at a time."
+        )
+        logger.warning("")
+        logger.warning("   If you see 'amqp:link:stolen' errors, it means:")
+        logger.warning("   • Another consumer instance is competing for the same partitions")
+        logger.warning("   • A zombie process from a previous run is still connected")
+        logger.warning("   • You're running multiple instances of this application")
+        logger.warning("")
+        logger.warning("   To fix:")
+        logger.warning("   • Kill all running instances: ps aux | grep evsnow")
+        logger.warning(
+            f"   • Use a different consumer group (current: '{self.eventhub_config.consumer_group}')"
+        )
+        logger.warning("   • Wait 5-10 minutes for old connections to timeout")
+        logger.warning("")
+
+    def _log_no_checkpoint_behavior(self, starting_pos: str) -> None:
+        logger.warning("⚠️ No checkpoints found in Snowflake.")
+
+        if starting_pos == "-1":
+            logger.info(
+                f"   Starting from BEGINNING of stream (starting_position='{starting_pos}') to process ALL existing messages."
+            )
+        elif starting_pos == "@latest":
+            logger.info(
+                f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
+            )
+        elif starting_pos == "0":
+            logger.info(
+                f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
+            )
+
+        logger.info(
+            "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
+        )
+
+    def _log_rbac_permission_validation_notice(self) -> None:
+        logger.info("")
+        logger.warning("⚠️  IMPORTANT: RBAC Permission Validation")
+        logger.warning("")
+        logger.warning("   Azure does NOT provide an API to pre-check data plane RBAC permissions.")
+        logger.warning("   Permission validation only happens when SDK tries to receive messages.")
+        logger.warning("")
+        logger.warning("   What happens next:")
+        logger.warning("   1. SDK will attempt to connect to EventHub partitions via AMQP")
+        logger.warning(
+            "   2. If authenticated identity lacks 'Azure Event Hubs Data Receiver' role:"
+        )
+        logger.warning("      - Connection will FAIL with 'Unauthorized' or 'Forbidden' error")
+        logger.warning("      - You'll see detailed error message with fix instructions")
+        logger.warning("   3. If connection succeeds:")
+        logger.warning("      - The authenticated identity HAS the required role")
+        logger.warning("      - Check logs above to see WHICH identity was used")
+        logger.warning("")
+        logger.warning("   NOTE: System may use Managed Identity (not your CLI user)!")
+        logger.warning(
+            "   Look for MSI endpoint in logs: http://169.254.169.254/metadata/identity/..."
+        )
+        logger.warning("")
+
+    def _log_receive_error_header(self, *, error_type: str, receive_error: Exception) -> None:
+        logger.error("")
+        logger.error("=" * 70)
+        logger.error("❌ EVENTHUB RECEIVE ERROR")
+        logger.error("=" * 70)
+        logger.error(f"Error type: {error_type}")
+        logger.error(f"Error message: {receive_error}")
+        logger.error("")
+
+    def _log_azure_credential_error_guidance(
+        self,
+        *,
+        error_type: str,
+        receive_error: Exception,
+    ) -> None:
+        logger.error("🔐 AZURE CREDENTIAL ERROR DETECTED!")
+        logger.error("")
+        logger.error("This error occurs during EventProcessor's partition ownership claiming.")
+        logger.error("The SDK repeatedly tries to claim partition ownership and re-authenticates.")
+        logger.error("")
+        logger.error("Possible causes:")
+        logger.error("  1. Azure CLI token expired and refresh failed")
+        logger.error(
+            "  2. Too many rapid authentication requests overwhelming the credential chain"
+        )
+        logger.error("  3. Network interruption preventing token refresh")
+        logger.error("  4. Azure CLI process busy or locked")
+        logger.error("")
+        logger.error("Recommended solutions:")
+        logger.error("  1. Run: az login --use-device-code (refresh auth)")
+        logger.error("  2. Set environment variables for faster auth (skip credential chain):")
+        logger.error("     export AZURE_TENANT_ID='your-tenant-id'")
+        logger.error("     export AZURE_CLIENT_ID='your-client-id'")
+        logger.error("     export AZURE_CLIENT_SECRET='your-secret'")
+        logger.error(
+            "  3. Check: az account get-access-token --resource https://eventhubs.azure.net"
+        )
+        logger.error("")
+        logfire.error(
+            "Azure credential error during EventHub receive",
+            error_type=error_type,
+            error_message=str(receive_error),
+            namespace=self.eventhub_config.namespace,
+            eventhub=self.eventhub_config.name,
+        )
+
+    def _raise_rbac_permission_error(
+        self,
+        *,
+        error_type: str,
+        receive_error: Exception,
+    ) -> NoReturn:
+        logger.error("")
+        logger.error("❌ RBAC PERMISSION ERROR DETECTED!")
+        logger.error(f"   Error type: {error_type}")
+        logger.error(f"   Error message: {receive_error}")
+        logger.error("")
+        logger.error("🔐 The authenticated identity lacks required Azure RBAC permissions!")
+        logger.error("")
+        logger.error("Required Role:")
+        logger.error("  • 'Azure Event Hubs Data Receiver' - to read EventHub messages")
+        logger.error("")
+        logger.error("How to Fix:")
+        logger.error("  1. Check which authentication method was used (see logs above)")
+        logger.error("  2. If using Managed Identity, assign the role to the managed identity")
+        logger.error("  3. If using Azure CLI, assign the role to your Azure CLI user")
+        logger.error("  4. Go to Azure Portal → Event Hubs")
+        logger.error(f"  5. Find namespace: {self.eventhub_config.namespace}")
+        logger.error(f"  6. Click on Event Hub: {self.eventhub_config.name}")
+        logger.error("  7. Go to 'Access Control (IAM)' → 'Add role assignment'")
+        logger.error("  8. Select role: 'Azure Event Hubs Data Receiver'")
+        logger.error("  9. Assign to the correct identity (MSI or user)")
+        logger.error("")
+        raise RuntimeError(
+            "Missing Azure RBAC permission: 'Azure Event Hubs Data Receiver' role required for the authenticated identity"
+        ) from receive_error
+
+    def _handle_receive_error(self, receive_error: Exception) -> bool:
+        """Handle EventHub receive errors.
+
+        Returns:
+            True if the error was handled (and should not be re-raised).
+            False if the caller should re-raise the original exception.
+
+        Note: This preserves the current behavior, including swallowing certain
+        credential-chain errors after printing guidance.
+        """
+
+        error_msg = str(receive_error).lower()
+        error_type = type(receive_error).__name__
+
+        self._log_receive_error_header(error_type=error_type, receive_error=receive_error)
+
+        if any(
+            keyword in error_msg
+            for keyword in [
+                "credential",
+                "failed to invoke azure cli",
+                "failed to retrieve a token",
+                "defaultazurecredential failed",
+                "authentication unavailable",
+            ]
+        ):
+            self._log_azure_credential_error_guidance(
+                error_type=error_type,
+                receive_error=receive_error,
+            )
+            return True
+
+        if (
+            any(
+                keyword in error_msg
+                for keyword in [
+                    "unauthorized",
+                    "not authorized",
+                    "authenticationerror",
+                    "permission",
+                    "access denied",
+                    "forbidden",
+                ]
+            )
+            or "401" in error_msg
+            or "403" in error_msg
+        ):
+            self._raise_rbac_permission_error(
+                error_type=error_type,
+                receive_error=receive_error,
+            )
+
+        return False
+
     async def start(self) -> None:
         """
         Start the EventHub consumer.
@@ -140,34 +515,8 @@ class EventHubAsyncConsumer:
             batch_timeout=self.batch_timeout_seconds,
         )
 
-        logger.info(f"🚀 Starting EventHub consumer for {self.eventhub_config.name}")
-        logger.info(f"   Namespace: {self.eventhub_config.namespace}")
-        logger.info(f"   Consumer Group: {self.eventhub_config.consumer_group}")
-        logger.info(f"   Consumer ID: {self.consumer_id}")
-        logger.info(f"   Batch Size: {self.batch_size}")
-        logger.info(f"   Batch Timeout: {self.batch_timeout_seconds}s")
-        logger.info("")
-        logger.warning("⚠️  IMPORTANT: Competing Consumer Detection")
-        logger.warning("")
-        logger.warning(
-            f"   This consumer ({self.consumer_id}) is using consumer group '{self.eventhub_config.consumer_group}'"
-        )
-        logger.warning(
-            "   EventHub allows ONLY ONE consumer per partition per consumer group at a time."
-        )
-        logger.warning("")
-        logger.warning("   If you see 'amqp:link:stolen' errors, it means:")
-        logger.warning("   • Another consumer instance is competing for the same partitions")
-        logger.warning("   • A zombie process from a previous run is still connected")
-        logger.warning("   • You're running multiple instances of this application")
-        logger.warning("")
-        logger.warning("   To fix:")
-        logger.warning("   • Kill all running instances: ps aux | grep evsnow")
-        logger.warning(
-            f"   • Use a different consumer group (current: '{self.eventhub_config.consumer_group}')"
-        )
-        logger.warning("   • Wait 5-10 minutes for old connections to timeout")
-        logger.warning("")
+        self._log_startup_summary()
+        self._log_competing_consumer_guidance()
 
         try:
             # Initialize checkpoint manager
@@ -195,10 +544,12 @@ class EventHubAsyncConsumer:
             logger.info("🔍 Checking for existing checkpoints...")
             partition_checkpoints = await self.checkpoint_manager.get_last_checkpoint()
 
-            # Determine starting position based on checkpoint existence
-            has_checkpoints = partition_checkpoints is not None and len(partition_checkpoints) > 0
+            has_checkpoints = bool(partition_checkpoints)
 
+            # Determine starting position based on checkpoint existence
+            # NOTE: keep the check inline so type-checkers can narrow `partition_checkpoints`.
             if has_checkpoints:
+                assert partition_checkpoints is not None
                 logger.info(f"✅ Found checkpoints in Snowflake: {partition_checkpoints}")
                 logger.info(
                     "   SDK will automatically resume from NEXT sequence after these checkpoints:"
@@ -210,24 +561,7 @@ class EventHubAsyncConsumer:
                 self.stats["last_checkpoint"] = partition_checkpoints
             else:
                 starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
-                logger.warning("⚠️ No checkpoints found in Snowflake.")
-
-                if starting_pos == "-1":
-                    logger.info(
-                        f"   Starting from BEGINNING of stream (starting_position='{starting_pos}') to process ALL existing messages."
-                    )
-                elif starting_pos == "@latest":
-                    logger.info(
-                        f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
-                    )
-                elif starting_pos == "0":
-                    logger.info(
-                        f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
-                    )
-
-                logger.info(
-                    "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
-                )
+                self._log_no_checkpoint_behavior(starting_pos)
 
             # Create EventHub client WITH checkpoint store
             # The SDK will automatically load checkpoints from the store
@@ -312,35 +646,13 @@ class EventHubAsyncConsumer:
 
             logger.info("✅ EventHub client configured - SDK will use checkpoint store to resume")
 
-            logger.info("")
-            logger.warning("⚠️  IMPORTANT: RBAC Permission Validation")
-            logger.warning("")
-            logger.warning(
-                "   Azure does NOT provide an API to pre-check data plane RBAC permissions."
-            )
-            logger.warning(
-                "   Permission validation only happens when SDK tries to receive messages."
-            )
-            logger.warning("")
-            logger.warning("   What happens next:")
-            logger.warning("   1. SDK will attempt to connect to EventHub partitions via AMQP")
-            logger.warning(
-                "   2. If authenticated identity lacks 'Azure Event Hubs Data Receiver' role:"
-            )
-            logger.warning("      - Connection will FAIL with 'Unauthorized' or 'Forbidden' error")
-            logger.warning("      - You'll see detailed error message with fix instructions")
-            logger.warning("   3. If connection succeeds:")
-            logger.warning("      - The authenticated identity HAS the required role")
-            logger.warning("      - Check logs above to see WHICH identity was used")
-            logger.warning("")
-            logger.warning("   NOTE: System may use Managed Identity (not your CLI user)!")
-            logger.warning(
-                "   Look for MSI endpoint in logs: http://169.254.169.254/metadata/identity/..."
-            )
-            logger.warning("")
+            self._log_rbac_permission_validation_notice()
 
             # Initialize batch
             self.current_batch = self._new_batch(reason="startup")
+
+            # Start capture writer (if enabled)
+            await self._start_capture_writer()
 
             self.running = True
             self.stats["start_time"] = datetime.now(UTC)
@@ -383,112 +695,8 @@ class EventHubAsyncConsumer:
 
                 await self.client.receive(**receive_kwargs)
             except Exception as receive_error:
-                error_msg = str(receive_error).lower()
-                error_type = type(receive_error).__name__
-
-                # Log the full error for diagnostics
-                logger.error("")
-                logger.error("=" * 70)
-                logger.error("❌ EVENTHUB RECEIVE ERROR")
-                logger.error("=" * 70)
-                logger.error(f"Error type: {error_type}")
-                logger.error(f"Error message: {receive_error}")
-                logger.error("")
-
-                # Check for credential/authentication errors
-                if any(
-                    keyword in error_msg
-                    for keyword in [
-                        "credential",
-                        "failed to invoke azure cli",
-                        "failed to retrieve a token",
-                        "defaultazurecredential failed",
-                        "authentication unavailable",
-                    ]
-                ):
-                    logger.error("🔐 AZURE CREDENTIAL ERROR DETECTED!")
-                    logger.error("")
-                    logger.error(
-                        "This error occurs during EventProcessor's partition ownership claiming."
-                    )
-                    logger.error(
-                        "The SDK repeatedly tries to claim partition ownership and re-authenticates."
-                    )
-                    logger.error("")
-                    logger.error("Possible causes:")
-                    logger.error("  1. Azure CLI token expired and refresh failed")
-                    logger.error(
-                        "  2. Too many rapid authentication requests overwhelming the credential chain"
-                    )
-                    logger.error("  3. Network interruption preventing token refresh")
-                    logger.error("  4. Azure CLI process busy or locked")
-                    logger.error("")
-                    logger.error("Recommended solutions:")
-                    logger.error("  1. Run: az login --use-device-code (refresh auth)")
-                    logger.error(
-                        "  2. Set environment variables for faster auth (skip credential chain):"
-                    )
-                    logger.error("     export AZURE_TENANT_ID='your-tenant-id'")
-                    logger.error("     export AZURE_CLIENT_ID='your-client-id'")
-                    logger.error("     export AZURE_CLIENT_SECRET='your-secret'")
-                    logger.error(
-                        "  3. Check: az account get-access-token --resource https://eventhubs.azure.net"
-                    )
-                    logger.error("")
-                    logfire.error(
-                        "Azure credential error during EventHub receive",
-                        error_type=error_type,
-                        error_message=str(receive_error),
-                        namespace=self.eventhub_config.namespace,
-                        eventhub=self.eventhub_config.name,
-                    )
-
-                # Check if this is an authentication/permission error
-                elif (
-                    any(
-                        keyword in error_msg
-                        for keyword in [
-                            "unauthorized",
-                            "not authorized",
-                            "authenticationerror",
-                            "permission",
-                            "access denied",
-                            "forbidden",
-                        ]
-                    )
-                    or "401" in error_msg
-                    or "403" in error_msg
-                ):
-                    logger.error("")
-                    logger.error("❌ RBAC PERMISSION ERROR DETECTED!")
-                    logger.error(f"   Error type: {error_type}")
-                    logger.error(f"   Error message: {receive_error}")
-                    logger.error("")
-                    logger.error(
-                        "🔐 The authenticated identity lacks required Azure RBAC permissions!"
-                    )
-                    logger.error("")
-                    logger.error("Required Role:")
-                    logger.error("  • 'Azure Event Hubs Data Receiver' - to read EventHub messages")
-                    logger.error("")
-                    logger.error("How to Fix:")
-                    logger.error("  1. Check which authentication method was used (see logs above)")
-                    logger.error(
-                        "  2. If using Managed Identity, assign the role to the managed identity"
-                    )
-                    logger.error("  3. If using Azure CLI, assign the role to your Azure CLI user")
-                    logger.error("  4. Go to Azure Portal → Event Hubs")
-                    logger.error(f"  5. Find namespace: {self.eventhub_config.namespace}")
-                    logger.error(f"  6. Click on Event Hub: {self.eventhub_config.name}")
-                    logger.error("  7. Go to 'Access Control (IAM)' → 'Add role assignment'")
-                    logger.error("  8. Select role: 'Azure Event Hubs Data Receiver'")
-                    logger.error("  9. Assign to the correct identity (MSI or user)")
-                    logger.error("")
-                    raise RuntimeError(
-                        "Missing Azure RBAC permission: 'Azure Event Hubs Data Receiver' role required for the authenticated identity"
-                    ) from receive_error
-                else:
-                    # Different error, re-raise
+                handled = self._handle_receive_error(receive_error)
+                if not handled:
                     raise
 
         except Exception as e:
@@ -570,6 +778,9 @@ class EventHubAsyncConsumer:
                 self.checkpoint_manager.close()
                 self.checkpoint_manager = None
 
+            # Flush captured messages (if enabled)
+            await self._stop_capture_writer()
+
             logger.info("✅ EventHub consumer stopped gracefully")
         except Exception as e:
             logger.error(f"❌ Error during final cleanup: {e}", exc_info=True)
@@ -621,11 +832,17 @@ class EventHubAsyncConsumer:
                 )
                 return
 
+            # Optional capture of the raw message (as received)
+            self._enqueue_capture(partition_context.partition_id, event)
+
             # Create message wrapper
             message = EventHubMessage(
                 event_data=event,
                 partition_id=partition_context.partition_id,
                 sequence_number=event.sequence_number,
+                eventhub_namespace=self.eventhub_config.namespace,
+                eventhub_name=self.eventhub_config.name,
+                consumer_group=self.eventhub_config.consumer_group,
             )
 
             # Store partition_context with message for later checkpoint update
@@ -756,27 +973,38 @@ class EventHubAsyncConsumer:
                         f"🔖 Updating EventHub SDK checkpoints for {len(last_message_by_partition)} partitions..."
                     )
                     checkpoints_updated = 0
+                    max_checkpoint_attempts = 3
                     for partition_id, last_message in last_message_by_partition.items():
                         if last_message.partition_context:
-                            try:
-                                await last_message.partition_context.update_checkpoint(
-                                    last_message.event_data
-                                )
-                                checkpoints_updated += 1
-                                logger.info(
-                                    f"✅ Updated SDK checkpoint for partition {partition_id}: "
-                                    f"offset={last_message.event_data.offset}, sequence={last_message.sequence_number}"
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    f"❌ Failed to update SDK checkpoint for partition {partition_id}: {e}",
-                                    exc_info=True,
-                                )
-                                logfire.error(
-                                    "Checkpoint update failed",
-                                    partition_id=partition_id,
-                                    error=str(e),
-                                )
+                            for attempt in range(1, max_checkpoint_attempts + 1):
+                                try:
+                                    await last_message.partition_context.update_checkpoint(
+                                        last_message.event_data
+                                    )
+                                    checkpoints_updated += 1
+                                    logger.info(
+                                        f"✅ Updated SDK checkpoint for partition {partition_id}: "
+                                        f"offset={last_message.event_data.offset}, sequence={last_message.sequence_number}"
+                                    )
+                                    break
+                                except Exception as e:
+                                    logger.error(
+                                        "❌ Failed to update SDK checkpoint for partition %s (attempt %s/%s): %s",
+                                        partition_id,
+                                        attempt,
+                                        max_checkpoint_attempts,
+                                        e,
+                                        exc_info=True,
+                                    )
+                                    logfire.error(
+                                        "Checkpoint update failed",
+                                        partition_id=partition_id,
+                                        attempt=attempt,
+                                        max_attempts=max_checkpoint_attempts,
+                                        error=str(e),
+                                    )
+                                    if attempt < max_checkpoint_attempts:
+                                        await asyncio.sleep(2 ** (attempt - 1))
                         else:
                             logger.warning(
                                 f"⚠️ No partition_context for partition {partition_id}, cannot update SDK checkpoint"

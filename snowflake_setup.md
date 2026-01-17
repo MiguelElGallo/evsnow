@@ -66,13 +66,30 @@ Then validate:
 evsnow validate-config
 ```
 
-## Checkpoint table (Hybrid vs. Standard)
+## Checkpoint table (INGESTION_STATUS)
 
-EvSnow creates `INGESTION_STATUS` automatically. If your account supports Hybrid Tables, it will use them; otherwise it creates a standard table. Required permissions:
+Create the control table using the working DDL:
 
 ```sql
-GRANT CREATE TABLE ON SCHEMA <db>.<schema> TO ROLE <role>;
-GRANT SELECT, INSERT, UPDATE ON TABLE <db>.<schema>.INGESTION_STATUS TO ROLE <role>;
+CREATE OR REPLACE TABLE CONTROL.PUBLIC.INGESTION_STATUS (
+    TS_INSERTED TIMESTAMP_LTZ(9) DEFAULT CURRENT_TIMESTAMP(),
+    EVENTHUB_NAMESPACE VARCHAR(500) NOT NULL,
+    EVENTHUB VARCHAR(200) NOT NULL,
+    TARGET_DB VARCHAR(200) NOT NULL,
+    TARGET_SCHEMA VARCHAR(200) NOT NULL,
+    TARGET_TABLE VARCHAR(200) NOT NULL,
+    WATERLEVEL NUMBER(38,0),
+    PARTITION_ID VARCHAR(50) NOT NULL,
+    METADATA VARIANT,
+    PRIMARY KEY (EVENTHUB_NAMESPACE, EVENTHUB, TARGET_DB, TARGET_SCHEMA, TARGET_TABLE, PARTITION_ID)
+);
+```
+
+Required permissions:
+
+```sql
+GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE <role>;
+GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE <role>;
 ```
 
 ## Troubleshooting

@@ -8,45 +8,26 @@ This module provides the main entry point for the pipeline that continuously:
 Based on TYPER CLI framework with configuration management via pydantic settings.
 """
 
-import contextlib
 import logging
-from pathlib import Path
 
 import logfire
 import typer
-from logfire.exceptions import LogfireConfigError
 from rich.console import Console
-from rich.logging import RichHandler
 from rich.table import Table
 
-# Load .env file by default if it exists
-try:
-    from dotenv import load_dotenv
-
-    # Look for .env file in current directory or parent directories
-    env_path = Path.cwd() / ".env"
-    if not env_path.exists():
-        # Look for .env in the project root (where pyproject.toml is)
-        project_root = Path(__file__).parent.parent.parent
-        env_path = project_root / ".env"
-
-    if env_path.exists():
-        load_dotenv(env_path)
-except ImportError:
-    pass  # python-dotenv not installed, environment variables should be set manually
-
+from utils.cli_bootstrap import (
+    configure_early_logfire,
+    configure_logging,
+    load_dotenv_if_present,
+)
 from utils.config import EvSnowConfig, load_config
 
-# Early Logfire initialization to prevent "LogfireNotConfiguredWarning"
-# This minimal configure() call allows modules to use logfire spans immediately
-# when they are imported (e.g., snowflake.py, eventhub.py)
-# Full configuration with user settings happens later in _initialize_logfire()
-# Suppress expected LogfireConfigError during early initialization
-with contextlib.suppress(LogfireConfigError):
-    logfire.configure(
-        send_to_logfire=False,  # Don't send anything yet
-        console=False,  # No console output yet
-    )
+# Load .env file by default if it exists
+load_dotenv_if_present(caller_file=__file__)
+
+# Early Logfire initialization to prevent "LogfireNotConfiguredWarning".
+# Full configuration with user settings happens later during command execution.
+configure_early_logfire()
 
 # Initialize CLI app and console
 app = typer.Typer(
@@ -56,20 +37,7 @@ app = typer.Typer(
 )
 console = Console()
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[RichHandler(console=console, rich_tracebacks=True)],
-)
-logger = logging.getLogger(__name__)
-
-# Suppress verbose Azure SDK logs
-logging.getLogger("azure.eventhub").setLevel(logging.WARNING)
-logging.getLogger("azure.eventhub._pyamqp").setLevel(logging.WARNING)
-logging.getLogger("azure.identity").setLevel(logging.WARNING)
-logging.getLogger("azure.identity.aio").setLevel(logging.WARNING)
+logger = configure_logging(console=console, level=logging.INFO, logger_name=__name__)
 
 
 def _show_rbac_guidance() -> None:
@@ -111,14 +79,14 @@ def _show_rbac_guidance() -> None:
 
 def _initialize_logfire(logfire_config) -> None:
     """Initialize Logfire observability if enabled."""
+
     if not logfire_config.enabled:
         logger.info("Logfire observability disabled")
         return
 
-    logger.info(f"Initializing Logfire observability for service: {logfire_config.service_name}")
+    logger.info("Initializing Logfire observability for service: %s", logfire_config.service_name)
 
     try:
-        # Configure Logfire
         logfire.configure(
             token=logfire_config.token if logfire_config.send_to_logfire else None,
             service_name=logfire_config.service_name,
@@ -132,30 +100,26 @@ def _initialize_logfire(logfire_config) -> None:
             else False,
         )
 
-        # Add Logfire handler to root logger to capture all logging
         if logfire_config.send_to_logfire or logfire_config.console_logging:
-            import logging as log_module
-
-            root_logger = log_module.getLogger()
+            root_logger = logging.getLogger()
             logfire_handler = logfire.LogfireLoggingHandler()
-            logfire_handler.setLevel(getattr(log_module, logfire_config.log_level.upper()))
+            logfire_handler.setLevel(getattr(logging, logfire_config.log_level.upper()))
             root_logger.addHandler(logfire_handler)
 
-        # Instrument Pydantic AI for automatic LLM call tracing
         try:
             logfire.instrument_pydantic_ai()
             logger.info("✅ Pydantic AI instrumentation enabled")
         except Exception as pydantic_error:
-            logger.warning(f"⚠️ Could not instrument Pydantic AI: {pydantic_error}")
+            logger.warning("⚠️ Could not instrument Pydantic AI: %s", pydantic_error)
 
         logger.info(
-            f"✅ Logfire initialized - "
-            f"Cloud: {logfire_config.send_to_logfire}, "
-            f"Console: {logfire_config.console_logging}, "
-            f"Level: {logfire_config.log_level}"
+            "✅ Logfire initialized - Cloud: %s, Console: %s, Level: %s",
+            logfire_config.send_to_logfire,
+            logfire_config.console_logging,
+            logfire_config.log_level,
         )
-    except Exception as e:
-        logger.warning(f"Failed to initialize Logfire: {e}")
+    except Exception as exc:
+        logger.warning("Failed to initialize Logfire: %s", exc)
         logger.warning("Pipeline will continue without Logfire observability")
 
 
@@ -373,6 +337,11 @@ def run(
         "--smart",
         help="Enable LLM-powered smart retry analysis for failures",
     ),
+    capture: bool = typer.Option(
+        False,
+        "--capture",
+        help="Capture each raw Event Hub message to messages/f_{timestamp}.json",
+    ),
 ) -> None:
     """Run the ELT pipeline continuously."""
     try:
@@ -380,6 +349,9 @@ def run(
 
         # Load and validate configuration
         config = load_config(env_file)
+
+        # Optional runtime-only toggles
+        config.capture_messages = capture
         validation_results = config.validate_configuration()
 
         if not validation_results["valid"] and validation_results["errors"]:

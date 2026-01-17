@@ -12,362 +12,22 @@ Best Practices Incorporated:
 
 import os
 import re
+import socket
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-
-class SnowflakeConnectionConfig(BaseSettings):
-    """
-    Snowflake connection configuration with JWT authentication.
-
-    Uses High-Performance Snowpipe Streaming SDK (v1.0.2+) with PIPE objects.
-    Reference: https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-getting-started
-
-    This class validates all required parameters for connecting to Snowflake
-    using private key authentication and provides connection management.
-    """
-
-    model_config = {
-        "env_prefix": "SNOWFLAKE_",
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": False,
-        "extra": "ignore",
-        "populate_by_name": True,  # Allow using both field name and alias
-    }
-
-    # Required connection parameters
-    account: str = Field(..., description="Snowflake account identifier")
-    user: str = Field(..., description="Snowflake username")
-    private_key_file: str = Field(..., description="Path to private key file")
-    private_key_password: str | None = Field(
-        default=None,
-        description="Private key password (None for unencrypted keys)",
-    )
-    warehouse: str = Field(..., description="Snowflake warehouse name")
-    database: str = Field(..., description="Snowflake database name")
-    schema_name: str = Field(..., description="Snowflake schema name")
-
-    # Optional parameters
-    role: str | None = Field(default=None, description="Snowflake role")
-
-    # High-Performance SDK configuration (REQUIRED)
-    pipe_name: str = Field(
-        ...,
-        description="PIPE object name for high-performance SDK (e.g., EVENTS_TABLE_PIPE)",
-    )
-
-    @field_validator("private_key_file")
-    @classmethod
-    def validate_private_key_file_exists(cls, v: str) -> str:
-        """Validate that the private key file exists and is readable."""
-        from pathlib import Path
-
-        key_path = Path(v).expanduser().resolve()
-        if not key_path.exists():
-            raise ValueError(f"Private key file not found: {v}")
-        if not key_path.is_file():
-            raise ValueError(f"Private key path is not a file: {v}")
-        if not os.access(key_path, os.R_OK):
-            raise ValueError(f"Private key file is not readable: {v}")
-        return str(key_path)
-
-    @field_validator("account")
-    @classmethod
-    def validate_account_format(cls, v: str) -> str:
-        """Validate Snowflake account identifier format."""
-        if not v.strip():
-            raise ValueError("Account identifier cannot be empty")
-        # Basic validation - Snowflake accounts typically contain letters, numbers, and hyphens
-        if not all(c.isalnum() or c in "-._" for c in v):
-            raise ValueError("Account identifier contains invalid characters")
-        return v.strip()
-
-    @field_validator("user", "warehouse", "database", "schema_name")
-    @classmethod
-    def validate_snowflake_identifiers(cls, v: str) -> str:
-        """Validate Snowflake identifiers."""
-        if not v.strip():
-            raise ValueError("Snowflake identifier cannot be empty")
-        v_clean = v.strip()
-        if not v_clean.replace("_", "").replace("$", "").replace("-", "").isalnum():
-            raise ValueError(f"Invalid Snowflake identifier: {v}")
-        return v_clean
-
-
-class SmartRetryConfig(BaseSettings):
-    """
-    Smart retry configuration with LLM analysis.
-
-    This configuration enables LLM-powered analysis of exceptions to determine
-    if operations should be retried. It can be optionally enabled via CLI flag.
-    """
-
-    model_config = {
-        "env_prefix": "SMART_RETRY_",
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": False,
-        "extra": "ignore",
-    }
-
-    enabled: bool = Field(
-        default=False,
-        description="Enable LLM-powered smart retry analysis",
-    )
-
-    llm_provider: str = Field(
-        default="openai",
-        description="LLM provider (openai, anthropic, gemini, etc.)",
-    )
-
-    llm_model: str = Field(
-        default="gpt-4o-mini",
-        description="LLM model to use for exception analysis",
-    )
-
-    llm_api_key: str | None = Field(
-        default=None,
-        description="API key for LLM provider",
-    )
-
-    llm_endpoint: str | None = Field(
-        default=None,
-        description="Custom endpoint for LLM provider (e.g., Azure OpenAI endpoint)",
-    )
-
-    max_attempts: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Maximum retry attempts",
-    )
-
-    timeout_seconds: int = Field(
-        default=10,
-        ge=1,
-        le=60,
-        description="Timeout for LLM analysis in seconds",
-    )
-
-    enable_caching: bool = Field(
-        default=True,
-        description="Enable caching of LLM decisions for similar errors",
-    )
-
-    @field_validator("llm_provider")
-    @classmethod
-    def validate_llm_provider(cls, v: str) -> str:
-        """Validate LLM provider."""
-        supported_providers = ["openai", "azure", "anthropic", "gemini", "groq", "cohere"]
-        if v.lower() not in supported_providers:
-            raise ValueError(
-                f"Unsupported LLM provider: {v}. "
-                f"Supported providers: {', '.join(supported_providers)}"
-            )
-        return v.lower()
-
-    @field_validator("llm_api_key")
-    @classmethod
-    def validate_api_key(cls, v: str | None) -> str | None:
-        """Validate API key format."""
-        if v is not None and not v.strip():
-            raise ValueError("LLM API key cannot be empty if provided")
-        return v.strip() if v else None
-
-
-class LogfireConfig(BaseSettings):
-    """
-    Logfire observability configuration.
-
-    This configuration enables Logfire distributed tracing and observability
-    for the EvSnow pipeline, providing insights into batch ingestion,
-    EventHub processing, and LLM-powered smart retry decisions.
-    """
-
-    model_config = {
-        "env_prefix": "LOGFIRE_",
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": False,
-        "extra": "ignore",
-    }
-
-    enabled: bool = Field(
-        default=False,
-        description="Enable Logfire observability and tracing",
-    )
-
-    token: str | None = Field(
-        default=None,
-        description="Logfire API token for cloud logging",
-    )
-
-    service_name: str = Field(
-        default="evsnow",
-        description="Service name for Logfire identification",
-    )
-
-    environment: str = Field(
-        default="development",
-        description="Environment tag (development, staging, production)",
-    )
-
-    send_to_logfire: bool = Field(
-        default=True,
-        description="Send logs to Logfire cloud (requires token)",
-    )
-
-    console_logging: bool = Field(
-        default=True,
-        description="Keep Rich console logging alongside Logfire",
-    )
-
-    log_level: str = Field(
-        default="INFO",
-        description="Minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
-    )
-
-    @field_validator("log_level")
-    @classmethod
-    def validate_log_level(cls, v: str) -> str:
-        """Validate log level."""
-        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        v_upper = v.upper()
-        if v_upper not in valid_levels:
-            raise ValueError(f"Invalid log level: {v}. Valid levels: {', '.join(valid_levels)}")
-        return v_upper
-
-    @model_validator(mode="after")
-    def validate_token_when_enabled(self):
-        """Ensure token is provided when Logfire is enabled and sending to cloud."""
-        if self.enabled and self.send_to_logfire and not self.token:
-            raise ValueError(
-                "LOGFIRE_TOKEN is required when LOGFIRE_ENABLED=true and LOGFIRE_SEND_TO_LOGFIRE=true"
-            )
-        return self
-
-
-class EventHubConfig(BaseModel):
-    """Configuration for a single Event Hub."""
-
-    name: str = Field(..., description="Event Hub name")
-    namespace: str = Field(..., description="Event Hub namespace")
-    connection_string: str | None = None
-    consumer_group: str = Field(..., description="Consumer group name (required)")
-
-    # Azure Event Hubs SDK best practices
-    max_batch_size: int = 1000
-    max_wait_time: int = 60
-    prefetch_count: int = 300
-
-    # Authentication settings
-    use_connection_string: bool = Field(
-        default=False,
-        description="Use connection string instead of DefaultAzureCredential",
-    )
-
-    # Performance tuning
-    checkpoint_interval_seconds: int = Field(
-        default=300, description="How often to save checkpoints (seconds)"
-    )
-    max_message_batch_size: int = Field(
-        default=1000, description="Maximum messages per batch for processing"
-    )
-    batch_timeout_seconds: int = Field(
-        default=300, description="Maximum time to wait for batch completion"
-    )
-
-    # Starting position when no checkpoints exist
-    starting_position_on_no_checkpoint: str = Field(
-        default="-1",
-        description="Starting position when no checkpoints exist. Options: '-1' (beginning), '@latest' (only new), '0' (earliest)",
-    )
-
-    @field_validator("namespace")
-    @classmethod
-    def validate_namespace(cls, v: str) -> str:
-        """Validate Event Hub namespace format."""
-        if not v.endswith(".servicebus.windows.net"):
-            raise ValueError("Event Hub namespace must end with .servicebus.windows.net")
-        return v
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        """Validate Event Hub name format."""
-        if not re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9\-._])*[a-zA-Z0-9]$", v):
-            raise ValueError("Event Hub name contains invalid characters")
-        return v
-
-    @field_validator("consumer_group")
-    @classmethod
-    def validate_consumer_group(cls, v: str) -> str:
-        """Validate consumer group format."""
-        if not v.strip():
-            raise ValueError("Consumer group cannot be empty")
-        return v
-
-    @field_validator("starting_position_on_no_checkpoint")
-    @classmethod
-    def validate_starting_position(cls, v: str) -> str:
-        """Validate starting position format."""
-        valid_positions = ["-1", "@latest", "0"]
-        if v not in valid_positions:
-            raise ValueError(
-                f"Invalid starting_position: {v}. Must be one of: {', '.join(valid_positions)}"
-            )
-        return v
-
-
-class SnowflakeConfig(BaseModel):
-    """Configuration for a single Snowflake destination using Streaming API."""
-
-    database: str = Field(..., description="Snowflake database name")
-    schema_name: str = Field(..., description="Snowflake schema name")
-    table_name: str = Field(..., description="Snowflake table name")
-
-    # Snowflake batch ingestion best practices
-    batch_size: int = Field(default=1000, description="Number of records per batch insert")
-
-    # Performance tuning
-    max_retry_attempts: int = Field(
-        default=3, description="Maximum retry attempts for failed operations"
-    )
-    retry_delay_seconds: int = Field(default=5, description="Delay between retry attempts")
-    connection_timeout_seconds: int = Field(default=30, description="Connection timeout in seconds")
-
-    @field_validator("database", "schema_name", "table_name")
-    @classmethod
-    def validate_snowflake_identifiers(cls, v: str) -> str:
-        """Validate Snowflake identifiers."""
-        if not v.strip():
-            raise ValueError(f"Snowflake identifier cannot be empty: {v}")
-        # Snowflake identifiers: alphanumeric, underscores, dollar signs
-        v_clean = v.strip()
-        if not v_clean.replace("_", "").replace("$", "").replace("-", "").isalnum():
-            raise ValueError(f"Invalid Snowflake identifier: {v}")
-        return v_clean
-
-
-class EventHubSnowflakeMapping(BaseModel):
-    """Mapping between Event Hub and Snowflake configurations."""
-
-    event_hub_key: str = Field(..., description="Event Hub configuration key")
-    snowflake_key: str = Field(..., description="Snowflake configuration key")
-
-    # Channel naming for tracking
-    channel_name_pattern: str = "{event_hub}-{env}-{region}-{client_id}"
-
-    @field_validator("event_hub_key", "snowflake_key")
-    @classmethod
-    def validate_mapping_keys(cls, v: str) -> str:
-        """Validate mapping keys format."""
-        if not re.match(r"^[A-Z0-9_]+$", v):
-            raise ValueError(f"Mapping key must be uppercase with underscores: {v}")
-        return v
+# Public config models live in smaller modules under `utils.config_models`.
+# This module keeps the stable public import surface: `from utils.config import ...`.
+from .config_models import (
+    EventHubConfig,
+    EventHubSnowflakeMapping,
+    LogfireConfig,
+    SmartRetryConfig,
+    SnowflakeConfig,
+    SnowflakeConnectionConfig,
+)
 
 
 class EvSnowConfig(BaseSettings):
@@ -380,6 +40,7 @@ class EvSnowConfig(BaseSettings):
 
     Environment Variables:
     - EVENTHUB_NAMESPACE: Event Hub namespace
+    - EVSNOW_CLIENT_ID: Optional stable client identifier for channel naming
     - EVENTHUBNAME_{N}: Event Hub names (where N is a number)
     - SNOWFLAKE_{N}_DATABASE: Snowflake database name
     - SNOWFLAKE_{N}_SCHEMA: Snowflake schema name
@@ -400,6 +61,11 @@ class EvSnowConfig(BaseSettings):
     # Environment and deployment settings
     environment: str = Field("development", description="Deployment environment")
     region: str = Field("default", description="Deployment region")
+    client_id: str = Field(
+        default_factory=socket.gethostname,
+        validation_alias="EVSNOW_CLIENT_ID",
+        description="Stable identifier for this EvSnow instance (used in channel naming).",
+    )
 
     # Performance settings
     max_concurrent_channels: int = Field(50, description="Maximum concurrent channels")
@@ -429,6 +95,16 @@ class EvSnowConfig(BaseSettings):
         default=False, description="Log sample messages for debugging"
     )
     metrics_collection_enabled: bool = Field(default=True, description="Enable metrics collection")
+
+    # Debugging / diagnostics
+    capture_messages: bool = Field(
+        default=False,
+        description="Capture each raw Event Hub message to disk as JSON (messages/f_{timestamp}.json)",
+    )
+    capture_messages_dir: str = Field(
+        default="messages",
+        description="Directory (relative to repo-root/CWD) to store captured messages",
+    )
 
     # Observability
     logfire: LogfireConfig = Field(
@@ -488,7 +164,7 @@ class EvSnowConfig(BaseSettings):
                     ]
                     for key in os.environ
                 ):
-                    self.snowflake_connection = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+                    self.snowflake_connection = SnowflakeConnectionConfig()
                 else:
                     self.snowflake_connection = None
             except Exception:
@@ -565,6 +241,12 @@ class EvSnowConfig(BaseSettings):
                     schema_name=settings["schema"],
                     table_name=settings["table"],
                     batch_size=int(settings.get("batch", "1000")),
+                    channel_status_interval_seconds=int(
+                        settings.get("channel_status_interval_seconds", "60")
+                    ),
+                    client_refresh_interval_seconds=int(
+                        settings.get("client_refresh_interval_seconds", "0")
+                    ),
                 )
 
         # Parse mappings - look for explicit mapping lines in env file
@@ -607,6 +289,14 @@ class EvSnowConfig(BaseSettings):
         if not v.endswith(".servicebus.windows.net"):
             raise ValueError("Event Hub namespace must end with .servicebus.windows.net")
         return v
+
+    @field_validator("client_id")
+    @classmethod
+    def normalize_client_id(cls, v: str) -> str:
+        """Normalize client identifier for safe channel naming."""
+        cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", v.strip())
+        cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+        return cleaned or "client"
 
     @model_validator(mode="after")
     def validate_mappings_exist(self):
@@ -652,7 +342,26 @@ class EvSnowConfig(BaseSettings):
         if not event_hub_config:
             raise ValueError(f"No Event Hub config found: {event_hub_key}")
 
-        return f"{event_hub_config.name}-{self.environment}-{self.region}-{client_id}"
+        values = {
+            "event_hub": self._sanitize_channel_segment(event_hub_config.name),
+            "env": self._sanitize_channel_segment(self.environment),
+            "region": self._sanitize_channel_segment(self.region),
+            "client_id": self._sanitize_channel_segment(client_id),
+        }
+
+        try:
+            pattern = str(mapping.channel_name_pattern)
+            return pattern.format(**values)
+        except KeyError as exc:
+            raise ValueError(
+                "channel_name_pattern must use {event_hub}, {env}, {region}, {client_id}"
+            ) from exc
+
+    @staticmethod
+    def _sanitize_channel_segment(value: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", value.strip())
+        cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+        return cleaned or "unknown"
 
     def validate_configuration(self) -> dict[str, Any]:
         """
@@ -729,6 +438,19 @@ def load_config(env_file: str | None = None) -> EvSnowConfig:
         environment=os.getenv("ENVIRONMENT", "development"),
         region=os.getenv("REGION", "default"),
     )
+
+
+__all__ = [
+    "EvSnowConfig",
+    # Facade exports for existing import sites
+    "EventHubConfig",
+    "EventHubSnowflakeMapping",
+    "LogfireConfig",
+    "SmartRetryConfig",
+    "SnowflakeConfig",
+    "SnowflakeConnectionConfig",
+    "load_config",
+]
 
 
 # Example usage and testing utilities

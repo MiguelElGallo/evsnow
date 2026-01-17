@@ -533,12 +533,11 @@ Write comprehensive unit tests for Snowflake connection and checkpoint utilities
 #### Functions to Test
 1. \`load_private_key()\` - Load and decrypt private keys
 2. \`get_connection()\` - Create/cache Snowflake connections
-3. \`get_snowpark_session()\` - Create Snowpark sessions
-4. \`check_connection()\` - Test connection
-5. \`create_control_table()\` - Create checkpoint table
-6. \`insert_partition_checkpoint()\` - Save checkpoint
-7. \`get_partition_checkpoints()\` - Load checkpoints
-8. Connection caching utilities
+3. \`check_connection()\` - Test connection
+4. \`create_control_table()\` - Create checkpoint table
+5. \`insert_partition_checkpoint()\` - Save checkpoint
+6. \`get_partition_checkpoints()\` - Load checkpoints
+7. Connection caching utilities
 
 #### Key Scenarios
 
@@ -555,11 +554,6 @@ Write comprehensive unit tests for Snowflake connection and checkpoint utilities
 - [ ] Detect stale connections
 - [ ] Handle connection errors
 - [ ] Clear connection cache
-
-**Snowpark Sessions:**
-- [ ] Create session successfully
-- [ ] Handle missing snowpark library
-- [ ] Activate warehouse
 
 **Connection Testing:**
 - [ ] Test valid connection
@@ -582,7 +576,6 @@ Write comprehensive unit tests for Snowflake connection and checkpoint utilities
 #### Mocking Requirements
 - Mock \`snowflake.connector.connect()\`
 - Mock Snowflake cursor and queries
-- Mock Snowpark Session
 - Mock file system for private keys
 - Mock cryptography module
 - Mock connection caching
@@ -592,7 +585,6 @@ Write comprehensive unit tests for Snowflake connection and checkpoint utilities
 - **Classes:**
   - \`TestPrivateKeyLoading\`
   - \`TestConnectionManagement\`
-  - \`TestSnowparkSessions\`
   - \`TestControlTable\`
   - \`TestCheckpointOperations\`
 

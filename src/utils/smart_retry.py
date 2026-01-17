@@ -96,10 +96,10 @@ class ExceptionAnalyzer:
             os.environ["AZURE_OPENAI_ENDPOINT"] = base_url
             os.environ["AZURE_OPENAI_API_VERSION"] = "2024-08-01-preview"
 
-            # Use OpenAIModel with 'azure' provider string
-            from pydantic_ai.models.openai import OpenAIModel
+            # Use OpenAIChatModel with 'azure' provider string
+            from pydantic_ai.models.openai import OpenAIChatModel
 
-            model = OpenAIModel(
+            model = OpenAIChatModel(
                 model_name=llm_model,
                 provider="azure",  # Use built-in Azure provider
             )
@@ -264,7 +264,7 @@ prefer NOT to retry to avoid wasting resources on hopeless operations.
                 output_type=RetryDecision,  # Specify output type at runtime
             )
             # Type assertion: output_type=RetryDecision ensures this is RetryDecision
-            decision: RetryDecision = result.output  # type: ignore[assignment]
+            decision: RetryDecision = result.output
 
             span.set_attribute("decision", decision.should_retry)
             span.set_attribute("confidence", decision.confidence)
@@ -401,31 +401,40 @@ def create_smart_retry_decorator(
             }
 
             # Call LLM analyzer (we need to run async in sync context)
-            # Note: Uses asyncio.run() to execute async analyzer in a fresh event loop,
-            # avoiding blocking the main event loop with busy-wait patterns.
+            # Prefer running in a fresh event loop when no loop is active.
+            # If a loop is already running (pytest-asyncio/edge cases), run analysis in
+            # a separate thread and create the coroutine inside that thread to avoid
+            # leaking un-awaited coroutine objects.
             try:
-                # Run in a new event loop to avoid conflicts
-                decision = asyncio.run(analyzer.analyze_exception(exception, context))
-            except RuntimeError as e:
-                # If we're already in an event loop (edge case in tenacity callback)
-                # Fall back to creating a new thread
-                logger.warning(f"⚠️  Event loop already running, using thread-based fallback: {e}")
-                span.set_attribute("fallback_mode", "thread")
                 try:
+                    asyncio.get_running_loop()
+                    loop_running = True
+                except RuntimeError:
+                    loop_running = False
+
+                if not loop_running:
+                    coro = analyzer.analyze_exception(exception, context)
+                    try:
+                        decision = asyncio.run(coro)
+                    except Exception:
+                        # If asyncio.run fails unexpectedly, ensure we don't leak the coroutine.
+                        coro.close()
+                        raise
+                else:
+                    logger.warning("⚠️  Event loop already running, using thread-based fallback")
+                    span.set_attribute("fallback_mode", "thread")
                     import concurrent.futures
 
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            asyncio.run, analyzer.analyze_exception(exception, context)
-                        )
-                        decision = future.result(timeout=30)
-                except Exception as thread_error:
-                    logger.error(
-                        f"❌ Failed to analyze exception with LLM (thread fallback): {thread_error}"
-                    )
-                    span.set_attribute("error", str(thread_error))
-                    span.set_attribute("decision", False)
-                    return False
+                    def _run_in_thread() -> RetryDecision:
+                        thread_coro = analyzer.analyze_exception(exception, context)
+                        try:
+                            return asyncio.run(thread_coro)
+                        except Exception:
+                            thread_coro.close()
+                            raise
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        decision = executor.submit(_run_in_thread).result(timeout=30)
             except Exception as e:
                 logger.error(f"❌ Failed to analyze exception with LLM: {e}")
                 # Fallback: don't retry if analysis fails

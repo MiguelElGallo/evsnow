@@ -5,6 +5,8 @@
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
+EvSnow can also stream-ingest into **Apache Iceberg tables in Snowflake** (Snowflake-managed Iceberg) using **Snowpipe Streaming**—so you can land Event Hub events directly into Iceberg-backed storage while keeping the same pipeline, checkpointing, and operational workflow.
+
 ![alt text](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
 
 See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
@@ -73,7 +75,7 @@ TARGET_TABLE=INGESTION_STATUS
 # Topic → Table Mapping
 SNOWFLAKE_1_DATABASE=INGESTION
 SNOWFLAKE_1_SCHEMA=PUBLIC
-SNOWFLAKE_1_TABLE=events_table
+SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 SNOWFLAKE_1_BATCH=100
 ```
 
@@ -127,7 +129,7 @@ When starting the pipeline **without existing checkpoints** (e.g., after truncat
 
 ```bash
 # Example: Starting fresh after truncating tables
-snowsql -q "truncate table ingestion.public.events_table;"
+snowsql -q "truncate table ingestion.public.events_table1;"
 snowsql -q "truncate table control.public.ingestion_status;"
 
 # Consumer will process based on STARTING_POSITION_ON_NO_CHECKPOINT setting

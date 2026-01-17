@@ -24,15 +24,6 @@ import snowflake.connector as sc
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
-# Try to import Snowpark, but make it optional
-try:
-    from snowflake.snowpark import Session
-
-    SNOWPARK_AVAILABLE = True
-except ImportError:
-    SNOWPARK_AVAILABLE = False
-    Session = None  # type: ignore
-
 from utils.config import SnowflakeConnectionConfig
 
 logger = logging.getLogger(__name__)
@@ -40,7 +31,6 @@ logger = logging.getLogger(__name__)
 # Connection cache for reusing connections in high-performance streaming scenarios
 # Key: (account, user, database, schema, warehouse, role)
 _connection_cache: dict[tuple, sc.SnowflakeConnection] = {}
-_session_cache: dict[tuple, Any] = {}
 
 
 @contextmanager
@@ -102,7 +92,7 @@ def close_all_cached_connections() -> None:
 
     Call this during application shutdown to clean up resources.
     """
-    global _connection_cache, _session_cache
+    global _connection_cache
 
     # Close all cached connections
     for key, conn in list(_connection_cache.items()):
@@ -112,16 +102,7 @@ def close_all_cached_connections() -> None:
         except Exception as e:
             logger.warning(f"Error closing cached connection: {e}")
 
-    # Close all cached sessions
-    for key, session in list(_session_cache.items()):
-        try:
-            session.close()
-            logger.debug(f"Closed cached session for {key[0]}")
-        except Exception as e:
-            logger.warning(f"Error closing cached session: {e}")
-
     _connection_cache.clear()
-    _session_cache.clear()
     logger.info("All cached Snowflake connections closed")
 
 
@@ -185,7 +166,7 @@ def get_connection(
         Exception: If connection fails
     """
     if config is None:
-        config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+        config = SnowflakeConnectionConfig()
 
     # Check cache first
     if use_cache:
@@ -237,66 +218,6 @@ def get_connection(
         raise
 
 
-def get_snowpark_session(
-    config: SnowflakeConnectionConfig | None = None,
-):  # type: ignore
-    """
-    Create a Snowpark Session using private key authentication.
-
-    Args:
-        config: Snowflake connection configuration. If not provided,
-               will be loaded from environment variables.
-
-    Returns:
-        Active Snowpark Session
-
-    Raises:
-        ImportError: If snowflake-snowpark is not installed
-        Exception: If session creation fails
-    """
-    if not SNOWPARK_AVAILABLE:
-        raise ImportError(
-            "snowflake-snowpark is not installed. Install it with: uv add snowflake-snowpark"
-        )
-
-    if config is None:
-        config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
-
-    logger.info(f"Creating Snowpark session for account: {config.account}")
-
-    try:
-        # Load private key
-        private_key = load_private_key(config.private_key_file, config.private_key_password)
-
-        # Build connection parameters
-        connection_parameters = {
-            "account": config.account,
-            "user": config.user,
-            "private_key": private_key,
-            "warehouse": config.warehouse,
-            "database": config.database,
-            "schema": config.schema_name,
-        }
-
-        if config.role:
-            connection_parameters["role"] = config.role
-
-        # Create Snowpark session
-        session = Session.builder.configs(connection_parameters).create()  # type: ignore
-
-        # Explicitly use the warehouse to ensure it's active
-        if config.warehouse:
-            session.sql(f"USE WAREHOUSE {config.warehouse}").collect()
-            logger.info(f"Activated warehouse: {config.warehouse}")
-
-        logger.info("Snowpark session created successfully")
-        return session
-
-    except Exception as e:
-        logger.error(f"Failed to create Snowpark session: {e}", exc_info=True)
-        raise
-
-
 def check_connection(config: SnowflakeConnectionConfig | None = None) -> bool:
     """
     Test the Snowflake connection.
@@ -312,7 +233,7 @@ def check_connection(config: SnowflakeConnectionConfig | None = None) -> bool:
     """
     try:
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         logger.info(f"Testing connection to Snowflake account: {config.account}")
 
@@ -403,7 +324,7 @@ def create_control_table(
     """
     try:
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         table_type = "HYBRID TABLE" if use_hybrid_table else "TABLE"
         logger.info(
@@ -522,7 +443,7 @@ def insert_partition_checkpoint(
     try:
         # Load config if not provided
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
         # Get cached connection (don't close it!)
         conn = get_connection(config, use_cache=True)
@@ -663,67 +584,82 @@ def get_partition_checkpoints(
     try:
         # Load config if not provided
         if config is None:
-            config = SnowflakeConnectionConfig()  # type: ignore[call-arg]
+            config = SnowflakeConnectionConfig()
 
-        session = get_snowpark_session(config)
+        # Determine control table location (where checkpoints are stored)
+        actual_control_db = control_db or config.database
+        actual_control_schema = control_schema or config.schema_name
+        actual_control_table = control_table or "INGESTION_STATUS"
+
+        # Validate identifiers
+        import re
+
+        for identifier in [
+            actual_control_db,
+            actual_control_schema,
+            actual_control_table,
+            target_db,
+            target_schema,
+            target_table,
+        ]:
+            if not re.match(r"^[A-Za-z0-9_$]+$", identifier):
+                raise ValueError(f"Invalid Snowflake identifier: {identifier}")
+
+        # Construct the fully qualified control table name
+        control_table_fqn = f"{actual_control_db}.{actual_control_schema}.{actual_control_table}"
+
+        logger.info(
+            f"Querying control table: {control_table_fqn}, "
+            f"for target: {target_db}.{target_schema}.{target_table}"
+        )
+
+        conn = get_connection(config, use_cache=True)
+        cursor = conn.cursor()
 
         try:
-            # Determine control table location (where checkpoints are stored)
-            actual_control_db = control_db or config.database
-            actual_control_schema = control_schema or config.schema_name
-            actual_control_table = control_table or "INGESTION_STATUS"
+            if config.warehouse:
+                cursor.execute(f"USE WAREHOUSE {config.warehouse}")
+                logger.debug(f"Activated warehouse: {config.warehouse}")
 
-            # Construct the fully qualified control table name
-            control_table_fqn = (
-                f"{actual_control_db}.{actual_control_schema}.{actual_control_table}"
+            sql = f"""
+                SELECT PARTITION_ID, WATERLEVEL
+                FROM {control_table_fqn}
+                WHERE EVENTHUB_NAMESPACE = %s
+                  AND EVENTHUB = %s
+                  AND TARGET_DB = %s
+                  AND TARGET_SCHEMA = %s
+                  AND TARGET_TABLE = %s
+                  AND PARTITION_ID IS NOT NULL
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY PARTITION_ID
+                    ORDER BY TS_INSERTED DESC
+                ) = 1
+            """
+            cursor.execute(
+                sql,
+                (
+                    eventhub_namespace,
+                    eventhub,
+                    target_db,
+                    target_schema,
+                    target_table,
+                ),
             )
 
-            logger.info(
-                f"Querying control table: {control_table_fqn}, "
-                f"for target: {target_db}.{target_schema}.{target_table}"
-            )
-
-            # Get the table
-            df = session.table(control_table_fqn)
-
-            # Filter by EventHub AND target table (to get checkpoints for this specific data table)
-            df = df.filter(
-                (df["EVENTHUB_NAMESPACE"] == eventhub_namespace)
-                & (df["EVENTHUB"] == eventhub)
-                & (df["TARGET_DB"] == target_db)
-                & (df["TARGET_SCHEMA"] == target_schema)
-                & (df["TARGET_TABLE"] == target_table)
-                & (df["PARTITION_ID"].is_not_null())
-            )
-
-            # Get the latest record for each partition using window function
-            from snowflake.snowpark import Window
-            from snowflake.snowpark.functions import desc, row_number
-
-            window_spec = Window.partition_by("PARTITION_ID").order_by(desc("TS_INSERTED"))
-            df = df.with_column("row_num", row_number().over(window_spec))
-            df = df.filter(df["row_num"] == 1)
-
-            # Select only partition_id and waterlevel
-            df = df.select("PARTITION_ID", "WATERLEVEL")
-
-            # Collect results
-            results = df.collect()
-
-            if not results:
-                logger.info(f"No partition checkpoints found for {eventhub_namespace}/{eventhub}")
-                return None
-
-            # Convert to dictionary
-            partition_checkpoints = {row["PARTITION_ID"]: row["WATERLEVEL"] for row in results}
-
-            logger.info(
-                f"Retrieved partition checkpoints: {partition_checkpoints} for {eventhub_namespace}/{eventhub}"
-            )
-            return partition_checkpoints
-
+            results = cursor.fetchall()
         finally:
-            session.close()
+            cursor.close()
+
+        if not results:
+            logger.info(f"No partition checkpoints found for {eventhub_namespace}/{eventhub}")
+            return None
+
+        partition_checkpoints = {row[0]: row[1] for row in results}
+
+        logger.info(
+            f"Retrieved partition checkpoints: {partition_checkpoints} for {eventhub_namespace}/{eventhub}"
+        )
+        return partition_checkpoints
 
     except Exception as e:
         logger.error(f"Failed to retrieve partition checkpoints: {e}", exc_info=True)

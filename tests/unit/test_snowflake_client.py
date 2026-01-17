@@ -15,11 +15,11 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
-from src.streaming.snowflake_high_performance import (
+from streaming.snowflake_high_performance import (
     SnowflakeHighPerformanceStreamingClient,
     create_snowflake_streaming_client,
 )
-from src.utils.config import SnowflakeConnectionConfig
+from utils.config import SnowflakeConnectionConfig
 
 
 class TestSnowflakeHighPerformanceStreamingClient:
@@ -106,6 +106,33 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Act & Assert
         assert not client.is_started
 
+    def test_maybe_refresh_client_sets_last_refresh_when_missing(
+        self,
+        sample_snowflake_config,
+        sample_snowflake_connection_config,
+        mocker,
+    ):
+        """Sets last refresh timestamp when none is recorded yet."""
+        client = SnowflakeHighPerformanceStreamingClient(
+            snowflake_config=sample_snowflake_config,
+            connection_config=sample_snowflake_connection_config,
+            client_name_suffix="test-123",
+        )
+
+        client.streaming_client = mocker.MagicMock()
+        client.stats["client_created_at"] = None
+        client._last_client_refresh_at = None
+        client.snowflake_config.client_refresh_interval_seconds = 300
+
+        client.stop = mocker.MagicMock()
+        client.start = mocker.MagicMock()
+
+        client._maybe_refresh_client()
+
+        assert client._last_client_refresh_at is not None
+        client.stop.assert_not_called()
+        client.start.assert_not_called()
+
     # ========================================================================
     # Connection Profile Building Tests
     # ========================================================================
@@ -140,7 +167,10 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Assert
         assert profile["user"] == sample_snowflake_connection_config.user
         assert profile["account"] == sample_snowflake_connection_config.account
-        assert profile["url"] == f"https://{sample_snowflake_connection_config.account}.snowflakecomputing.com:443"
+        assert (
+            profile["url"]
+            == f"https://{sample_snowflake_connection_config.account}.snowflakecomputing.com:443"
+        )
         assert "private_key" in profile
         assert profile["role"] == sample_snowflake_connection_config.role
 
@@ -153,7 +183,9 @@ class TestSnowflakeHighPerformanceStreamingClient:
         """Test building connection profile with encrypted private key."""
         # Arrange
         key_file = tmp_path / "encrypted_key.pem"
-        key_file.write_text("-----BEGIN ENCRYPTED PRIVATE KEY-----\ntest\n-----END ENCRYPTED PRIVATE KEY-----")
+        key_file.write_text(
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\ntest\n-----END ENCRYPTED PRIVATE KEY-----"
+        )
 
         connection_config = SnowflakeConnectionConfig(
             account="test-account",
@@ -173,9 +205,13 @@ class TestSnowflakeHighPerformanceStreamingClient:
         )
 
         # Mock private key decryption
-        mock_key_content = b"-----BEGIN ENCRYPTED PRIVATE KEY-----\ntest\n-----END ENCRYPTED PRIVATE KEY-----"
+        mock_key_content = (
+            b"-----BEGIN ENCRYPTED PRIVATE KEY-----\ntest\n-----END ENCRYPTED PRIVATE KEY-----"
+        )
         mock_private_key = mocker.MagicMock()
-        mock_private_key.private_bytes.return_value = b"-----BEGIN PRIVATE KEY-----\ndecrypted\n-----END PRIVATE KEY-----"
+        mock_private_key.private_bytes.return_value = (
+            b"-----BEGIN PRIVATE KEY-----\ndecrypted\n-----END PRIVATE KEY-----"
+        )
 
         mocker.patch("pathlib.Path.open", mocker.mock_open(read_data=mock_key_content))
         mock_load_key = mocker.patch(
@@ -306,15 +342,16 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Mock tempfile creation - return actual file descriptors
         mock_mkstemp = mocker.patch("tempfile.mkstemp")
         mock_mkstemp.side_effect = [
-            (1, "/tmp/snowflake_key_test.pem"),    # First call for key file
+            (1, "/tmp/snowflake_key_test.pem"),  # First call for key file
             (2, "/tmp/snowflake_profile_test.json"),  # Second call for profile file
         ]
 
         # Mock file operations - use a real file-like object
-        def mock_open_wrapper(fd_or_path, mode='r'):
+        def mock_open_wrapper(fd_or_path, mode="r"):
             if isinstance(fd_or_path, int):
                 # File descriptor - create a mock file object
                 from io import StringIO
+
                 return StringIO()
             else:
                 # Regular path
@@ -325,7 +362,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Mock StreamingIngestClient to prevent real instantiation
         mock_streaming_client_class = mocker.patch(
-            "src.streaming.snowflake_high_performance.StreamingIngestClient"
+            "streaming.snowflake_high_performance.StreamingIngestClient"
         )
         mock_streaming_client_class.return_value = mock_snowflake_streaming_client
 
@@ -372,9 +409,10 @@ class TestSnowflakeHighPerformanceStreamingClient:
         ]
 
         # Mock file operations
-        def mock_open_wrapper(fd_or_path, mode='r'):
+        def mock_open_wrapper(fd_or_path, mode="r"):
             if isinstance(fd_or_path, int):
                 from io import StringIO
+
                 return StringIO()
             else:
                 return mocker.mock_open()()
@@ -384,7 +422,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Mock StreamingIngestClient
         mock_streaming_client_class = mocker.patch(
-            "src.streaming.snowflake_high_performance.StreamingIngestClient"
+            "streaming.snowflake_high_performance.StreamingIngestClient"
         )
         mock_streaming_client_class.return_value = mock_snowflake_streaming_client
 
@@ -527,11 +565,11 @@ class TestSnowflakeHighPerformanceStreamingClient:
         client.streaming_client = mock_client
 
         # Act
-        channel = client._get_or_create_channel("partition_0")
+        channel = client._get_or_create_channel("test-channel")
 
         # Assert
         assert channel == mock_channel
-        assert "TEST_TABLE_partition_partition_0_test-123" in client.channels
+        assert "test-channel" in client.channels
         assert client.stats["channels_created"] == 1
         mock_client.open_channel.assert_called_once()
 
@@ -552,12 +590,12 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Set up mock streaming client and existing channel
         mock_client = MagicMock()
         mock_channel = MagicMock()
-        channel_name = "TEST_TABLE_partition_partition_0_test-123"
+        channel_name = "test-channel"
         client.channels[channel_name] = mock_channel
         client.streaming_client = mock_client
 
         # Act
-        channel = client._get_or_create_channel("partition_0")
+        channel = client._get_or_create_channel("test-channel")
 
         # Assert
         assert channel == mock_channel
@@ -579,7 +617,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Act & Assert
         with pytest.raises(RuntimeError, match="StreamingIngestClient not initialized"):
-            client._get_or_create_channel("partition_0")
+            client._get_or_create_channel("test-channel")
 
     def test_get_or_create_channel_handles_creation_error(
         self,
@@ -601,7 +639,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Act & Assert
         with pytest.raises(Exception, match="Channel creation failed"):
-            client._get_or_create_channel("partition_0")
+            client._get_or_create_channel("test-channel")
 
     # ========================================================================
     # Data Ingestion Tests
@@ -812,6 +850,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Now create a retry decorator that wraps the failing implementation
         def retry_decorator(func):
             """Simulates a retry decorator that retries on exception."""
+
             def wrapper(*args, **kwargs):
                 max_retries = 3
                 for attempt in range(max_retries):
@@ -823,6 +862,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
                         else:
                             raise  # Out of retries
                 return False
+
             return wrapper
 
         # Apply retry decorator to our failing implementation

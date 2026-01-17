@@ -42,17 +42,21 @@ jobs:
         run: |
           uv sync --all-groups
 
-      - name: Check formatting with black
+      - name: Install ty
         run: |
-          uv run black --check src/ tests/ || true
+          uv tool install ty
 
-      - name: Check import sorting with isort
+      - name: Check formatting with ruff
         run: |
-          uv run isort --check-only src/ tests/ || true
+          uv run ruff format --check src/
 
-      - name: Lint with pylint
+      - name: Lint with ruff
         run: |
-          uv run pylint src/ --disable=all --enable=E,F,W || true
+          uv run ruff check src/
+
+      - name: Type check with ty
+        run: |
+          uv tool run ty check src/
 
   test-unit:
     name: Unit Tests

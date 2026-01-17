@@ -57,6 +57,10 @@ jobs:
         run: |
           uv sync --all-groups
 
+      - name: Install ty
+        run: |
+          uv tool install ty
+
       - name: Determine test scope
         id: test_scope
         run: |
@@ -147,13 +151,17 @@ jobs:
         run: |
           uv sync --all-groups
 
-      - name: Run linting
+      - name: Check formatting with ruff
         run: |
-          uv run pylint src/ --disable=all --enable=E,F --exit-zero || true
+          uv run ruff format --check src/
+
+      - name: Lint with ruff
+        run: |
+          uv run ruff check src/
 
       - name: Run type checking
         run: |
-          uv run mypy src/ --ignore-missing-imports --no-error-summary || true
+          uv tool run ty check src/
 
       - name: Run coverage check
         run: |

@@ -23,7 +23,6 @@ dependencies = [
     "snowflake-connector-python>=3.13.1",
     "cryptography>=41.0.0",
     "snowpipe-streaming>=1.1.0",
-    "snowflake-snowpark-python>=1.42.0",
 ]
 
 [project.scripts]
