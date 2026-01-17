@@ -231,7 +231,7 @@ class PostgresCheckpointManager:
 
         except Exception as e:
             logger.error("Failed to get last checkpoint: %s", e, exc_info=True)
-            return None
+            raise
 
     async def save_checkpoint(
         self,
@@ -309,7 +309,7 @@ class PostgresCheckpointManager:
                     eventhub_name=self.eventhub_name,
                     partitions_count=len(partition_checkpoints),
                 )
-                return False
+                raise
 
     def close(self):
         """Close cached Postgres connections."""

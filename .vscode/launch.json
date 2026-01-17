@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "EvSnow: run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "evsnow",
+      "args": ["run", "--env-file", ".env"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

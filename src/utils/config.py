@@ -188,7 +188,9 @@ class EvSnowConfig(BaseSettings):
         if self.control_table_backend == "postgres":
             if self.control_postgres is None:
                 self.control_postgres = PostgresConnectionConfig()
-            self.target_schema = self._normalize_postgres_schema(self.target_schema)
+            self.target_db = self._normalize_postgres_identifier(self.target_db)
+            self.target_schema = self._normalize_postgres_identifier(self.target_schema)
+            self.target_table = self._normalize_postgres_identifier(self.target_table)
 
     def _parse_dynamic_config(self):
         """Parse dynamic Event Hub and Snowflake configurations from environment variables."""
@@ -389,7 +391,7 @@ class EvSnowConfig(BaseSettings):
         return cleaned or "unknown"
 
     @staticmethod
-    def _normalize_postgres_schema(value: str) -> str:
+    def _normalize_postgres_identifier(value: str) -> str:
         cleaned = value.strip()
         if cleaned.startswith('"') and cleaned.endswith('"') and len(cleaned) > 1:
             return cleaned[1:-1]
@@ -454,7 +456,7 @@ def load_config(env_file: str | None = None) -> EvSnowConfig:
         try:
             from dotenv import load_dotenv
 
-            load_dotenv(env_path)
+            load_dotenv(env_path, override=True)
         except ImportError as e:
             raise ImportError(
                 "python-dotenv is required for loading .env files. Install it with: pip install python-dotenv"

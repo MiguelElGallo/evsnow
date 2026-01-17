@@ -398,7 +398,17 @@ class PipelineOrchestrator:
             logger.info(f"All {len(self.tasks)} mapping tasks started")
 
             # Wait for all tasks (they should run indefinitely until stopped)
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+            results = await asyncio.gather(*self.tasks, return_exceptions=True)
+            errors = [
+                result
+                for result in results
+                if isinstance(result, Exception)
+                and not isinstance(result, asyncio.CancelledError)
+            ]
+            if errors:
+                for error in errors:
+                    logger.error("Mapping task failed: %s", error)
+                raise errors[0]
 
         except asyncio.CancelledError:
             logger.info("Pipeline execution cancelled")

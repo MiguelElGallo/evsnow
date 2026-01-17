@@ -33,8 +33,14 @@ def _get_azure_credential() -> DefaultAzureCredential:
 def _get_password(config: PostgresConnectionConfig) -> str | None:
     if config.auth_mode == "password":
         return config.password
+    logger.info("Requesting Azure token for Postgres user %s", config.user)
     credential = _get_azure_credential()
-    token = credential.get_token(_AZURE_TOKEN_SCOPE)
+    try:
+        token = credential.get_token(_AZURE_TOKEN_SCOPE)
+    except Exception as exc:
+        logger.error("Failed to obtain Azure token for Postgres: %s", exc, exc_info=True)
+        raise
+    logger.info("Obtained Azure token for Postgres (expires_on=%s)", token.expires_on)
     return token.token
 
 
@@ -58,6 +64,14 @@ def get_connection(
         if cached_conn:
             _connection_cache.pop(cache_key, None)
 
+    logger.info(
+        "Connecting to Postgres control DB %s at %s:%s as %s (auth_mode=%s)",
+        database,
+        config.host,
+        config.port,
+        config.user,
+        config.auth_mode,
+    )
     conn = psycopg.connect(
         host=config.host,
         port=config.port,
