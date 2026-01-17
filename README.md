@@ -88,6 +88,10 @@ SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 SNOWFLAKE_1_BATCH=100
 ```
 
+Postgres control table notes:
+- When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
+- When `CONTROL_PG_AUTH_MODE=azure_token`, the app uses `DefaultAzureCredential` and passes the access token as the password; `CONTROL_PG_PASSWORD` is ignored. Ensure the Azure AD principal exists on the server and has access to the database/schema/table.
+
 ### Snowflake authentication
 
 Generate RSA key pair for authentication:
