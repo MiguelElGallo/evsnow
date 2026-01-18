@@ -607,6 +607,28 @@ class TestPostgresCheckpointManager:
         assert result is True
         assert mock_insert.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_save_checkpoint_raises_on_error(self, mocker, mock_logfire):
+        """Test that save raises exception on error."""
+        mocker.patch(
+            "utils.postgres.insert_partition_checkpoint", side_effect=Exception("DB error")
+        )
+
+        manager = PostgresCheckpointManager(
+            eventhub_namespace="test.servicebus.windows.net",
+            eventhub_name="test-hub",
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            postgres_config=MagicMock(),
+        )
+
+        partition_checkpoints = {"0": 100}
+
+        # PostgresCheckpointManager raises exceptions (unlike SnowflakeCheckpointManager which returns False)
+        with pytest.raises(Exception, match="DB error"):
+            await manager.save_checkpoint(partition_checkpoints)
+
     def test_close_calls_postgres_cleanup(self, mocker):
         """Test close() triggers Postgres connection cleanup."""
         mock_close = mocker.patch("utils.postgres.close_cached_connections")
