@@ -1,5 +1,6 @@
 """Tests for Postgres control table utilities."""
 
+import pytest
 from unittest.mock import MagicMock, Mock
 
 from utils.config_models import PostgresConnectionConfig
@@ -174,7 +175,6 @@ def test_get_connection_azure_token_auth_failure(mocker):
     )
 
     # Should raise an exception when trying to get connection
-    import pytest
     with pytest.raises(Exception) as exc_info:
         pg.get_connection(config, "control_db", use_cache=False)
     
