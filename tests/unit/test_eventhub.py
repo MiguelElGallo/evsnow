@@ -624,7 +624,7 @@ class TestPostgresCheckpointManager:
         )
 
         partition_checkpoints = {"0": 100}
-        
+
         # PostgresCheckpointManager raises exceptions (unlike SnowflakeCheckpointManager which returns False)
         with pytest.raises(Exception, match="DB error"):
             await manager.save_checkpoint(partition_checkpoints)
