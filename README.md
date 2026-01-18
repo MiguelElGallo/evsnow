@@ -1,9 +1,15 @@
 # evsnow
 
+[![EvSnow video](media/videoevsnow.png)](https://www.youtube.com/watch?v=zX3K-rfNZIU)
+
+Video: Click the image above for a walkthrough of this repo.
+
 [![Tests](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml)
 [![CI/CD Pipeline](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml)
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
+
+Now supports streaming directly to Iceberg tables.
 
 EvSnow can also stream-ingest into **Apache Iceberg tables in Snowflake** (Snowflake-managed Iceberg) using **Snowpipe Streaming**—so you can land Event Hub events directly into Iceberg-backed storage while keeping the same pipeline, checkpointing, and operational workflow.
 
@@ -71,6 +77,15 @@ SNOWFLAKE_ROLE=STREAM
 TARGET_DB=CONTROL
 TARGET_SCHEMA=PUBLIC
 TARGET_TABLE=INGESTION_STATUS
+CONTROL_TABLE_BACKEND=snowflake  # snowflake | postgres
+
+# Postgres control table (only if CONTROL_TABLE_BACKEND=postgres)
+CONTROL_PG_HOST=localhost
+CONTROL_PG_PORT=5432
+CONTROL_PG_USER=checkpoint_user
+CONTROL_PG_PASSWORD=checkpoint_password
+CONTROL_PG_SSLMODE=require
+CONTROL_PG_AUTH_MODE=password  # password | azure_token
 
 # Topic → Table Mapping
 SNOWFLAKE_1_DATABASE=INGESTION
@@ -78,6 +93,10 @@ SNOWFLAKE_1_SCHEMA=PUBLIC
 SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 SNOWFLAKE_1_BATCH=100
 ```
+
+Postgres control table notes:
+- When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
+- When `CONTROL_PG_AUTH_MODE=azure_token`, the app uses `DefaultAzureCredential` and passes the access token as the password; `CONTROL_PG_PASSWORD` is ignored. Ensure the Azure AD principal exists on the server and has access to the database/schema/table.
 
 ### Snowflake authentication
 

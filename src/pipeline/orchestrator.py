@@ -119,6 +119,8 @@ class PipelineMapping:
                 control_db=self.pipeline_config.target_db,
                 control_schema=self.pipeline_config.target_schema,
                 control_table=self.pipeline_config.target_table,
+                control_table_backend=self.pipeline_config.control_table_backend,
+                control_postgres_config=self.pipeline_config.control_postgres,
                 capture_messages=bool(getattr(self.pipeline_config, "capture_messages", False)),
                 capture_messages_dir=str(
                     getattr(self.pipeline_config, "capture_messages_dir", "messages")
@@ -396,7 +398,16 @@ class PipelineOrchestrator:
             logger.info(f"All {len(self.tasks)} mapping tasks started")
 
             # Wait for all tasks (they should run indefinitely until stopped)
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+            results = await asyncio.gather(*self.tasks, return_exceptions=True)
+            errors = [
+                result
+                for result in results
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError)
+            ]
+            if errors:
+                for error in errors:
+                    logger.error("Mapping task failed: %s", error)
+                raise errors[0]
 
         except asyncio.CancelledError:
             logger.info("Pipeline execution cancelled")

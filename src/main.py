@@ -244,36 +244,73 @@ def validate_config(
                 target_schema = os.getenv("TARGET_SCHEMA")
                 target_table = os.getenv("TARGET_TABLE")
                 use_hybrid_table = config.use_hybrid_table
+                control_backend = config.control_table_backend
 
                 if target_db and target_schema and target_table:
-                    table_type = "hybrid table" if use_hybrid_table else "table"
-                    console.print(
-                        f"\n[bold blue]Verifying control {table_type}:[/bold blue] {target_db}.{target_schema}.{target_table}"
-                    )
-
-                    # Use Snowflake control table
-                    from utils.snowflake import create_control_table
-
-                    try:
-                        if create_control_table(
-                            target_db=target_db,
-                            target_schema=target_schema,
-                            target_table=target_table,
-                            config=config.snowflake_connection,
-                            use_hybrid_table=use_hybrid_table,
-                        ):
+                    if control_backend == "postgres":
+                        console.print(
+                            "\n[bold blue]Verifying control table (Postgres):[/bold blue] "
+                            f"{target_db}.{target_schema}.{target_table}"
+                        )
+                        if not config.control_postgres:
                             console.print(
-                                "[green]✓ Snowflake control table verified/created successfully[/green]"
+                                "[yellow]⚠ Warning: Postgres control table backend selected but CONTROL_PG_* settings are missing[/yellow]"
                             )
                         else:
-                            console.print(
-                                "[yellow]⚠ Warning: Could not verify Snowflake control table[/yellow]"
-                            )
-                    except Exception as sf_error:
+                            from utils.postgres import create_control_table
+
+                            try:
+                                if create_control_table(
+                                    target_db=target_db,
+                                    target_schema=target_schema,
+                                    target_table=target_table,
+                                    config=config.control_postgres,
+                                ):
+                                    console.print(
+                                        "[green]✓ Postgres control table verified/created successfully[/green]"
+                                    )
+                                else:
+                                    console.print(
+                                        "[yellow]⚠ Warning: Could not verify Postgres control table[/yellow]"
+                                    )
+                            except Exception as pg_error:
+                                console.print(
+                                    f"[yellow]⚠ Warning: Could not verify Postgres control table: {pg_error}[/yellow]"
+                                )
+                                logger.warning(
+                                    f"Postgres control table verification failed: {pg_error}"
+                                )
+                    else:
+                        table_type = "hybrid table" if use_hybrid_table else "table"
                         console.print(
-                            f"[yellow]⚠ Warning: Could not verify Snowflake control table: {sf_error}[/yellow]"
+                            f"\n[bold blue]Verifying control {table_type}:[/bold blue] {target_db}.{target_schema}.{target_table}"
                         )
-                        logger.warning(f"Snowflake control table verification failed: {sf_error}")
+
+                        # Use Snowflake control table
+                        from utils.snowflake import create_control_table
+
+                        try:
+                            if create_control_table(
+                                target_db=target_db,
+                                target_schema=target_schema,
+                                target_table=target_table,
+                                config=config.snowflake_connection,
+                                use_hybrid_table=use_hybrid_table,
+                            ):
+                                console.print(
+                                    "[green]✓ Snowflake control table verified/created successfully[/green]"
+                                )
+                            else:
+                                console.print(
+                                    "[yellow]⚠ Warning: Could not verify Snowflake control table[/yellow]"
+                                )
+                        except Exception as sf_error:
+                            console.print(
+                                f"[yellow]⚠ Warning: Could not verify Snowflake control table: {sf_error}[/yellow]"
+                            )
+                            logger.warning(
+                                f"Snowflake control table verification failed: {sf_error}"
+                            )
                 else:
                     console.print(
                         "[yellow]⚠ Control table settings not found in environment (TARGET_DB, TARGET_SCHEMA, TARGET_TABLE)[/yellow]"

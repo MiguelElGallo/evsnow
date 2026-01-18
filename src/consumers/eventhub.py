@@ -1,14 +1,14 @@
 """
-Azure EventHub async consumer with custom Snowflake-based checkpoint management.
+Azure EventHub async consumer with database-backed checkpoint management.
 
 This module provides an EventHub consumer that:
 1. Receives messages asynchronously from EventHub partitions
 2. Batches messages for efficient processing (1000 messages or 5 minutes)
-3. Uses Snowflake tables for checkpoint storage instead of blob storage
-4. Integrates with the existing Snowflake connection utilities
+3. Uses Snowflake or Postgres for checkpoint storage instead of blob storage
+4. Integrates with the existing Snowflake/Postgres connection utilities
 5. Provides robust error handling and recovery mechanisms
 
-Based on Azure EventHub SDK patterns but adapted for Snowflake checkpointing.
+Based on Azure EventHub SDK patterns but adapted for database checkpointing.
 """
 
 import asyncio
@@ -25,10 +25,16 @@ import logfire
 from azure.eventhub import EventData
 from azure.eventhub.aio import EventHubConsumerClient, PartitionContext
 
-from consumers.checkpoints import SnowflakeCheckpointManager, SnowflakeCheckpointStore
+from consumers.checkpoints import (
+    CheckpointManagerProtocol,
+    PostgresCheckpointManager,
+    PostgresCheckpointStore,
+    SnowflakeCheckpointManager,
+    SnowflakeCheckpointStore,
+)
 from consumers.messages import BytesEncoder, EventHubMessage, MessageBatch, _convert_bytes_to_str
 from utils.azure_identity import build_eventhub_cli_credential
-from utils.config import EventHubConfig, SnowflakeConnectionConfig
+from utils.config import EventHubConfig, PostgresConnectionConfig, SnowflakeConnectionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +49,8 @@ __all__ = [
     "EventHubAsyncConsumer",
     "EventHubMessage",
     "MessageBatch",
+    "PostgresCheckpointManager",
+    "PostgresCheckpointStore",
     "SnowflakeCheckpointManager",
     "SnowflakeCheckpointStore",
     "_convert_bytes_to_str",
@@ -52,12 +60,12 @@ __all__ = [
 
 class EventHubAsyncConsumer:
     """
-    Async EventHub consumer with Snowflake-based checkpoint management.
+    Async EventHub consumer with database-backed checkpoint management.
 
     This consumer:
     - Receives messages from EventHub asynchronously
     - Batches messages for efficient processing
-    - Uses Snowflake for checkpoint storage
+    - Uses Snowflake or Postgres for checkpoint storage
     - Provides callback-based message processing
     """
 
@@ -74,6 +82,8 @@ class EventHubAsyncConsumer:
         control_db: str | None = None,
         control_schema: str | None = None,
         control_table: str | None = None,
+        control_table_backend: str = "snowflake",
+        control_postgres_config: PostgresConnectionConfig | None = None,
         capture_messages: bool = False,
         capture_messages_dir: str = "messages",
     ):
@@ -97,6 +107,11 @@ class EventHubAsyncConsumer:
         self.control_db = control_db or target_db
         self.control_schema = control_schema or target_schema
         self.control_table = control_table or "INGESTION_STATUS"
+        self.control_table_backend = control_table_backend.strip().lower()
+        self.control_postgres_config = control_postgres_config
+        self.checkpoint_backend_label = (
+            "Postgres" if self.control_table_backend == "postgres" else "Snowflake"
+        )
 
         # Generate unique consumer ID to help identify competing consumers
         self.consumer_id = f"evsnow_{uuid.uuid4().hex[:8]}"
@@ -107,7 +122,7 @@ class EventHubAsyncConsumer:
         # Runtime state
         self.client: EventHubConsumerClient | None = None
         self.credential: Any = None  # Azure credential (needs to be closed)
-        self.checkpoint_manager: SnowflakeCheckpointManager | None = None
+        self.checkpoint_manager: CheckpointManagerProtocol | None = None
         self.current_batch: MessageBatch | None = None
         self.running = False
         self.tasks: set[asyncio.Task] = set()
@@ -313,7 +328,7 @@ class EventHubAsyncConsumer:
         logger.warning("")
 
     def _log_no_checkpoint_behavior(self, starting_pos: str) -> None:
-        logger.warning("⚠️ No checkpoints found in Snowflake.")
+        logger.warning("⚠️ No checkpoints found in %s.", self.checkpoint_backend_label)
 
         if starting_pos == "-1":
             logger.info(
@@ -524,21 +539,39 @@ class EventHubAsyncConsumer:
             # (where events are ingested), NOT the control table location.
             # The control table location is determined by the utility functions internally.
             logger.info("📍 Initializing checkpoint manager...")
-            self.checkpoint_manager = SnowflakeCheckpointManager(
-                eventhub_namespace=self.eventhub_config.namespace,
-                eventhub_name=self.eventhub_config.name,
-                target_db=self.target_db,  # Destination data table
-                target_schema=self.target_schema,  # Destination data schema
-                target_table=self.target_table,  # Destination data table name
-                snowflake_config=self.snowflake_config,
-                control_db=self.control_db,  # Where checkpoints are stored
-                control_schema=self.control_schema,
-                control_table=self.control_table,
-            )
+            if self.control_table_backend == "postgres":
+                if not self.control_postgres_config:
+                    raise ValueError(
+                        "Postgres control table backend selected but CONTROL_PG_* config is missing"
+                    )
+                self.checkpoint_manager = PostgresCheckpointManager(
+                    eventhub_namespace=self.eventhub_config.namespace,
+                    eventhub_name=self.eventhub_config.name,
+                    target_db=self.target_db,  # Destination data table
+                    target_schema=self.target_schema,  # Destination data schema
+                    target_table=self.target_table,  # Destination data table name
+                    postgres_config=self.control_postgres_config,
+                    control_db=self.control_db,  # Where checkpoints are stored
+                    control_schema=self.control_schema,
+                    control_table=self.control_table,
+                )
+                checkpoint_store = PostgresCheckpointStore(self.checkpoint_manager)
+            else:
+                self.checkpoint_manager = SnowflakeCheckpointManager(
+                    eventhub_namespace=self.eventhub_config.namespace,
+                    eventhub_name=self.eventhub_config.name,
+                    target_db=self.target_db,  # Destination data table
+                    target_schema=self.target_schema,  # Destination data schema
+                    target_table=self.target_table,  # Destination data table name
+                    snowflake_config=self.snowflake_config,
+                    control_db=self.control_db,  # Where checkpoints are stored
+                    control_schema=self.control_schema,
+                    control_table=self.control_table,
+                )
+                checkpoint_store = SnowflakeCheckpointStore(self.checkpoint_manager)
 
             # Create Azure SDK-compatible checkpoint store
             logger.info("🔐 Creating checkpoint store...")
-            checkpoint_store = SnowflakeCheckpointStore(self.checkpoint_manager)
 
             # Log existing checkpoints for debugging (SDK will load them automatically)
             logger.info("🔍 Checking for existing checkpoints...")
@@ -550,7 +583,11 @@ class EventHubAsyncConsumer:
             # NOTE: keep the check inline so type-checkers can narrow `partition_checkpoints`.
             if has_checkpoints:
                 assert partition_checkpoints is not None
-                logger.info(f"✅ Found checkpoints in Snowflake: {partition_checkpoints}")
+                logger.info(
+                    "✅ Found checkpoints in %s: %s",
+                    self.checkpoint_backend_label,
+                    partition_checkpoints,
+                )
                 logger.info(
                     "   SDK will automatically resume from NEXT sequence after these checkpoints:"
                 )
@@ -1063,6 +1100,8 @@ async def create_eventhub_consumer(
     control_db: str | None = None,
     control_schema: str | None = None,
     control_table: str | None = None,
+    control_table_backend: str = "snowflake",
+    control_postgres_config: PostgresConnectionConfig | None = None,
 ) -> EventHubAsyncConsumer:
     """Factory function to create an EventHub consumer."""
     return EventHubAsyncConsumer(
@@ -1077,6 +1116,8 @@ async def create_eventhub_consumer(
         control_db=control_db,
         control_schema=control_schema,
         control_table=control_table,
+        control_table_backend=control_table_backend,
+        control_postgres_config=control_postgres_config,
     )
 
 

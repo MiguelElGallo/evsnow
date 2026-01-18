@@ -60,6 +60,8 @@ def mock_config():
     config.snowflake_configs = {"SNOWFLAKE_1": mock_sf}
 
     config.snowflake_connection = None  # Set to None to skip control table creation
+    config.control_table_backend = "snowflake"
+    config.control_postgres = None
     config.logfire = MagicMock(
         enabled=False,
         service_name="evsnow",
@@ -196,6 +198,26 @@ class TestValidateConfigCommand:
         assert result.exit_code == 0
         assert "Control table settings not found" in result.stdout
         mock_create_table.assert_not_called()
+
+    @patch("utils.postgres.create_control_table")
+    @patch("main.load_config")
+    def test_validate_config_postgres_control_table_success(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config, monkeypatch
+    ):
+        """If Postgres backend is selected, validate-config should verify Postgres control table."""
+        monkeypatch.setenv("TARGET_DB", "TEST_DB")
+        monkeypatch.setenv("TARGET_SCHEMA", "TEST_SCHEMA")
+        monkeypatch.setenv("TARGET_TABLE", "INGESTION_STATUS")
+
+        mock_config.control_table_backend = "postgres"
+        mock_config.control_postgres = MagicMock()
+        mock_load_config.return_value = mock_config
+        mock_create_table.return_value = True
+
+        result = cli_runner.invoke(app, ["validate-config"], input="n\n")
+
+        assert result.exit_code == 0
+        mock_create_table.assert_called_once()
 
     @patch("main.load_config")
     def test_validate_config_show_detailed_config_yes(self, mock_load_config, cli_runner, mock_config):

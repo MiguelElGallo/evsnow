@@ -935,6 +935,45 @@ class TestEvSnowConfig:
         warnings_str = " ".join(results["warnings"])
         assert "EVENTHUBNAME_2" in warnings_str
 
+    def test_postgres_backend_loads_control_config(self, monkeypatch):
+        """Test that Postgres control backend loads its connection config."""
+        monkeypatch.setenv("CONTROL_PG_HOST", "localhost")
+        monkeypatch.setenv("CONTROL_PG_PORT", "5432")
+        monkeypatch.setenv("CONTROL_PG_USER", "pguser")
+        monkeypatch.setenv("CONTROL_PG_PASSWORD", "pgpass")
+        monkeypatch.setenv("CONTROL_PG_SSLMODE", "require")
+        monkeypatch.setenv("CONTROL_PG_AUTH_MODE", "password")
+
+        config = EvSnowConfig(
+            eventhub_namespace="test.servicebus.windows.net",
+            control_table_backend="postgres",
+        )
+
+        assert config.control_table_backend == "postgres"
+        assert config.control_postgres is not None
+        assert config.control_postgres.host == "localhost"
+
+    def test_postgres_backend_normalizes_identifiers(self, monkeypatch):
+        """Test that Postgres control backend normalizes target identifiers."""
+        monkeypatch.setenv("CONTROL_PG_HOST", "localhost")
+        monkeypatch.setenv("CONTROL_PG_PORT", "5432")
+        monkeypatch.setenv("CONTROL_PG_USER", "pguser")
+        monkeypatch.setenv("CONTROL_PG_PASSWORD", "pgpass")
+        monkeypatch.setenv("CONTROL_PG_SSLMODE", "require")
+        monkeypatch.setenv("CONTROL_PG_AUTH_MODE", "password")
+
+        config = EvSnowConfig(
+            eventhub_namespace="test.servicebus.windows.net",
+            control_table_backend="postgres",
+            target_db="CONTROL",
+            target_schema="PUBLIC",
+            target_table="INGESTION_STATUS",
+        )
+
+        assert config.target_db == "control"
+        assert config.target_schema == "public"
+        assert config.target_table == "ingestion_status"
+
 
 class TestLoadConfig:
     """Tests for load_config function."""
