@@ -75,8 +75,7 @@ def main() -> int:
         logging.error("TARGET_DB is required for Postgres connection tests.")
         return 1
 
-    if target_db:
-        target_db = _normalize_postgres_identifier(target_db)
+    target_db = _normalize_postgres_identifier(target_db)
     if target_schema:
         target_schema = _normalize_postgres_identifier(target_schema)
     if target_table:
