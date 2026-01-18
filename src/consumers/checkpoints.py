@@ -453,9 +453,7 @@ class DatabaseCheckpointStore(CheckpointStore):
                 offset_value,
             )
 
-        logger.info(
-            "Loaded %s checkpoints from %s for SDK", len(checkpoints), self.backend_label
-        )
+        logger.info("Loaded %s checkpoints from %s for SDK", len(checkpoints), self.backend_label)
         return checkpoints
 
 

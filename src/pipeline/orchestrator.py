@@ -402,8 +402,7 @@ class PipelineOrchestrator:
             errors = [
                 result
                 for result in results
-                if isinstance(result, Exception)
-                and not isinstance(result, asyncio.CancelledError)
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError)
             ]
             if errors:
                 for error in errors:

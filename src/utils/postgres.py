@@ -20,7 +20,9 @@ _AZURE_TOKEN_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
 
 
 def _get_cache_key(config: PostgresConnectionConfig, database: str) -> str:
-    return f"{config.host}:{config.port}:{config.user}:{database}:{config.sslmode}:{config.auth_mode}"
+    return (
+        f"{config.host}:{config.port}:{config.user}:{database}:{config.sslmode}:{config.auth_mode}"
+    )
 
 
 def _get_azure_credential() -> DefaultAzureCredential:
@@ -110,9 +112,7 @@ def create_control_table(
         conn = get_connection(config, target_db, use_cache=False)
         with conn.cursor() as cursor:
             cursor.execute(
-                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
-                    sql.Identifier(target_schema)
-                )
+                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(target_schema))
             )
             cursor.execute(
                 sql.SQL(
