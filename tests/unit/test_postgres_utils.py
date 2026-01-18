@@ -1,6 +1,7 @@
 """Tests for Postgres control table utilities."""
 
-from unittest.mock import MagicMock
+import pytest
+from unittest.mock import MagicMock, Mock
 
 from utils.config_models import PostgresConnectionConfig
 from utils import postgres as pg
@@ -101,3 +102,83 @@ def test_insert_partition_checkpoint_executes(monkeypatch):
     )
 
     assert executed.get("called") is True
+
+
+def test_get_connection_azure_token_auth_success(mocker):
+    """Ensure azure_token auth retrieves token and passes it to psycopg.connect."""
+    # Reset the global azure credential cache to ensure clean test
+    pg._azure_credential = None
+    
+    dummy_conn = MagicMock()
+    dummy_conn.closed = False
+
+    mock_connect = mocker.patch("utils.postgres.psycopg.connect", return_value=dummy_conn)
+    
+    # Mock the Azure credential and token
+    mock_token = Mock()
+    mock_token.token = "mock-azure-token-12345"
+    mock_token.expires_on = 1234567890
+    
+    mock_credential = Mock()
+    mock_credential.get_token = Mock(return_value=mock_token)
+    
+    mock_default_azure_credential = mocker.patch(
+        "utils.postgres.DefaultAzureCredential",
+        return_value=mock_credential
+    )
+
+    config = PostgresConnectionConfig(
+        host="localhost",
+        port=5432,
+        user="pguser",
+        sslmode="require",
+        auth_mode="azure_token",
+    )
+
+    conn = pg.get_connection(config, "control_db", use_cache=False)
+
+    assert conn is dummy_conn
+    mock_default_azure_credential.assert_called_once()
+    mock_credential.get_token.assert_called_once_with(
+        "https://ossrdbms-aad.database.windows.net/.default"
+    )
+    mock_connect.assert_called_once()
+    call_kwargs = mock_connect.call_args.kwargs
+    assert call_kwargs["password"] == "mock-azure-token-12345"
+    assert call_kwargs["dbname"] == "control_db"
+
+
+def test_get_connection_azure_token_auth_failure(mocker):
+    """Ensure azure_token auth raises exception when token acquisition fails."""
+    # Reset the global azure credential cache to ensure clean test
+    pg._azure_credential = None
+    
+    # Mock psycopg.connect so we don't make real connection attempts
+    mocker.patch("utils.postgres.psycopg.connect")
+    
+    mock_credential = Mock()
+    mock_credential.get_token = Mock(
+        side_effect=Exception("Failed to acquire Azure token")
+    )
+    
+    mocker.patch(
+        "utils.postgres.DefaultAzureCredential",
+        return_value=mock_credential
+    )
+
+    config = PostgresConnectionConfig(
+        host="localhost",
+        port=5432,
+        user="pguser",
+        sslmode="require",
+        auth_mode="azure_token",
+    )
+
+    # Should raise an exception when trying to get connection
+    with pytest.raises(Exception) as exc_info:
+        pg.get_connection(config, "control_db", use_cache=False)
+    
+    assert "Failed to acquire Azure token" in str(exc_info.value)
+    mock_credential.get_token.assert_called_once_with(
+        "https://ossrdbms-aad.database.windows.net/.default"
+    )
