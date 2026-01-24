@@ -168,23 +168,23 @@ From issue #XX:
 ### Prerequisites
 ```bash
 # Python 3.13+ required
-pip install pytest pytest-mock pytest-asyncio pytest-cov
-pip install 'pydantic>=2.0.0' 'pydantic-settings>=2.0.0'
+uv sync --all-groups
 ```
 
 ### Basic Execution
 ```bash
 # All streaming tests
-pytest tests/unit/test_streaming.py -v
+uv run pytest tests/unit/test_streaming.py -v
 
 # With coverage
-pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=term-missing
+uv run pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=html
+uv run pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=term-missing
 
 # Specific test class
-pytest tests/unit/test_streaming.py::TestStreamingFactory -v
+uv run pytest tests/unit/test_streaming.py::TestStreamingFactory -v
 
 # Single test
-pytest tests/unit/test_streaming.py::TestStreamingFactory::test_creates_high_performance_client_with_valid_config -v
+uv run pytest tests/unit/test_streaming.py::TestStreamingFactory::test_creates_high_performance_client_with_valid_config -v
 ```
 
 ### Expected Output

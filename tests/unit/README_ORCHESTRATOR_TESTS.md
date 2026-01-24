@@ -77,16 +77,6 @@ Tests for the `run_pipeline()` function - main entry point.
 The tests require the following dependencies to run:
 
 ```bash
-pip install pytest pytest-asyncio pytest-mock pytest-cov
-pip install pydantic pydantic-settings
-pip install azure-eventhub azure-identity
-pip install logfire
-pip install snowflake-connector-python snowpipe-streaming
-```
-
-Or using the project's dependency management:
-
-```bash
 uv sync --all-groups  # Install all dependencies including dev/test
 ```
 
@@ -95,36 +85,36 @@ uv sync --all-groups  # Install all dependencies including dev/test
 ### Run All Orchestrator Tests
 
 ```bash
-pytest tests/unit/test_orchestrator.py -v
+uv run pytest tests/unit/test_orchestrator.py -v
 ```
 
 ### Run Specific Test Class
 
 ```bash
 # Test PipelineMapping only
-pytest tests/unit/test_orchestrator.py::TestPipelineMapping -v
+uv run pytest tests/unit/test_orchestrator.py::TestPipelineMapping -v
 
 # Test PipelineOrchestrator only  
-pytest tests/unit/test_orchestrator.py::TestPipelineOrchestrator -v
+uv run pytest tests/unit/test_orchestrator.py::TestPipelineOrchestrator -v
 
 # Test run_pipeline() only
-pytest tests/unit/test_orchestrator.py::TestRunPipeline -v
+uv run pytest tests/unit/test_orchestrator.py::TestRunPipeline -v
 ```
 
 ### Run Specific Test
 
 ```bash
-pytest tests/unit/test_orchestrator.py::TestPipelineMapping::test_start_initializes_components_successfully -v
+uv run pytest tests/unit/test_orchestrator.py::TestPipelineMapping::test_start_initializes_components_successfully -v
 ```
 
 ### Run with Coverage
 
 ```bash
 # Generate coverage report
-pytest tests/unit/test_orchestrator.py --cov=src/pipeline/orchestrator --cov-report=term-missing
+uv run pytest tests/unit/test_orchestrator.py --cov=src/pipeline/orchestrator --cov-report=term-missing
 
 # Generate HTML coverage report
-pytest tests/unit/test_orchestrator.py --cov=src/pipeline/orchestrator --cov-report=html
+uv run pytest tests/unit/test_orchestrator.py --cov=src/pipeline/orchestrator --cov-report=html
 
 # View HTML report
 open htmlcov/index.html  # macOS
@@ -134,7 +124,7 @@ xdg-open htmlcov/index.html  # Linux
 ### Run Async Tests Only
 
 ```bash
-pytest tests/unit/test_orchestrator.py -m asyncio -v
+uv run pytest tests/unit/test_orchestrator.py -m asyncio -v
 ```
 
 ## Test Design Principles

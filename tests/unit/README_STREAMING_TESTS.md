@@ -9,24 +9,21 @@ This directory contains comprehensive unit tests for the streaming module, inclu
 
 The tests require Python 3.13+ and the following dependencies:
 ```bash
-# Install test dependencies
-pip install pytest pytest-asyncio pytest-cov pytest-mock
-
-# Install project dependencies (required for imports)
-pip install pydantic>=2.0.0 pydantic-settings>=2.0.0
+# Install all dependencies including test dependencies
+uv sync --all-groups
 ```
 
 ### Running Tests
 
 ```bash
 # Run all streaming tests
-pytest tests/unit/test_streaming.py -v
+uv run pytest tests/unit/test_streaming.py -v
 
 # Run with coverage
-pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=html
+uv run pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=html
 
 # Run specific test class
-pytest tests/unit/test_streaming.py::TestSnowflakeStreamingClientBase -v
+uv run pytest tests/unit/test_streaming.py::TestSnowflakeStreamingClientBase -v
 
 # Run specific test
 pytest tests/unit/test_streaming.py::TestStreamingFactory::test_creates_high_performance_client_with_valid_config -v
@@ -93,7 +90,7 @@ ImportError: cannot import name 'field_validator' from 'pydantic'
 
 This means you have Pydantic v1.x installed but the project requires v2.x:
 ```bash
-pip install --upgrade 'pydantic>=2.0.0' 'pydantic-settings>=2.0.0'
+uv sync --all-groups
 ```
 
 ### Module Not Found

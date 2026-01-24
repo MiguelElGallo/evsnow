@@ -190,10 +190,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install UV
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: Run Bandit
         run: |
-          pip install bandit
-          bandit -r src/ -f json -o bandit-report.json || true
+          uv tool install bandit
+          uv tool run bandit -r src/ -f json -o bandit-report.json || true
 
       - name: Upload security report
         uses: actions/upload-artifact@v4

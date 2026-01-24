@@ -33,7 +33,7 @@ echo ""
 echo "2. Checking pytest installation..."
 if ! command -v pytest &> /dev/null; then
     echo -e "${RED}   ✗ pytest not found${NC}"
-    echo "   Install with: pip install pytest pytest-asyncio pytest-mock pytest-cov"
+    echo "   Install with: uv sync --all-groups"
     exit 1
 fi
 echo -e "${GREEN}   ✓ pytest found${NC}"
@@ -124,8 +124,8 @@ else
     echo "===================================${NC}"
     echo ""
     echo "Debug steps:"
-    echo "1. Check dependencies: pip list | grep -E 'pytest|pydantic|azure|snowflake'"
-    echo "2. Run single test: pytest tests/unit/test_orchestrator.py::TestPipelineMapping::test_init_with_valid_config_creates_mapping -v"
+    echo "1. Check dependencies: uv pip list | grep -E 'pytest|pydantic|azure|snowflake'"
+    echo "2. Run single test: uv run pytest tests/unit/test_orchestrator.py::TestPipelineMapping::test_init_with_valid_config_creates_mapping -v"
     echo "3. Check test file: cat tests/unit/test_orchestrator.py | head -50"
     exit 1
 fi

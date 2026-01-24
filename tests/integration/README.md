@@ -51,31 +51,31 @@ Comprehensive integration tests covering the complete pipeline flow.
 ### Run All Integration Tests
 
 ```bash
-pytest tests/integration/ -v
+uv run pytest tests/integration/ -v
 ```
 
 ### Run Specific Test Class
 
 ```bash
-pytest tests/integration/test_pipeline_integration.py::TestEndToEndPipeline -v
+uv run pytest tests/integration/test_pipeline_integration.py::TestEndToEndPipeline -v
 ```
 
 ### Run Specific Test
 
 ```bash
-pytest tests/integration/test_pipeline_integration.py::TestEndToEndPipeline::test_complete_pipeline_flow_with_all_components -v
+uv run pytest tests/integration/test_pipeline_integration.py::TestEndToEndPipeline::test_complete_pipeline_flow_with_all_components -v
 ```
 
 ### Run with Coverage
 
 ```bash
-pytest tests/integration/ --cov=src --cov-report=html --cov-report=term
+uv run pytest tests/integration/ --cov=src --cov-report=html --cov-report=term
 ```
 
 ### Run Only Integration Tests (Using Markers)
 
 ```bash
-pytest -m integration -v
+uv run pytest -m integration -v
 ```
 
 ## Test Markers
@@ -192,8 +192,7 @@ async def test_new_feature_with_valid_input_succeeds(
 If you see import errors, ensure all dependencies are installed:
 
 ```bash
-pip install pytest pytest-asyncio pytest-mock pytest-cov
-pip install azure-eventhub azure-identity pydantic pydantic-settings
+uv sync --all-groups
 ```
 
 ### Async Errors
@@ -219,7 +218,7 @@ Integration tests are designed to be fast:
 
 Run tests in parallel:
 ```bash
-pytest tests/integration/ -n auto
+uv run pytest tests/integration/ -n auto
 ```
 
 ## CI/CD Integration
@@ -234,7 +233,7 @@ Example GitHub Actions workflow:
 ```yaml
 - name: Run Integration Tests
   run: |
-    pytest tests/integration/ -v --cov=src --cov-report=xml
+    uv run pytest tests/integration/ -v --cov=src --cov-report=xml
 ```
 
 ## References
