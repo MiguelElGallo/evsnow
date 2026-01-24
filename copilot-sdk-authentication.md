@@ -12,11 +12,11 @@ The easiest and most straightforward way to authenticate the GitHub Copilot SDK 
 
 #### 1. Generate a Personal Access Token
 
-1. Go to [GitHub's token generation page](https://github.com/settings/personal-access-tokens/new)
-2. Click "Generate new token (fine-grained)"
+1. Go to [GitHub's fine-grained token generation page](https://github.com/settings/personal-access-tokens/new)
+2. If you see token type options, select "Fine-grained tokens" (recommended over classic tokens)
 3. Give your token a descriptive name (e.g., "Copilot SDK Access")
 4. Set an expiration date based on your needs
-5. Under "Permissions", find and enable **"Copilot Requests"** permission
+5. Under "Permissions", find and enable the Copilot-related permission (typically labeled "Copilot Requests" or similar - look for permissions related to GitHub Copilot)
 6. Click "Generate token"
 7. **Important**: Copy the token immediately - you won't be able to see it again!
 
@@ -53,7 +53,7 @@ Once the environment variable is set, the SDK will automatically detect and use 
 ### Prerequisites
 
 - A valid GitHub Copilot subscription (required for all SDK usage)
-- The Copilot CLI installed on your system (`copilot` command available in PATH)
+- The GitHub Copilot CLI installed on your system (see [installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli))
 
 ### Authentication Priority
 
@@ -70,9 +70,12 @@ Using `COPILOT_GITHUB_TOKEN` ensures your authentication is explicit and won't b
 ### Troubleshooting
 
 **Token not recognized:**
-- Verify your token includes the "Copilot Requests" permission
+- Verify your token includes the "Copilot Requests" permission (or appropriate Copilot-related scope)
 - Ensure your Copilot subscription is active
-- Check that the environment variable is properly set: `echo $COPILOT_GITHUB_TOKEN` (Linux/macOS) or `echo %COPILOT_GITHUB_TOKEN%` (Windows)
+- Check that the environment variable is properly set:
+  - Linux/macOS: `echo $COPILOT_GITHUB_TOKEN`
+  - Windows Command Prompt: `echo %COPILOT_GITHUB_TOKEN%`
+  - Windows PowerShell: `echo $env:COPILOT_GITHUB_TOKEN`
 
 **Conflicts with other tokens:**
 - If you have `GH_TOKEN` or `GITHUB_TOKEN` set, consider unsetting them to avoid confusion
