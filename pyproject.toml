@@ -10,7 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "azure-eventhub>=5.15.0",
     "azure-identity>=1.15.0",
-    "aiohttp>=3.9.0",
+    "aiohttp>=3.10.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
@@ -22,7 +22,7 @@ dependencies = [
     "logfire>=2.7.0",
     "psycopg[binary]>=3.3.2",
     "snowflake-connector-python>=3.13.1",
-    "cryptography>=41.0.0",
+    "cryptography>=44.0.0",
     "snowpipe-streaming>=1.1.0",
 ]
 
