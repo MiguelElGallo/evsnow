@@ -12,11 +12,11 @@ The easiest and most straightforward way to authenticate the GitHub Copilot SDK 
 
 #### 1. Generate a Personal Access Token
 
-1. Go to [GitHub's fine-grained token generation page](https://github.com/settings/personal-access-tokens/new)
-2. If you see token type options, select "Fine-grained tokens" (recommended over classic tokens)
+1. Go to [GitHub's personal access token page](https://github.com/settings/tokens) and choose "Fine-grained tokens" (recommended) or visit [direct fine-grained token creation](https://github.com/settings/personal-access-tokens/new)
+2. Click "Generate new token"
 3. Give your token a descriptive name (e.g., "Copilot SDK Access")
 4. Set an expiration date based on your needs
-5. Under "Permissions", find and enable the Copilot-related permission (typically labeled "Copilot Requests" or similar - look for permissions related to GitHub Copilot)
+5. Under "Permissions" or "Repository permissions", look for and enable GitHub Copilot access (the exact permission name may vary - look for options containing "Copilot")
 6. Click "Generate token"
 7. **Important**: Copy the token immediately - you won't be able to see it again!
 
@@ -70,8 +70,8 @@ Using `COPILOT_GITHUB_TOKEN` ensures your authentication is explicit and won't b
 ### Troubleshooting
 
 **Token not recognized:**
-- Verify your token includes the "Copilot Requests" permission (or appropriate Copilot-related scope)
-- Ensure your Copilot subscription is active
+- Verify your token includes GitHub Copilot access permissions (the exact name varies, but look for Copilot-related scopes)
+- Ensure your Copilot subscription is active and associated with your GitHub account
 - Check that the environment variable is properly set:
   - Linux/macOS: `echo $COPILOT_GITHUB_TOKEN`
   - Windows Command Prompt: `echo %COPILOT_GITHUB_TOKEN%`
