@@ -26,7 +26,7 @@ uv run pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=html
 uv run pytest tests/unit/test_streaming.py::TestSnowflakeStreamingClientBase -v
 
 # Run specific test
-pytest tests/unit/test_streaming.py::TestStreamingFactory::test_creates_high_performance_client_with_valid_config -v
+uv run pytest tests/unit/test_streaming.py::TestStreamingFactory::test_creates_high_performance_client_with_valid_config -v
 ```
 
 ## Test Coverage
@@ -103,7 +103,7 @@ ModuleNotFoundError: No module named 'streaming'
 Make sure to run pytest from the project root:
 ```bash
 cd /path/to/evsnow
-pytest tests/unit/test_streaming.py
+uv run pytest tests/unit/test_streaming.py
 ```
 
 ## Expected Test Results

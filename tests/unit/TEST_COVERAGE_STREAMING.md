@@ -94,13 +94,13 @@ tests/unit/
 
 ```bash
 # From project root
-pytest tests/unit/test_streaming.py -v
+uv run pytest tests/unit/test_streaming.py -v
 
 # With coverage
-pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=term-missing
+uv run pytest tests/unit/test_streaming.py --cov=src/streaming --cov-report=term-missing
 
 # Specific test class
-pytest tests/unit/test_streaming.py::TestSnowflakeStreamingClientBase -v
+uv run pytest tests/unit/test_streaming.py::TestSnowflakeStreamingClientBase -v
 ```
 
 ## Acceptance Criteria

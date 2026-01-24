@@ -263,16 +263,13 @@ cd /path/to/evsnow
 uv sync --all-groups
 
 # Run tests
-pytest tests/unit/test_orchestrator.py -v
+uv run pytest tests/unit/test_orchestrator.py -v
 ```
 
 ### Async Test Failures
 
 If async tests fail with event loop errors:
 ```bash
-# Ensure pytest-asyncio is installed
-pip install pytest-asyncio
-
 # Check pytest configuration
 cat pyproject.toml | grep asyncio_mode
 # Should show: asyncio_mode = "strict"
@@ -282,11 +279,8 @@ cat pyproject.toml | grep asyncio_mode
 
 If coverage reports aren't generated:
 ```bash
-# Ensure pytest-cov is installed
-pip install pytest-cov
-
 # Run with explicit coverage settings
-pytest tests/unit/test_orchestrator.py \
+uv run pytest tests/unit/test_orchestrator.py \
   --cov=src/pipeline/orchestrator \
   --cov-branch \
   --cov-report=term-missing

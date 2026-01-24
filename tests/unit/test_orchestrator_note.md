@@ -52,13 +52,13 @@ Once dependencies are installed:
 
 ```bash
 # Run all orchestrator tests
-pytest tests/unit/test_orchestrator.py -v
+uv run pytest tests/unit/test_orchestrator.py -v
 
 # Run with coverage
-pytest tests/unit/test_orchestrator.py --cov=src/pipeline --cov-report=term
+uv run pytest tests/unit/test_orchestrator.py --cov=src/pipeline --cov-report=term
 
 # Run specific test class
-pytest tests/unit/test_orchestrator.py::TestPipelineMapping -v
+uv run pytest tests/unit/test_orchestrator.py::TestPipelineMapping -v
 ```
 
 ## Test Design Principles

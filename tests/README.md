@@ -10,22 +10,22 @@ This directory contains the test suite for the EvSnow project (EventHub to Snowf
 
 ```bash
 # Run all tests
-pytest
+uv run pytest
 
 # Run only unit tests
-pytest -m unit
+uv run pytest -m unit
 
 # Run only integration tests
-pytest -m integration
+uv run pytest -m integration
 
 # Run with coverage
-pytest --cov=src --cov-report=html --cov-report=term
+uv run pytest --cov=src --cov-report=html --cov-report=term
 
 # Run specific test file
-pytest tests/unit/test_config.py
+uv run pytest tests/unit/test_config.py
 
 # Run tests matching pattern
-pytest -k "test_load_config"
+uv run pytest -k "test_load_config"
 ```
 
 ### Test Structure
@@ -178,7 +178,7 @@ def test_with_mocks(mocker):
 
 Check coverage:
 ```bash
-pytest --cov=src --cov-report=term-missing
+uv run pytest --cov=src --cov-report=term-missing
 ```
 
 ## Test Markers
@@ -194,9 +194,9 @@ Use markers to categorize tests:
 
 Run specific categories:
 ```bash
-pytest -m unit              # Only unit tests
-pytest -m integration       # Only integration tests
-pytest -m "not slow"        # Exclude slow tests
+uv run pytest -m unit              # Only unit tests
+uv run pytest -m integration       # Only integration tests
+uv run pytest -m "not slow"        # Exclude slow tests
 ```
 
 ## Common Issues
