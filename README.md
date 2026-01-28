@@ -248,7 +248,7 @@ See [`.env.example`](./.env.example) for all available configuration options wit
 
 ## Docs
 
-- [Snowflake Quick Start](./SNOWFLAKE_QUICKSTART.md) - Setup guide for Snowflake
+- [Step by Step Guide](./SNOWFLAKE_COMPLETE_SETUP.md) - Setup guide for Snowflake
 - [Troubleshooting](./TROUBLESHOOTING.md) - Common issues and solutions
 
 ## License
