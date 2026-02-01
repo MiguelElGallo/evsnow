@@ -68,7 +68,7 @@ Before starting, make sure you have:
 
 Snowflake uses RSA key-pair authentication for secure, passwordless connections.
 
-### Run the key generator script:
+### Run the key generator script
 
 ```bash
 ./generate_snowflake_keys.sh
@@ -83,7 +83,7 @@ This creates two files in the `snowflake/` directory:
 
 > 💡 **Tip**: Remember the password you set! You'll need it for `SNOWFLAKE_PRIVATE_KEY_PASSWORD` in your `.env` file.
 
-### Verify the keys were created:
+### Verify the keys were created
 
 ```bash
 ls -la snowflake/
@@ -615,10 +615,13 @@ GROUP BY PARTITION_ID;
 **Symptom**: `JWT token is invalid`
 
 **Solutions**:
-1. Verify the public key was assigned: 
+
+1. Verify the public key was assigned:
+
    ```sql
    DESC USER STREAMEV;
    ```
+
 2. Check the key format in `rsa_key_pub_value.txt` — it should be a single line
 3. Regenerate keys with `./generate_snowflake_keys.sh`
 
@@ -629,14 +632,19 @@ GROUP BY PARTITION_ID;
 **Symptom**: `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`
 
 **Solutions**:
+
 1. Verify the pipe exists:
+
    ```sql
    SHOW PIPES LIKE 'EVENTS_TABLE_PIPE' IN SCHEMA INGESTION.PUBLIC;
    ```
+
 2. Check grants:
+
    ```sql
    SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE;
    ```
+
 3. Ensure `SNOWFLAKE_PIPE_NAME` matches the created pipe name
 
 ---
@@ -646,6 +654,7 @@ GROUP BY PARTITION_ID;
 **Symptom**: `SYSTEM$VERIFY_EXTERNAL_VOLUME failed`
 
 **Solutions**:
+
 1. Verify Azure Storage credentials and tenant ID
 2. Check that the container exists and is accessible
 3. Ensure the storage account allows Snowflake access
@@ -657,6 +666,7 @@ GROUP BY PARTITION_ID;
 **Symptom**: `Authentication failed`
 
 **Solutions**:
+
 1. Tokens expire — regenerate with Step 7.2
 2. Ensure you're using `access_token`, not `client_secret`
 3. Verify the role in the scope matches: `session:role:STREAM`
@@ -668,6 +678,7 @@ GROUP BY PARTITION_ID;
 **Symptom**: `DefaultAzureCredential failed`
 
 **Solutions**:
+
 1. Run `az login` to refresh credentials
 2. Verify your account has access to the storage account
 3. Check `az account show` to confirm the correct subscription
