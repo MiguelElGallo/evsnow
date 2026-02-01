@@ -50,6 +50,7 @@ github-copilot-sdk = ">=0.1.0"
 ```
 
 Or install separately:
+
 ```bash
 pip install github-copilot-sdk
 ```
@@ -293,19 +294,21 @@ snow connection add \\
     --token-file-path <path-to-token-file>
 ```
 
-2. First, save the PAT token to a secure temp file, then create the connection.
+1. First, save the PAT token to a secure temp file, then create the connection.
 
-3. Test the connection:
+2. Test the connection:
+
 ```bash
 snow connection test -c evsnow-setup
 ```
 
-4. **IMPORTANT**: Do NOT ask the user for help unless the connection repeatedly fails. 
+1. **IMPORTANT**: Do NOT ask the user for help unless the connection repeatedly fails.
    - If there are errors, try to diagnose and fix them automatically
    - Common issues: wrong account format, network issues, token expired
    - Only ask the user if you've exhausted troubleshooting options
 
 ### Task 2: Gather Required Information
+
 Once the connection works, ask the user for the following information needed for setup:
 
 1. **Azure Storage Account name** (for External Volume)
@@ -315,6 +318,7 @@ Once the connection works, ask the user for the following information needed for
 Ask for these in a clear, conversational manner. Explain why each is needed.
 
 ### Task 3: Execute Complete Setup
+
 Follow the SNOWFLAKE_COMPLETE_SETUP.md guide below to set up:
 
 1. Create Role (STREAM) and User (STREAMEV) - Step 2.1
@@ -341,11 +345,14 @@ Use `snow sql -c evsnow-setup -q "<SQL>"` to execute SQL commands.
 5. **Generate .env content**: At the end, provide the user with the .env variables they need
 
 ## Output Format
+
 When complete, provide:
+
 1. Summary of what was created
 2. Any manual steps the user needs to complete
 3. The .env file content for their configuration
 """
+
 ```
 
 ---
@@ -625,6 +632,7 @@ token_file_path = "path-to-pat-token"
 ```
 
 Or via command line:
+
 ```bash
 snow connection add \
     --connection-name evsnow-setup \
