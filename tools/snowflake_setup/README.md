@@ -91,7 +91,7 @@ The agent provides:
 
 ## Architecture
 
-```
+```markdown
 snowflake_setup/
 ├── __init__.py       # Package metadata
 ├── main.py           # Typer CLI entry point

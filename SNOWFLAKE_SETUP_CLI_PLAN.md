@@ -6,7 +6,7 @@ Create a Python CLI tool based on Typer that guides users through complete Snowf
 
 ### User Flow
 
-```
+```markdown
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │  User provides  │────▶│  CLI generates  │────▶│  User runs SQL  │
 │  account + user │     │  PAT SQL        │     │  in Snowflake   │
@@ -30,7 +30,7 @@ Create a Python CLI tool based on Typer that guides users through complete Snowf
 
 ## 📁 Project Structure
 
-```
+```markdown
 tools/
 └── snowflake_setup/
     ├── __init__.py
@@ -353,8 +353,6 @@ When complete, provide:
 3. The .env file content for their configuration
 """
 
-```
-
 ---
 
 ### Phase 4: Copilot Agent Wrapper (`agent.py`)
@@ -507,7 +505,7 @@ async def handle_user_input(request, invocation):
 
 ### Step-by-Step Flow
 
-```
+```markdown
 1. User runs: uv run python -m tools.snowflake_setup.main setup
    ↓
 2. CLI prompts for:
