@@ -1,48 +1,16 @@
 # 🦆 Querying Snowflake Iceberg Tables with DuckDB
 
-This guide shows you how to query your Snowflake Iceberg table (`EVENTS_TABLE1`) directly using DuckDB and its Iceberg extension.
-
-> 📍 **Reference**: This connects to the Iceberg table created in [setup_snowpipe_streaming.sql](setup_snowpipe_streaming.sql#L21) which uses an External Volume.
+This guide shows you how to query your Snowflake Iceberg table directly using DuckDB and its Iceberg extension.
 
 ---
 
 ## 📋 Prerequisites
 
 - ✅ Snowflake account with the Iceberg table created
-- ✅ Azure Storage account configured as External Volume in Snowflake
+- ✅ Azure Storage account configured as External Volume in Snowflake and in use for the Iceberg table
 - ✅ DuckDB installed locally
 - ✅ Azure CLI authenticated (for credential chain)
-
----
-
-## 🏗️ Step 0: Create the External Volume in Snowflake
-
-> ⚠️ **Important**: Before the Iceberg table can be created, you need an External Volume pointing to Azure Storage.
-
-Run this in Snowflake **before** running `setup_snowpipe_streaming.sql`:
-
-```sql
--- Create External Volume pointing to Azure Blob Storage
-CREATE EXTERNAL VOLUME exvol
-  STORAGE_LOCATIONS =
-    (
-      (
-        NAME = 'my-azure-region'
-        STORAGE_PROVIDER = 'AZURE'
-        STORAGE_BASE_URL = 'azure://<YOUR_STORAGE_ACCOUNT>.blob.core.windows.net/<YOUR_CONTAINER>/'
-        AZURE_TENANT_ID = '<YOUR_AZURE_TENANT_ID>'
-      )
-    );
-
--- Verify the external volume works
-SELECT SYSTEM$VERIFY_EXTERNAL_VOLUME('exvol');
-```
-
-| Parameter | Description |
-|-----------|-------------|
-| `<YOUR_STORAGE_ACCOUNT>` | Your Azure Storage account name |
-| `<YOUR_CONTAINER>` | The blob container name |
-| `<YOUR_AZURE_TENANT_ID>` | Your Azure AD tenant ID |
+- ✅ A valid PAT created in Snowflake (see Step 1)
 
 ---
 
@@ -111,6 +79,7 @@ LOAD azure;
 ## ☁️ Step 4: Create Azure Storage Secret
 
 Create a secret to authenticate with Azure Storage (same account used in the External Volume):
+In the near future, the Catalog / DuckDB (not sure) should also support vending credentials, removing the need for this step.
 
 ```sql
 CREATE SECRET azure_auto (
@@ -170,59 +139,6 @@ Now you can query the Iceberg table directly from DuckDB:
 ```sql
 -- Query all events
 SELECT * FROM sf.PUBLIC.EVENTS_TABLE1;
-
--- Query with filters
-SELECT 
-    EVENT_BODY,
-    PARTITION_ID,
-    ENQUEUED_TIME
-FROM sf.PUBLIC.EVENTS_TABLE1
-WHERE ENQUEUED_TIME > '2025-01-01'
-ORDER BY ENQUEUED_TIME DESC
-LIMIT 100;
-
--- Count events by partition
-SELECT 
-    PARTITION_ID,
-    COUNT(*) as event_count
-FROM sf.PUBLIC.EVENTS_TABLE1
-GROUP BY PARTITION_ID;
 ```
 
----
-
-## 🎉 Summary
-
-| Step | Action | Where |
-|------|--------|-------|
-| 0 | Create External Volume | Snowflake |
-| 1 | Create Programmatic Access Token | Snowflake |
-| 2 | Get OAuth Token | Terminal (curl) |
-| 3 | Install Extensions | DuckDB |
-| 4 | Create Azure Secret | DuckDB |
-| 5 | Create Iceberg Secret | DuckDB |
-| 6 | Attach Catalog | DuckDB |
-| 7 | Query! 🎊 | DuckDB |
-
----
-
-## 🔧 Troubleshooting
-
-### ❌ Authentication Failed
-- Verify your OAuth token hasn't expired (tokens from Step 2 have limited lifetime)
-- Re-run Step 2 to get a fresh token
-
-### ❌ Azure Access Denied
-- Run `az login` to refresh Azure credentials
-- Verify your Azure account has access to the storage account
-
-### ❌ Table Not Found
-- Verify the database and schema names match your Snowflake setup
-- Check that the role has SELECT permissions on the table
-
----
-
-## 📚 Related Files
-
-- [setup_snowpipe_streaming.sql](setup_snowpipe_streaming.sql) - Creates the Iceberg table and PIPE
-- [setup_snowflake.sql](setup_snowflake.sql) - Base Snowflake setup with users and roles
+> 🎉 **Congratulations**: You've successfully queried your Snowflake Iceberg table using DuckDB!
