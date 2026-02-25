@@ -351,8 +351,8 @@ def create_standard_retry_decorator(
     return retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(multiplier=1, min=min_wait, max=max_wait),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        after=after_log(logger, logging.INFO),
+        before_sleep=before_sleep_log(logger, logging.WARNING),  # type: ignore[arg-type]
+        after=after_log(logger, logging.INFO),  # type: ignore[arg-type]
         reraise=True,  # Re-raise exception after final attempt
     )
 
@@ -474,7 +474,7 @@ def create_smart_retry_decorator(
         stop=stop_after_attempt(max_attempts),
         retry=retry_if_exception(should_retry_predicate),
         wait=wait_exponential(multiplier=1, min=2, max=30),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
+        before_sleep=before_sleep_log(logger, logging.WARNING),  # type: ignore[arg-type]
         reraise=True,
     )
 
