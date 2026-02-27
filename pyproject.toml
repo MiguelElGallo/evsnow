@@ -16,7 +16,6 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "typer>=0.24.1",
     "rich>=14.3.3",
-    "mypy>=1.19.1",
     "tenacity>=9.1.4",
     "pydantic-ai>=1.63.0",
     "logfire>=4.25.0",
@@ -67,6 +66,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest-mock>=3.15.1",
     "ruff>=0.15.2",
+    "mypy>=1.19.1",
 ]
 
 [tool.pytest.ini_options]
