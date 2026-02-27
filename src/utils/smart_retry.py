@@ -40,7 +40,7 @@ class _TenacityLoggerAdapter:
     def __init__(self, underlying: logging.Logger) -> None:
         self._logger = underlying
 
-    def log(self, level: int, msg: str, /, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def log(self, level: int, msg: str, /, *args: Any, **kwargs: Any) -> None:
         self._logger.log(level, msg, *args, **kwargs)
 
 
