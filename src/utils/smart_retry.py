@@ -25,6 +25,28 @@ from tenacity import (
 logger = logging.getLogger(__name__)
 
 
+class _TenacityLoggerAdapter:
+    """Adapter bridging logging.Logger to tenacity's LoggerProtocol.
+
+    tenacity's LoggerProtocol requires ``log(level, msg: str, /)`` with
+    positional-only parameters and ``msg`` typed as ``str``, while
+    ``logging.Logger.log`` declares ``msg: object``.  The structural mismatch
+    causes the ``ty`` type-checker to emit ``invalid-argument-type`` when a
+    plain ``Logger`` is passed to ``before_sleep_log`` / ``after_log``.  This
+    adapter satisfies the protocol explicitly without suppressing unrelated
+    type errors at the call sites.
+    """
+
+    def __init__(self, underlying: logging.Logger) -> None:
+        self._logger = underlying
+
+    def log(self, level: int, msg: str, /, *args: Any, **kwargs: Any) -> None:
+        self._logger.log(level, msg, *args, **kwargs)
+
+
+_tenacity_logger = _TenacityLoggerAdapter(logger)
+
+
 class RetryDecision(BaseModel):
     """LLM response for retry decision."""
 
@@ -351,8 +373,8 @@ def create_standard_retry_decorator(
     return retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(multiplier=1, min=min_wait, max=max_wait),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        after=after_log(logger, logging.INFO),
+        before_sleep=before_sleep_log(_tenacity_logger, logging.WARNING),
+        after=after_log(_tenacity_logger, logging.INFO),
         reraise=True,  # Re-raise exception after final attempt
     )
 
@@ -474,7 +496,7 @@ def create_smart_retry_decorator(
         stop=stop_after_attempt(max_attempts),
         retry=retry_if_exception(should_retry_predicate),
         wait=wait_exponential(multiplier=1, min=2, max=30),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
+        before_sleep=before_sleep_log(_tenacity_logger, logging.WARNING),
         reraise=True,
     )
 
