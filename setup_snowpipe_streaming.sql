@@ -9,6 +9,11 @@
 --   SNOWFLAKE_1_SCHEMA=PUBLIC
 --   SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 --   SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
+--
+-- EvSnow opens one Snowpipe Streaming channel per Event Hub partition using:
+--   {base_channel_name}-p{sanitized_partition}
+-- For example: topic1-development-default-evsnow-prod-a-p0
+-- All partition channels write through the same PIPE into the target table.
 -- ============================================================================
 
 USE DATABASE INGESTION;
@@ -18,7 +23,7 @@ USE WAREHOUSE COMPUTE_WH;
 -- ============================================================================
 -- Create the target Iceberg table for Event Hub data
 -- ============================================================================
-CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 CLUSTER BY (ENQUEUED_TIME)(
+CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
     EVENT_BODY STRING,
     PARTITION_ID STRING,
     SEQUENCE_NUMBER DECIMAL(38, 0),
@@ -28,6 +33,7 @@ CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 CLUSTER BY (ENQUE
     SYSTEM_PROPERTIES STRING,
     INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
 )
+CLUSTER BY (ENQUEUED_TIME)
 EXTERNAL_VOLUME = 'EXVOL'
 CATALOG = 'SNOWFLAKE'
 BASE_LOCATION = 'events/';
@@ -39,6 +45,8 @@ BASE_LOCATION = 'events/';
 -- Without this, you'll get: ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED
 --
 -- The PIPE uses DATA_SOURCE(TYPE => 'STREAMING') as the source.
+-- EvSnow splits mixed-partition Event Hub batches before ingest, so each
+-- Snowpipe Streaming channel receives only one partition in sequence order.
 -- ============================================================================
 CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
 COPY INTO INGESTION.PUBLIC.EVENTS_TABLE1 (
@@ -74,6 +82,7 @@ GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
 GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
+GRANT USAGE ON EXTERNAL VOLUME EXVOL TO ROLE STREAM;
 
 -- ============================================================================
 -- Verify grants

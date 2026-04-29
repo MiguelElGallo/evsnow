@@ -11,6 +11,7 @@ Documentation: https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe
 """
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -59,7 +60,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         # Client components
         self.streaming_client: StreamingIngestClient | None = None
         self.channels: dict[str, Any] = {}  # channel_name -> channel object
-        self._last_channel_status_check_at: datetime | None = None
+        self._last_channel_status_check_at_by_channel: dict[str, datetime] = {}
         self._last_client_refresh_at: datetime | None = None
 
         # Statistics
@@ -247,22 +248,19 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             try:
                 if channel is not None:
                     logger.info(f"Closing channel with flush: {channel_name}")
-                    # The SDK automatically flushes when close() is called on a channel
-                    channel.close()
+                    self._close_with_flush(channel)
                     logger.info(f"✅ Channel closed and flushed: {channel_name}")
             except Exception as e:
                 logger.error(f"Error closing channel {channel_name}: {e}", exc_info=True)
 
         self.channels.clear()
+        self._last_channel_status_check_at_by_channel.clear()
         logger.info("✅ All channels closed with flush")
 
-        # Close the StreamingIngestClient
-        # Note: The SDK's close() method doesn't accept wait_for_flush parameter in Python bindings
-        # We've already flushed all channels above, so this is safe
         if self.streaming_client is not None:
             try:
                 logger.info("Closing StreamingIngestClient (channels already flushed)...")
-                self.streaming_client.close()
+                self._close_with_flush(self.streaming_client)
                 logger.info("✅ StreamingIngestClient closed")
                 self.streaming_client = None
             except Exception as e:
@@ -371,17 +369,16 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         if self.streaming_client is None:
             return
 
-        interval = self.snowflake_config.channel_status_interval_seconds
+        interval = getattr(self.snowflake_config, "channel_status_interval_seconds", 0)
         if interval <= 0:
             return
 
         now = datetime.now(UTC)
-        if self._last_channel_status_check_at is not None:
-            elapsed = (now - self._last_channel_status_check_at).total_seconds()
+        last_check_at = self._last_channel_status_check_at_by_channel.get(channel_name)
+        if last_check_at is not None:
+            elapsed = (now - last_check_at).total_seconds()
             if elapsed < interval:
                 return
-
-        self._last_channel_status_check_at = now
 
         try:
             statuses = self.streaming_client.get_channel_statuses([channel_name])
@@ -444,6 +441,12 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 rows_error=status.rows_error_count,
                 last_error_message=status.last_error_message,
             )
+            raise RuntimeError(
+                "Snowflake channel reported row errors: "
+                f"channel={status.channel_name} status={status.status_code} "
+                f"rows_error={status.rows_error_count} "
+                f"last_error={status.last_error_message}"
+            )
 
         if self._is_channel_status_error(status):
             logger.error(
@@ -458,6 +461,13 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 last_error_message=status.last_error_message,
             )
             self._reopen_channel(status.channel_name)
+            raise RuntimeError(
+                "Snowflake channel status indicates an error: "
+                f"channel={status.channel_name} status={status.status_code} "
+                f"last_error={status.last_error_message}"
+            )
+
+        self._last_channel_status_check_at_by_channel[channel_name] = now
 
     @staticmethod
     def _is_channel_status_error(status: ChannelStatus) -> bool:
@@ -477,7 +487,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         channel = self.channels.get(channel_name)
         if channel is not None:
             try:
-                channel.close()
+                self._close_with_flush(channel)
             except Exception as exc:
                 logger.error(
                     "Failed to close channel %s during reopen: %s",
@@ -492,6 +502,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 )
             finally:
                 self.channels.pop(channel_name, None)
+                self._last_channel_status_check_at_by_channel.pop(channel_name, None)
 
         channel, status = self.streaming_client.open_channel(channel_name)
         self.channels[channel_name] = channel
@@ -617,6 +628,109 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             or ("channel" in message and "invalid state" in message)
         )
 
+    @staticmethod
+    def _sequence_number_for_row(row: dict[str, Any], fallback: int) -> int:
+        sequence_number = row.get("sequence_number", fallback)
+        try:
+            return int(sequence_number)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid sequence_number %r; using batch index %s as offset token",
+                sequence_number,
+                fallback,
+            )
+            return fallback
+
+    @staticmethod
+    def _offset_token_for_sequence(sequence_number: int) -> str:
+        return str(sequence_number)
+
+    @staticmethod
+    def _offset_sequence_from_token(offset_token: Any) -> int | None:
+        if offset_token is None:
+            return None
+
+        if isinstance(offset_token, int):
+            return offset_token
+
+        token = str(offset_token)
+        if not token:
+            return None
+
+        if token.lstrip("-").isdigit():
+            return int(token)
+
+        matches = re.findall(r"-?\d+", token)
+        if not matches:
+            return None
+        return int(matches[-1])
+
+    @classmethod
+    def _offset_token_has_reached(cls, committed_token: Any, expected_token: str) -> bool:
+        committed_sequence = cls._offset_sequence_from_token(committed_token)
+        expected_sequence = cls._offset_sequence_from_token(expected_token)
+
+        if committed_sequence is not None and expected_sequence is not None:
+            return committed_sequence >= expected_sequence
+
+        return committed_token == expected_token
+
+    @classmethod
+    def _is_committed(cls, offset_token: str, latest_committed_offset_token: Any) -> bool:
+        return cls._offset_token_has_reached(latest_committed_offset_token, offset_token)
+
+    @staticmethod
+    def _close_with_flush(closeable: Any) -> None:
+        try:
+            closeable.close(wait_for_flush=True)
+        except TypeError:
+            closeable.close()
+
+    @staticmethod
+    def _append_rows(
+        channel: Any,
+        rows: list[dict[str, Any]],
+        offset_tokens: list[str],
+    ) -> None:
+        start_token = offset_tokens[0]
+        end_token = offset_tokens[-1]
+        append_rows = getattr(channel, "append_rows", None)
+        if callable(append_rows):
+            append_rows(rows, start_offset_token=start_token, end_offset_token=end_token)
+            return
+
+        append_row = getattr(channel, "append_row", None)
+        if not callable(append_row):
+            raise AttributeError("Snowflake streaming channel has no append_rows or append_row API")
+
+        for row_payload, offset_token in zip(rows, offset_tokens, strict=True):
+            try:
+                append_row(row_payload, offset_token=offset_token)
+            except TypeError:
+                append_row(row_payload, offset_token)
+
+    def _wait_for_commit(self, channel: Any, expected_token: str) -> None:
+        timeout_seconds = getattr(self.snowflake_config, "connection_timeout_seconds", None)
+
+        wait_for_commit = getattr(channel, "wait_for_commit", None)
+        if callable(wait_for_commit):
+            wait_for_commit(
+                lambda committed_token: self._offset_token_has_reached(
+                    committed_token, expected_token
+                ),
+                timeout_seconds=timeout_seconds,
+            )
+            return
+
+        wait_for_flush = getattr(channel, "wait_for_flush", None)
+        if callable(wait_for_flush):
+            wait_for_flush(timeout_seconds=timeout_seconds)
+            return
+
+        flush = getattr(channel, "flush", None)
+        if callable(flush):
+            flush()
+
     def _ingest_batch_impl(
         self,
         channel_name: str,
@@ -656,7 +770,6 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 f"Ingesting {len(data_batch)} records to channel {channel_name} (partition {partition_id})"
             )
 
-            # Get or create shared channel for all partitions
             self._maybe_refresh_client()
             channel = self._get_or_create_channel(channel_name)
 
@@ -665,49 +778,57 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                     f"Failed to get channel {channel_name}. Client may not be started."
                 )
 
-            # Insert rows into the channel (based on gist reference pattern)
-            flush_result = None
             try:
-                rows_inserted = 0
-                for row in data_batch:
-                    # Generate unique row_id: partition_id_sequence_number
-                    # Use sequence_number from row if available, otherwise use index
-                    sequence_number = row.get("sequence_number", rows_inserted)
-                    row_id = f"{partition_id}_{sequence_number}"
-
-                    # Insert row with unique ID
-                    channel.append_row(row, row_id)
-                    rows_inserted += 1
-
+                latest_committed_offset_token = channel.get_latest_committed_offset_token()
                 logger.debug(
-                    f"✅ Appended {rows_inserted} rows to channel {channel_name} (partition {partition_id})"
+                    "Latest committed offset for channel %s: %s",
+                    channel_name,
+                    latest_committed_offset_token,
                 )
 
-                # Get latest committed offset token for verification
-                offset_token = channel.get_latest_committed_offset_token()
-                logger.debug(f"Latest committed offset for channel {channel_name}: {offset_token}")
+                rows_to_append: list[dict[str, Any]] = []
+                offset_tokens: list[str] = []
+                rows_skipped = 0
 
-                if hasattr(channel, "flush"):
-                    try:
-                        flush_result = channel.flush()
-                        logger.debug(
-                            "Flushed channel %s after append (result=%s)",
-                            channel_name,
-                            flush_result,
-                        )
-                    except Exception as flush_error:
-                        logger.error(
-                            "Failed to flush channel %s: %s",
-                            channel_name,
-                            flush_error,
-                            exc_info=True,
-                        )
-                        raise
-                else:
+                for row_index, row in enumerate(data_batch):
+                    sequence_number = self._sequence_number_for_row(row, row_index)
+                    offset_token = self._offset_token_for_sequence(sequence_number)
+                    if self._is_committed(offset_token, latest_committed_offset_token):
+                        rows_skipped += 1
+                        continue
+
+                    rows_to_append.append(row)
+                    offset_tokens.append(offset_token)
+
+                if not rows_to_append:
                     logger.debug(
-                        "Channel %s has no flush() method; relying on SDK auto-flush/close",
+                        "All %s rows for channel %s partition %s were already committed "
+                        "(latest offset token=%s)",
+                        len(data_batch),
                         channel_name,
+                        partition_id,
+                        latest_committed_offset_token,
                     )
+                    rows_inserted = 0
+                else:
+                    start_offset_token = offset_tokens[0]
+                    end_offset_token = offset_tokens[-1]
+
+                    self._append_rows(channel, rows_to_append, offset_tokens)
+
+                    rows_inserted = len(rows_to_append)
+                    logger.debug(
+                        "✅ Appended %s rows to channel %s (partition=%s, "
+                        "start_offset_token=%s, end_offset_token=%s, skipped=%s)",
+                        rows_inserted,
+                        channel_name,
+                        partition_id,
+                        start_offset_token,
+                        end_offset_token,
+                        rows_skipped,
+                    )
+
+                    self._wait_for_commit(channel, end_offset_token)
 
                 self._maybe_check_channel_status(channel_name)
 
@@ -744,25 +865,30 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 raise
 
             # Update statistics
-            self.stats["total_messages_sent"] += len(data_batch)
-            self.stats["total_batches_sent"] += 1
-            self.stats["last_ingestion"] = datetime.now(UTC)
+            if rows_inserted > 0:
+                self.stats["total_messages_sent"] += rows_inserted
+                self.stats["total_batches_sent"] += 1
+                self.stats["last_ingestion"] = datetime.now(UTC)
 
             # Track ingestion metrics in span
-            span.set_attribute("messages_sent", len(data_batch))
+            span.set_attribute("messages_sent", rows_inserted)
+            span.set_attribute("messages_skipped", rows_skipped)
             span.set_attribute("total_messages", self.stats["total_messages_sent"])
             span.set_attribute("total_batches", self.stats["total_batches_sent"])
-            if flush_result is not None:
-                span.set_attribute("flush_result", str(flush_result))
 
             logger.debug(
-                f"Successfully ingested {len(data_batch)} records to {channel_name} (partition {partition_id})"
+                "Successfully ingested %s records to %s (partition %s, skipped %s)",
+                rows_inserted,
+                channel_name,
+                partition_id,
+                rows_skipped,
             )
             logfire.info(
                 "Batch ingested successfully",
                 channel=channel_name,
                 partition=partition_id,
-                records=len(data_batch),
+                records=rows_inserted,
+                skipped=rows_skipped,
                 total_messages=self.stats["total_messages_sent"],
             )
             return True

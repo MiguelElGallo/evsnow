@@ -35,6 +35,9 @@ cd evsnow
 # Install dependencies
 uv sync
 
+# CI/reproducible installs use the checked-in dependency lock
+uv sync --locked
+
 # Quickstart
 uv run evsnow validate-config
 uv run evsnow run --dry-run
@@ -93,6 +96,8 @@ SNOWFLAKE_1_SCHEMA=PUBLIC
 SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 SNOWFLAKE_1_BATCH=100
 ```
+
+Snowpipe Streaming channels are generated per Event Hub partition. The base channel uses the configured pattern (`{event_hub}-{env}-{region}-{client_id}` by default), and each ingest batch appends a sanitized partition suffix such as `-p0`, `-p1`, or `-ppartition-1`. Keep `EVSNOW_CLIENT_ID` stable for a given running instance so channel names remain deterministic across restarts.
 
 Postgres control table notes:
 - When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
@@ -159,7 +164,7 @@ uv run evsnow run
 
 ```bash
 # Option 1: BEGINNING of stream (default, recommended)
-# Processes ALL existing messages in the Event Hub partition
+# Processes ALL existing messages in the Event Hub partitions
 # Use to ensure no messages are lost when starting fresh
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
 
@@ -241,6 +246,10 @@ SNOWFLAKE_SCHEMA_NAME=PUBLIC
 
 # Create PIPE in Snowflake (see setup_snowpipe_streaming.sql)
 ```
+
+One PIPE serves the target table, while EvSnow opens one Snowpipe Streaming channel per Event Hub partition. A batch containing mixed partitions is split before ingestion, sorted by sequence number within each partition, and sent to channels named `<base-channel>-p<sanitized-partition>`.
+
+Dependencies are managed through `pyproject.toml` and the checked-in `uv.lock`. Use `uv sync --locked` when you need the exact locked versions, and refresh the lock only when intentionally changing dependencies.
 
 ## Configuration reference
 

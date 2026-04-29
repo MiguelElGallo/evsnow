@@ -290,14 +290,73 @@ class TestPipelineMapping:
         mapping.start()
 
         # Act
-        result = mapping._process_messages(sample_eventhub_messages)
+        result = mapping._process_messages(list(reversed(sample_eventhub_messages)))
 
         # Assert
         assert result is True
         assert mapping.stats["messages_processed"] == len(sample_eventhub_messages)
         assert mapping.stats["batches_processed"] == 1
         assert mapping.stats["last_activity"] is not None
-        mock_snowflake_client.ingest_batch.assert_called_once()
+        assert mock_snowflake_client.ingest_batch.call_count == 3
+
+        calls = mock_snowflake_client.ingest_batch.call_args_list
+        assert [ingest_call.kwargs["partition_id"] for ingest_call in calls] == ["0", "1", "2"]
+        assert [ingest_call.kwargs["channel_name"] for ingest_call in calls] == [
+            f"{mapping.channel_name}-p0",
+            f"{mapping.channel_name}-p1",
+            f"{mapping.channel_name}-p2",
+        ]
+
+        sequences_by_partition = {
+            ingest_call.kwargs["partition_id"]: [
+                row["sequence_number"] for row in ingest_call.kwargs["data_batch"]
+            ]
+            for ingest_call in calls
+        }
+        assert sequences_by_partition == {
+            "0": [100, 103, 106, 109],
+            "1": [101, 104, 107],
+            "2": [102, 105, 108],
+        }
+
+    def test_process_messages_sanitizes_partition_channel_suffix(
+        self,
+        complete_pipeline_config,
+        sample_mapping,
+        sample_eventhub_messages,
+        mock_eventhub_consumer,
+        mock_snowflake_client,
+        mock_logfire,
+    ):
+        """Test that partition channel suffixes are safe for Snowflake channel names."""
+        # Arrange
+        mapping = PipelineMapping(
+            mapping_config=sample_mapping,
+            pipeline_config=complete_pipeline_config,
+        )
+        mapping.start()
+
+        messages = sample_eventhub_messages[:3]
+        messages[0].partition_id = "partition/1"
+        messages[0].sequence_number = 2
+        messages[1].partition_id = "partition/1"
+        messages[1].sequence_number = 1
+        messages[2].partition_id = "space partition"
+
+        # Act
+        result = mapping._process_messages(messages)
+
+        # Assert
+        assert result is True
+        assert [
+            ingest_call.kwargs["channel_name"]
+            for ingest_call in mock_snowflake_client.ingest_batch.call_args_list
+        ] == [
+            f"{mapping.channel_name}-ppartition-1",
+            f"{mapping.channel_name}-pspace-partition",
+        ]
+        first_batch = mock_snowflake_client.ingest_batch.call_args_list[0].kwargs["data_batch"]
+        assert [row["sequence_number"] for row in first_batch] == [1, 2]
 
     def test_process_messages_without_snowflake_client_returns_false(
         self, complete_pipeline_config, sample_mapping, sample_eventhub_messages, mock_logfire

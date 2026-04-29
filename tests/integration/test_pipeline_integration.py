@@ -133,9 +133,7 @@ class TestEndToEndPipeline:
             "consumers.eventhub.SnowflakeCheckpointManager", return_value=mock_checkpoint_mgr
         )
 
-        mocker.patch(
-            "consumers.eventhub.SnowflakeCheckpointStore", return_value=mocker.MagicMock()
-        )
+        mocker.patch("consumers.eventhub.SnowflakeCheckpointStore", return_value=mocker.MagicMock())
 
         # Act: Create mapping and process messages
         mapping = PipelineMapping(
@@ -152,16 +150,19 @@ class TestEndToEndPipeline:
 
         # Assert: Verify Snowflake ingestion
         assert success is True
-        assert len(ingested_batches) == 1
+        assert len(ingested_batches) == 3
 
-        batch = ingested_batches[0]
-        assert "channel" in batch
-        assert "data" in batch
-        assert "partition" in batch
+        assert [batch["partition"] for batch in ingested_batches] == ["0", "1", "2"]
+        assert [batch["channel"] for batch in ingested_batches] == [
+            f"{mapping.channel_name}-p0",
+            f"{mapping.channel_name}-p1",
+            f"{mapping.channel_name}-p2",
+        ]
 
         # Verify data format
-        assert len(batch["data"]) == len(sample_eventhub_messages)
-        for data_item in batch["data"]:
+        data_items = [data_item for batch in ingested_batches for data_item in batch["data"]]
+        assert len(data_items) == len(sample_eventhub_messages)
+        for data_item in data_items:
             assert "event_body" in data_item
             assert "partition_id" in data_item
             assert "sequence_number" in data_item
@@ -610,6 +611,8 @@ class TestErrorRecovery:
             retry_manager=mock_retry_manager,
         )
         mapping.start()
+        for message in sample_eventhub_messages:
+            message.partition_id = "0"
 
         # Manually retry the ingestion
         success = False

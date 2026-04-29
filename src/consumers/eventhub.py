@@ -163,7 +163,8 @@ class EventHubAsyncConsumer:
         except Exception:
             # Fallback: some mocks or SDK versions may expose `body` differently
             try:
-                body_bytes = bytes(event.body)  # type: ignore[arg-type]
+                body_text = event.body_as_str(encoding="UTF-8")
+                body_bytes = body_text.encode("utf-8", errors="replace")
             except Exception:
                 body_bytes = b""
         return body_bytes.decode("utf-8", errors="replace")
