@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SETUP_SQL = REPO_ROOT / "setup_snowpipe_streaming.sql"
 SETUP_GRANTS_SQL = REPO_ROOT / "setup_snowflake.sql"
@@ -65,7 +64,7 @@ def test_sample_message_creation_sql_uses_internal_storage():
     sql = _normalized(MESSAGES_CREATION_SQL)
 
     assert "CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE" in sql
-    assert "CATALOG = 'SNOWFLAKE'" in sql
+    assert "CATALOG = SNOWFLAKE" in sql
     assert "EXTERNAL_VOLUME = SNOWFLAKE_MANAGED" in sql
     assert "ICEBERG_VERSION = 3" in sql
     assert "BASE_LOCATION" not in sql

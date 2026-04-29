@@ -11,10 +11,13 @@ This module tests the SnowflakeHighPerformanceStreamingClient class including:
 - Statistics tracking
 """
 
+import os
 import sys
+import tempfile
 import types
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,7 +38,8 @@ def _install_snowflake_tempfile_stub(mocker) -> None:
         import os
         import tempfile
 
-        _fd, path = tempfile.mkstemp(suffix=".pem", prefix="snowflake_key_")
+        fd, path = tempfile.mkstemp(suffix=".pem", prefix="snowflake_key_")
+        os.close(fd)
         try:
             yield path
         finally:
@@ -46,7 +50,8 @@ def _install_snowflake_tempfile_stub(mocker) -> None:
         import os
         import tempfile
 
-        _fd, path = tempfile.mkstemp(suffix=".json", prefix="snowflake_profile_")
+        fd, path = tempfile.mkstemp(suffix=".json", prefix="snowflake_profile_")
+        os.close(fd)
         try:
             yield path
         finally:
@@ -355,6 +360,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         mock_snowflake_streaming_client,
         mock_logfire,
         mocker,
+        tmp_path,
     ):
         """Test that start() initializes the streaming client successfully."""
         # Arrange
@@ -374,15 +380,16 @@ class TestSnowflakeHighPerformanceStreamingClient:
             return_value=mock_private_key,
         )
 
-        # Mock tempfile creation - return actual file descriptors
+        # Mock tempfile creation under tmp_path while returning real file descriptors.
+        real_mkstemp = tempfile.mkstemp
         mock_mkstemp = mocker.patch("tempfile.mkstemp")
-        mock_mkstemp.side_effect = [
-            (1, "/tmp/snowflake_key_test.pem"),  # First call for key file
-            (2, "/tmp/snowflake_profile_test.json"),  # Second call for profile file
-        ]
+        mock_mkstemp.side_effect = lambda suffix, prefix: real_mkstemp(
+            suffix=suffix,
+            prefix=prefix,
+            dir=tmp_path,
+        )
 
         _install_snowflake_tempfile_stub(mocker)
-        mocker.patch("os.unlink")
 
         # Mock StreamingIngestClient to prevent real instantiation
         mock_streaming_client_class = mocker.patch(
@@ -406,6 +413,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         mock_snowflake_streaming_client,
         mock_logfire,
         mocker,
+        tmp_path,
     ):
         """Test that start() creates and cleans up temporary files."""
         # Arrange
@@ -425,15 +433,20 @@ class TestSnowflakeHighPerformanceStreamingClient:
             return_value=mock_private_key,
         )
 
-        # Mock tempfile creation
+        # Mock tempfile creation under tmp_path while returning real file descriptors.
+        real_mkstemp = tempfile.mkstemp
         mock_mkstemp = mocker.patch("tempfile.mkstemp")
-        mock_mkstemp.side_effect = [
-            (1, "/tmp/snowflake_key_test2.pem"),
-            (2, "/tmp/snowflake_profile_test2.json"),
-        ]
+        created_paths: list[str] = []
 
+        def mkstemp_in_tmp_path(suffix: str, prefix: str):
+            fd, path = real_mkstemp(suffix=suffix, prefix=prefix, dir=tmp_path)
+            created_paths.append(path)
+            return fd, path
+
+        mock_mkstemp.side_effect = mkstemp_in_tmp_path
         _install_snowflake_tempfile_stub(mocker)
-        mock_unlink = mocker.patch("os.unlink")
+        mock_close = mocker.spy(os, "close")
+        mock_unlink = mocker.spy(os, "unlink")
 
         # Mock StreamingIngestClient
         mock_streaming_client_class = mocker.patch(
@@ -446,9 +459,11 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Assert - verify temp files were created and cleaned up
         assert mock_mkstemp.call_count == 2
+        assert mock_close.call_count >= 2
         assert mock_unlink.call_count == 2
-        mock_unlink.assert_any_call("/tmp/snowflake_key_test2.pem")
-        mock_unlink.assert_any_call("/tmp/snowflake_profile_test2.json")
+        for path in created_paths:
+            mock_unlink.assert_any_call(path)
+            assert not Path(path).exists()
 
     def test_start_with_error_calls_stop(
         self,
@@ -989,9 +1004,9 @@ class TestSnowflakeHighPerformanceStreamingClient:
             return status
 
         client.streaming_client = MagicMock()
-        client.streaming_client.get_channel_statuses.side_effect = (
-            lambda names: {names[0]: make_status(names[0])}
-        )
+        client.streaming_client.get_channel_statuses.side_effect = lambda names: {
+            names[0]: make_status(names[0])
+        }
 
         # Act
         client._maybe_check_channel_status("channel-p0")

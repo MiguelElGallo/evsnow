@@ -17,11 +17,6 @@ class EventHubConfig(BaseModel):
     max_wait_time: int = 60
     prefetch_count: int = 300
 
-    use_connection_string: bool = Field(
-        default=False,
-        description="Use connection string instead of Azure CLI credential authentication",
-    )
-
     checkpoint_interval_seconds: int = Field(
         default=300, description="Checkpoint interval (seconds)"
     )
