@@ -502,7 +502,9 @@ def run(
             console.print("   • Check your .env file configuration")
             console.print("   • Verify EventHub namespace and connection settings")
             console.print("   • Ensure Snowflake token is valid")
-            console.print("   • Run: [bold]uv run evsnow validate-config[/bold] to check configuration")
+            console.print(
+                "   • Run: [bold]uv run evsnow validate-config[/bold] to check configuration"
+            )
             console.print(
                 "   • Run: [bold]uv run evsnow validate-config --show-rbac[/bold] for permission guidance"
             )
