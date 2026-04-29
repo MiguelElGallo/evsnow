@@ -22,6 +22,9 @@ DESC USER STREAMEV;
 -- PART 2: Create INGESTION Database and Schema
 -- ============================================
 
+CREATE ROLE IF NOT EXISTS STREAM;
+GRANT ROLE STREAM TO USER STREAMEV;
+
 CREATE DATABASE IF NOT EXISTS INGESTION;
 
 USE DATABASE INGESTION;
@@ -74,26 +77,25 @@ DESC TABLE CONTROL.PUBLIC.INGESTION_STATUS;
 
 
 -- ============================================
--- PART 5: Grant Permissions to STREAMEV User
+-- PART 5: Grant Permissions to STREAM Role
 -- ============================================
 
 -- Grant permissions on CONTROL database
-GRANT USAGE ON DATABASE CONTROL TO ROLE PUBLIC;
-GRANT USAGE ON SCHEMA CONTROL.PUBLIC TO ROLE PUBLIC;
-GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE PUBLIC;
+GRANT USAGE ON DATABASE CONTROL TO ROLE STREAM;
+GRANT USAGE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
+GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE STREAM;
 
 -- Grant permissions on INGESTION database
-GRANT USAGE ON DATABASE INGESTION TO ROLE PUBLIC;
-GRANT USAGE ON SCHEMA INGESTION.PUBLIC TO ROLE PUBLIC;
-GRANT CREATE TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE PUBLIC;
-GRANT INSERT, SELECT ON ALL TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE PUBLIC;
-GRANT INSERT, SELECT ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE PUBLIC;
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE STREAM;
+GRANT USAGE ON DATABASE INGESTION TO ROLE STREAM;
+GRANT USAGE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT CREATE TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT INSERT, SELECT ON ALL TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT INSERT, SELECT ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 
--- If STREAMEV has a specific role, grant to that role instead
--- Example:
--- GRANT USAGE ON DATABASE CONTROL TO ROLE DATA_ENGINEER;
--- GRANT USAGE ON SCHEMA CONTROL.PUBLIC TO ROLE DATA_ENGINEER;
--- etc.
+-- For high-performance Snowpipe Streaming target objects, also run:
+--   setup_snowpipe_streaming.sql
+-- That script creates the Iceberg table, PIPE, and grants EXTERNAL VOLUME usage.
 
 
 -- ============================================
@@ -122,12 +124,4 @@ VALUES
 DELETE FROM CONTROL.PUBLIC.INGESTION_STATUS WHERE EVENTHUB = 'test-eventhub';
 */
 
-PRINT;
-PRINT '✅ Snowflake setup completed!';
-PRINT '';
-PRINT 'Next steps:';
-PRINT '1. Copy the public key from: snowflake/rsa_key_pub_value.txt';
-PRINT '2. Replace <PUBLIC_KEY_VALUE> in Part 1 above';
-PRINT '3. Update your .env file with Snowflake configuration';
-PRINT '4. Run: ./verify_snowflake_setup.sh';
-PRINT '5. Run: evsnow validate-config';
+SELECT 'Snowflake setup completed. Next: update .env, run uv run evsnow validate-config --show-rbac, then run setup_snowpipe_streaming.sql for high-performance streaming objects.' AS STATUS;

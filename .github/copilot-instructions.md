@@ -10,7 +10,7 @@ The project follows a modular async architecture:
 - **CLI Layer**: Typer-based command-line interface (`src/main.py`)
 - **Configuration**: Pydantic-based config management with environment variables (`src/utils/config.py`)
 - **Consumers**: Azure Event Hub async consumers with checkpointing (`src/consumers/eventhub.py`)
-- **Streaming**: Snowflake batch ingestion and control table management (`src/streaming/motherduck.py`)
+- **Streaming**: Snowflake streaming clients and control table management (`src/streaming/snowflake.py`, `src/streaming/snowflake_high_performance.py`)
 - **Orchestration**: Async pipeline orchestrator for managing mappings (`src/pipeline/orchestrator.py`)
 
 ## Code Style and Conventions
@@ -68,51 +68,52 @@ uv sync --all-groups
 # uv sync
 
 # Verify configuration
-uv run python src/main.py validate-config
+uv run evsnow validate-config
 ```
 
 ### Running the Project
 ```bash
 # Validate configuration
-uv run python src/main.py validate-config
+uv run evsnow validate-config
 
 # Run the pipeline
-uv run python src/main.py run
+uv run evsnow run
 
 # Show status
-uv run python src/main.py status
+uv run evsnow status
 
 # Dry run mode
-uv run python src/main.py run --dry-run
+uv run evsnow run --dry-run
 
 # Show version
-uv run python src/main.py version
+uv run evsnow version
 ```
 
 ### Linting and Type Checking
 ```bash
-# Run mypy type checker
-uv run mypy src/
+# Run ty type checker
+uv run ty check src/
 
-# MyPy configuration is in pyproject.toml under [tool.mypy]
-# Settings: strict equality, warn on redundant casts, check untyped defs
+# Ruff and ty are the CI quality gates
+uv run ruff format --check src/
+uv run ruff check src/
 ```
 
 ### Testing
-- Currently no test framework is configured
-- When adding tests, place them in a `tests/` directory at the project root
-- Use pytest as the testing framework if implementing tests
+- Pytest is configured in `pyproject.toml`
+- Place tests under `tests/`
+- Use `uv run pytest` for the full suite
 
 ## Key Dependencies
 
 ### Required Packages
 - **azure-eventhub**: Event Hub SDK for consuming messages
-- **azure-identity**: Azure authentication with DefaultAzureCredential
+- **azure-identity**: Azure CLI credential for Event Hub receiver auth; DefaultAzureCredential for Postgres Azure-token auth
 - **snowflake-connector-python**: Snowflake/DuckDB database interface
 - **pydantic**: Data validation and settings management
 - **typer**: CLI framework with Rich integration
 - **rich**: Beautiful terminal output and logging
-- **mypy**: Static type checking
+- **ty**: Static type checking
 
 ### Package Management
 - Use `uv` as the package manager (modern, fast Python package installer)
@@ -121,7 +122,7 @@ uv run mypy src/
 ## Azure Event Hub Best Practices
 
 When working with Event Hub consumers:
-- Use `DefaultAzureCredential` for authentication (preferred over connection strings)
+- Use per-hub connection strings for quick tests or Azure CLI credentials for receiver authentication
 - Configure appropriate `max_batch_size` (default: 1000)
 - Set reasonable `max_wait_time` for batch collection (default: 60s)
 - Use `prefetch_count` for performance optimization (default: 300)
@@ -134,7 +135,7 @@ When working with Snowflake:
 - Use batch ingestion for high performance
 - Maintain control tables for watermark checkpointing
 - Configure appropriate `batch_size` for ingestion
-- Use DuckDB connection with Snowflake token
+- Use Snowpipe Streaming channels and Snowflake/Postgres checkpoint storage
 - Handle schema and table creation gracefully
 - Verify connections before starting pipeline
 
@@ -143,7 +144,7 @@ When working with Snowflake:
 - `src/main.py` - Main CLI entry point with Typer commands
 - `src/utils/config.py` - Configuration models and validation
 - `src/consumers/eventhub.py` - Event Hub consumer implementation
-- `src/streaming/motherduck.py` - Snowflake streaming logic
+- `src/streaming/snowflake_high_performance.py` - High-performance Snowpipe Streaming logic
 - `src/pipeline/orchestrator.py` - Pipeline orchestration
 - `pyproject.toml` - Project metadata and dependencies
 - `.env.example` - Environment variable template
@@ -168,7 +169,7 @@ When working with Snowflake:
    - Maintain async patterns with `asyncio`
    - Use proper error handling for network operations
    - Follow checkpoint management patterns
-   - Test with both connection strings and DefaultAzureCredential
+   - Test with both per-hub connection strings and Azure CLI credential auth
 
 4. **Working with Snowflake**:
    - Use batch operations for efficiency
@@ -183,9 +184,9 @@ When working with Snowflake:
    - Handle errors gracefully with appropriate exit codes
 
 6. **Type Checking**:
-   - Run `uv run mypy src/` before committing
+   - Run `uv run ty check src/` before committing
    - Fix any type errors or add proper ignores
-   - Follow mypy configuration in `pyproject.toml`
+   - Keep `ty` aligned with the CI quality gate
 
 ## Code Quality Standards
 

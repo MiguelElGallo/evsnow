@@ -706,6 +706,7 @@ class TestEvSnowConfig:
         monkeypatch.setenv("EVENTHUB_NAMESPACE", "test.servicebus.windows.net")
         monkeypatch.setenv("EVENTHUBNAME_1", "hub1")
         monkeypatch.setenv("EVENTHUBNAME_1_CONSUMER_GROUP", "group1")
+        monkeypatch.setenv("EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT", "@latest")
         monkeypatch.setenv("EVENTHUBNAME_2", "hub2")
         monkeypatch.setenv("EVENTHUBNAME_2_CONSUMER_GROUP", "group2")
 
@@ -716,8 +717,10 @@ class TestEvSnowConfig:
         assert "EVENTHUBNAME_2" in config.event_hubs
         assert config.event_hubs["EVENTHUBNAME_1"].name == "hub1"
         assert config.event_hubs["EVENTHUBNAME_1"].consumer_group == "group1"
+        assert config.event_hubs["EVENTHUBNAME_1"].starting_position_on_no_checkpoint == "@latest"
         assert config.event_hubs["EVENTHUBNAME_2"].name == "hub2"
         assert config.event_hubs["EVENTHUBNAME_2"].consumer_group == "group2"
+        assert config.event_hubs["EVENTHUBNAME_2"].starting_position_on_no_checkpoint == "-1"
 
     def test_parse_dynamic_snowflake_configs_from_env(self, monkeypatch):
         """Test parsing dynamic Snowflake configurations from environment variables."""

@@ -202,8 +202,8 @@ def setup_snowflake():
         print()
         print("Next steps:")
         print("1. Update your .env file with Snowflake configuration")
-        print("2. Run: ./verify_snowflake_setup.sh")
-        print("3. Run: evsnow validate-config")
+        print("2. Run: uv run evsnow validate-config --show-rbac")
+        print("3. Run: setup_snowpipe_streaming.sql for high-performance streaming objects")
         print()
 
     except Exception as e:

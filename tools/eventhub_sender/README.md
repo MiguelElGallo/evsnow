@@ -17,7 +17,7 @@ uv run python tools/eventhub_sender/main.py send \
 Or use a connection string (env var supported):
 
 ```bash
-export EVENTHUB_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
+export AZURE_EVENTHUB_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
 uv run python tools/eventhub_sender/main.py send --eventhub my-hub --count 20
 
 # If your .env already has EVENTHUB_NAMESPACE, EVENTHUBNAME_1, and AZURE_EVENTHUB_CONNECTION_STRING,

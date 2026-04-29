@@ -146,7 +146,7 @@ GRANT CREATE TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 | Object | Name | Maps to `.env.example` |
 |--------|------|------------------------|
 | Database | `INGESTION` | `SNOWFLAKE_DATABASE`, `SNOWFLAKE_1_DATABASE` |
-| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA`, `SNOWFLAKE_1_SCHEMA` |
+| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA_NAME`, `SNOWFLAKE_1_SCHEMA` |
 
 ### 2.4 Create CONTROL Database
 
@@ -259,6 +259,8 @@ CREATE OR REPLACE EXTERNAL VOLUME EXVOL
 | `<YOUR_CONTAINER>` | Blob container name | `iceberg-data` |
 | `<YOUR_AZURE_TENANT_ID>` | Azure AD tenant ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
 
+After creating the external volume, complete the Azure consent and storage RBAC steps shown by Snowflake for the volume. The Snowflake-managed Azure service principal needs access to the storage account/container before `SYSTEM$VERIFY_EXTERNAL_VOLUME` can succeed.
+
 ### 3.2 Verify the External Volume
 
 ```sql
@@ -290,8 +292,7 @@ USE DATABASE INGESTION;
 USE SCHEMA PUBLIC;
 USE WAREHOUSE COMPUTE_WH;
 
-CREATE OR REPLACE ICEBERG TABLE EVENTS_TABLE1 
-  CLUSTER BY (ENQUEUED_TIME) (
+CREATE OR REPLACE ICEBERG TABLE EVENTS_TABLE1 (
     EVENT_BODY STRING,
     PARTITION_ID STRING,
     SEQUENCE_NUMBER DECIMAL(38, 0),
@@ -301,6 +302,7 @@ CREATE OR REPLACE ICEBERG TABLE EVENTS_TABLE1
     SYSTEM_PROPERTIES STRING,
     INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
 )
+CLUSTER BY (ENQUEUED_TIME)
 EXTERNAL_VOLUME = 'EXVOL'
 CATALOG = 'SNOWFLAKE'
 BASE_LOCATION = 'events/';
@@ -352,6 +354,7 @@ GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 -- Grant table permissions
 GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
 GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
+GRANT USAGE ON EXTERNAL VOLUME EXVOL TO ROLE STREAM;
 ```
 
 ### 4.4 Verify Setup
@@ -395,7 +398,7 @@ SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=<YOUR_KEY_PASSWORD>
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
 SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 
 # ============================================================================
@@ -600,7 +603,7 @@ GROUP BY PARTITION_ID;
 | Warehouse | `COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE` | (pre-existing) |
 | Database | `INGESTION` | `SNOWFLAKE_DATABASE` | Step 2.3 |
 | Database | `CONTROL` | `TARGET_DB` | Step 2.4 |
-| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA` | Steps 2.3, 2.4 |
+| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA_NAME` | Steps 2.3, 2.4 |
 | External Volume | `EXVOL` | — | Step 3.1 |
 | Iceberg Table | `EVENTS_TABLE1` | `SNOWFLAKE_1_TABLE` | Step 4.1 |
 | Pipe | `EVENTS_TABLE_PIPE` | `SNOWFLAKE_PIPE_NAME` | Step 4.2 |
@@ -673,9 +676,9 @@ GROUP BY PARTITION_ID;
 
 ---
 
-### ❌ Azure Credential Chain Failed
+### ❌ Azure CLI Credential Failed
 
-**Symptom**: `DefaultAzureCredential failed`
+**Symptom**: `AzureCliCredential failed` during Event Hub startup
 
 **Solutions**:
 

@@ -200,6 +200,9 @@ class EvSnowConfig(BaseSettings):
         event_hub_pattern = re.compile(r"^EVENTHUBNAME_(\d+)$")
         event_hub_consumer_pattern = re.compile(r"^EVENTHUBNAME_(\d+)_CONSUMER_GROUP$")
         event_hub_connection_pattern = re.compile(r"^EVENTHUBNAME_(\d+)_CONNECTION_STRING$")
+        event_hub_starting_position_pattern = re.compile(
+            r"^EVENTHUBNAME_(\d+)_STARTING_POSITION_ON_NO_CHECKPOINT$"
+        )
 
         # First collect all Event Hub numbers and their consumer groups
         event_hub_data: dict[str, dict[str, str]] = {}
@@ -226,6 +229,13 @@ class EvSnowConfig(BaseSettings):
                     event_hub_data[hub_num] = {}
                 event_hub_data[hub_num]["connection_string"] = value
 
+            match = event_hub_starting_position_pattern.match(key)
+            if match:
+                hub_num = match.group(1)
+                if hub_num not in event_hub_data:
+                    event_hub_data[hub_num] = {}
+                event_hub_data[hub_num]["starting_position_on_no_checkpoint"] = value
+
         # Create EventHubConfig instances with consumer groups
         for hub_num, data in event_hub_data.items():
             if "name" in data:  # Only create if we have a name
@@ -238,6 +248,9 @@ class EvSnowConfig(BaseSettings):
                     namespace=self.eventhub_namespace,
                     consumer_group=data["consumer_group"],
                     connection_string=data.get("connection_string"),
+                    starting_position_on_no_checkpoint=data.get(
+                        "starting_position_on_no_checkpoint", "-1"
+                    ),
                 )
 
         # Parse Snowflake configurations

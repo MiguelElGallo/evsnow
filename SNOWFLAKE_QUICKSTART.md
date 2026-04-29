@@ -87,7 +87,7 @@ CREATE DATABASE IF NOT EXISTS INGESTION;    -- For event data (SNOWFLAKE_DATABAS
 
 -- ============================================
 -- Create schemas if they don't exist
--- These match TARGET_SCHEMA and SNOWFLAKE_SCHEMA in .env
+-- These match TARGET_SCHEMA and SNOWFLAKE_SCHEMA_NAME in .env
 -- ============================================
 CREATE SCHEMA IF NOT EXISTS CONTROL.PUBLIC;
 CREATE SCHEMA IF NOT EXISTS INGESTION.PUBLIC;
@@ -98,22 +98,22 @@ CREATE SCHEMA IF NOT EXISTS INGESTION.PUBLIC;
 GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE STREAM;
 
 -- ============================================
--- CONTROL database - FULL permissions
+-- CONTROL database permissions
 -- Used for: TARGET_DB, TARGET_SCHEMA, TARGET_TABLE (INGESTION_STATUS)
 -- ============================================
-GRANT ALL PRIVILEGES ON DATABASE CONTROL TO ROLE STREAM;
-GRANT ALL PRIVILEGES ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
-GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
+GRANT USAGE ON DATABASE CONTROL TO ROLE STREAM;
+GRANT USAGE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
+GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
 
 -- ============================================
--- INGESTION database - FULL permissions
+-- INGESTION database permissions
 -- Used for: SNOWFLAKE_1_DATABASE, SNOWFLAKE_1_SCHEMA, SNOWFLAKE_1_TABLE
 -- ============================================
-GRANT ALL PRIVILEGES ON DATABASE INGESTION TO ROLE STREAM;
-GRANT ALL PRIVILEGES ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
-GRANT ALL PRIVILEGES ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT USAGE ON DATABASE INGESTION TO ROLE STREAM;
+GRANT USAGE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT CREATE TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT INSERT, SELECT ON ALL TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT INSERT, SELECT ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 
 -- ============================================
 -- Verify the grants
@@ -123,15 +123,7 @@ SHOW GRANTS ON DATABASE CONTROL;
 SHOW GRANTS ON DATABASE INGESTION;
 ```
 
-**If you still get "Insufficient privileges" errors**, run these additional commands to transfer ownership:
-
-```sql
--- Transfer ownership of databases and schemas to STREAM role
-GRANT OWNERSHIP ON DATABASE CONTROL TO ROLE STREAM COPY CURRENT GRANTS;
-GRANT OWNERSHIP ON DATABASE INGESTION TO ROLE STREAM COPY CURRENT GRANTS;
-GRANT OWNERSHIP ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
-GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
-```
+If you still get privilege errors, grant only the specific missing object privilege shown in the Snowflake error. Do not transfer ownership of databases or schemas to the runtime role.
 
 **How this relates to `.env.example`:**
 
@@ -143,7 +135,7 @@ GRANT OWNERSHIP ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM COPY CURRENT GRANTS;
 | `SCHEMA CONTROL.PUBLIC` | `TARGET_SCHEMA=PUBLIC` | Schema for control table |
 | `TABLE INGESTION_STATUS` | `TARGET_TABLE=INGESTION_STATUS` | Create via the SQL in Step 4 |
 | `DATABASE INGESTION` | `SNOWFLAKE_DATABASE=INGESTION`, `SNOWFLAKE_1_DATABASE=INGESTION` | Stores ingested event data |
-| `SCHEMA INGESTION.PUBLIC` | `SNOWFLAKE_SCHEMA=PUBLIC`, `SNOWFLAKE_1_SCHEMA=PUBLIC` | Schema for event tables |
+| `SCHEMA INGESTION.PUBLIC` | `SNOWFLAKE_SCHEMA_NAME=PUBLIC`, `SNOWFLAKE_1_SCHEMA=PUBLIC` | Schema for event tables |
 | `WAREHOUSE COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE=compute_wh` | Warehouse for query execution |
 
 Note: Snowflake identifiers are case-insensitive unless quoted; `COMPUTE_WH` and `compute_wh` both work.
@@ -174,7 +166,7 @@ USE WAREHOUSE COMPUTE_WH;
 -- Matches: SNOWFLAKE_1_TABLE=EVENTS_TABLE1 in .env
 -- Requires an existing external volume named EXVOL
 -- ============================================================================
-CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 CLUSTER BY (ENQUEUED_TIME)(
+CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
     EVENT_BODY STRING,
     PARTITION_ID STRING,
     SEQUENCE_NUMBER DECIMAL(38, 0),
@@ -184,6 +176,7 @@ CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 CLUSTER BY (ENQUE
     SYSTEM_PROPERTIES STRING,
     INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
 )
+CLUSTER BY (ENQUEUED_TIME)
 EXTERNAL_VOLUME = 'EXVOL'
 CATALOG = 'SNOWFLAKE'
 BASE_LOCATION = 'events/';
@@ -204,6 +197,8 @@ CREATE OR REPLACE TABLE CONTROL.PUBLIC.INGESTION_STATUS (
     METADATA VARIANT,
     PRIMARY KEY (EVENTHUB_NAMESPACE, EVENTHUB, TARGET_DB, TARGET_SCHEMA, TARGET_TABLE, PARTITION_ID)
 );
+
+GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE STREAM;
 
 -- ============================================================================
 -- Create PIPE for HIGH-PERFORMANCE Snowpipe Streaming
@@ -246,6 +241,7 @@ GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
 GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
+GRANT USAGE ON EXTERNAL VOLUME EXVOL TO ROLE STREAM;
 
 -- Verify grants
 SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE;
@@ -273,7 +269,7 @@ SNOWFLAKE_PRIVATE_KEY_FILE=/Users/miguelperedo/Github/evsnow/snowflake/rsa_key_e
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=YourPassword123   # Password from Step 1
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH                   # Your warehouse name
 SNOWFLAKE_DATABASE=MYDB                          # Your database
-SNOWFLAKE_SCHEMA=PUBLIC                          # Your schema
+SNOWFLAKE_SCHEMA_NAME=PUBLIC                     # Connection/default schema
 SNOWFLAKE_ROLE=DATA_ENGINEER                     # Optional: your role
 
 # Control table configuration
@@ -296,10 +292,10 @@ SNOWFLAKE_1_BATCH=1000                           # Batch size (leave as-is)
 
 ### Step 6: Verify Configuration
 
-Run the verification script to check if everything is set up correctly:
+Validate the environment file and RBAC guidance:
 
 ```bash
-./verify_snowflake_setup.sh
+uv run evsnow validate-config --show-rbac
 ```
 
 This will check:
@@ -319,7 +315,7 @@ This will check:
 Run EvSnow's built-in validation:
 
 ```bash
-evsnow validate-config
+uv run evsnow validate-config
 ```
 
 **What this does:**
@@ -340,13 +336,13 @@ evsnow validate-config
 Start the pipeline:
 
 ```bash
-evsnow run
+uv run evsnow run
 ```
 
 Or test with dry-run mode first:
 
 ```bash
-evsnow run --dry-run
+uv run evsnow run --dry-run
 ```
 
 ## Troubleshooting
@@ -396,7 +392,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
 
 ### Still having issues?
 
-1. Check detailed errors: `evsnow validate-config --verbose`
+1. Check configuration and RBAC guidance: `uv run evsnow validate-config --show-rbac`
 2. Verify Snowflake connectivity: `snowsql -a <account> -u <user> --private-key-path snowflake/rsa_key_encrypted.p8`
 3. Check the full setup guide: [snowflake_setup.md](./snowflake_setup.md)
 
@@ -409,7 +405,7 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
 | `snowflake/rsa_key_pub.pem` | Public key file | ❌ No (already in .gitignore) |
 | [`.env.example`](./.env.example) | Configuration template with all options documented | ✅ Yes |
 | `generate_snowflake_keys.sh` | Key generation script | ✅ Yes |
-| `verify_snowflake_setup.sh` | Verification script | ✅ Yes |
+| `uv run evsnow validate-config --show-rbac` | Configuration and RBAC validation command | — |
 | `snowflake_setup.md` | Detailed setup guide | ✅ Yes |
 
 ## Security Best Practices

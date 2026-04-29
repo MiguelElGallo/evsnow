@@ -56,14 +56,14 @@ SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=your_encryption_password
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
 SNOWFLAKE_DATABASE=MYDB
-SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=DATA_ENGINEER
 ```
 
 Then validate:
 
 ```bash
-evsnow validate-config
+uv run evsnow validate-config
 ```
 
 ## Checkpoint table (INGESTION_STATUS)

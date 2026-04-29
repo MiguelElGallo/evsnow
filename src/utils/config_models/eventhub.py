@@ -19,7 +19,7 @@ class EventHubConfig(BaseModel):
 
     use_connection_string: bool = Field(
         default=False,
-        description="Use connection string instead of DefaultAzureCredential",
+        description="Use connection string instead of Azure CLI credential authentication",
     )
 
     checkpoint_interval_seconds: int = Field(
@@ -38,7 +38,7 @@ class EventHubConfig(BaseModel):
         default="-1",
         description=(
             "Starting position when no checkpoints exist. Options: '-1' (beginning), "
-            "'@latest' (only new), '0' (earliest)"
+            "'@latest' (only new), '0' (offset zero)"
         ),
     )
 

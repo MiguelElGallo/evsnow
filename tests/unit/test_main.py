@@ -113,8 +113,8 @@ class TestCheckCredentialsCommand:
             assert result.exit_code == 0
             assert "Checking Available Azure Credentials" in result.stdout
 
-    def test_check_credentials_prefers_managed_identity_when_available(self, cli_runner):
-        """If Managed Identity is available, CLI credentials should be shown as lower priority."""
+    def test_check_credentials_uses_cli_for_eventhub_even_when_msi_available(self, cli_runner):
+        """Event Hub receiver guidance should still point to Azure CLI when MSI is available."""
         with (
             patch("azure.identity.EnvironmentCredential") as mock_env,
             patch("azure.identity.ManagedIdentityCredential") as mock_msi,
@@ -128,7 +128,7 @@ class TestCheckCredentialsCommand:
 
             assert result.exit_code == 0
             assert "Managed Identity" in result.stdout
-            assert "Will NOT be used" in result.stdout
+            assert "Will be used for Event Hub receiver authentication" in result.stdout
 
 
 class TestValidateConfigCommand:
@@ -471,7 +471,7 @@ class TestRunCommand:
 
         assert result.exit_code == 1
         assert "Authentication/Permission Error" in result.stdout
-        assert "Azure Service Bus Data Receiver" in result.stdout
+        assert "Azure Event Hubs Data Receiver" in result.stdout
 
     @patch("main.load_config")
     def test_run_generic_error_prints_troubleshooting(self, mock_load_config, cli_runner, mock_config):
