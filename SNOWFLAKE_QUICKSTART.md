@@ -112,6 +112,8 @@ GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
 GRANT USAGE ON DATABASE INGESTION TO ROLE STREAM;
 GRANT USAGE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 GRANT CREATE TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT CREATE ICEBERG TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 GRANT INSERT, SELECT ON ALL TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 GRANT INSERT, SELECT ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 
@@ -164,7 +166,7 @@ USE WAREHOUSE COMPUTE_WH;
 -- ============================================================================
 -- Create the Iceberg target table for Event Hub data
 -- Matches: SNOWFLAKE_1_TABLE=EVENTS_TABLE1 in .env
--- Requires an existing external volume named EXVOL
+-- Uses Snowflake-managed internal Iceberg storage by default
 -- ============================================================================
 CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
     EVENT_BODY STRING,
@@ -174,12 +176,11 @@ CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
     ENQUEUED_TIME TIMESTAMP_LTZ(6),
     PROPERTIES STRING,
     SYSTEM_PROPERTIES STRING,
-    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
+    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6)
 )
-CLUSTER BY (ENQUEUED_TIME)
-EXTERNAL_VOLUME = 'EXVOL'
-CATALOG = 'SNOWFLAKE'
-BASE_LOCATION = 'events/';
+CATALOG = SNOWFLAKE
+EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
+ICEBERG_VERSION = 3;
 
 -- ============================================================================
 -- Create the control table for checkpointing
@@ -215,7 +216,8 @@ COPY INTO INGESTION.PUBLIC.EVENTS_TABLE1 (
     OFFSET,
     ENQUEUED_TIME,
     PROPERTIES,
-    SYSTEM_PROPERTIES
+    SYSTEM_PROPERTIES,
+    INGESTION_TIMESTAMP
 )
 FROM (
     SELECT
@@ -223,9 +225,10 @@ FROM (
         TO_VARCHAR($1:partition_id) AS PARTITION_ID,
         $1:sequence_number::NUMBER(38,0) AS SEQUENCE_NUMBER,
         TO_VARCHAR($1:offset) AS OFFSET,
-        $1:enqueued_time::TIMESTAMP_NTZ(6) AS ENQUEUED_TIME,
+        $1:enqueued_time::TIMESTAMP_LTZ(6) AS ENQUEUED_TIME,
         TO_VARCHAR($1:properties) AS PROPERTIES,
-        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES
+        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES,
+        CURRENT_TIMESTAMP()::TIMESTAMP_LTZ(6) AS INGESTION_TIMESTAMP
     FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
 );
 
@@ -241,7 +244,6 @@ GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
 GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
-GRANT USAGE ON EXTERNAL VOLUME EXVOL TO ROLE STREAM;
 
 -- Verify grants
 SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE;
@@ -251,9 +253,9 @@ SELECT 'Snowpipe Streaming HIGH-PERFORMANCE setup complete!' AS STATUS;
 
 > ⚠️ If you see `ERR_PIPE_DOES_NOT_EXIST_OR_NOT_AUTHORIZED`, rerun this block and ensure role `STREAM` has `OPERATE`/`MONITOR` on the PIPE.
 
-#### External Volume Note
+#### Iceberg Storage Note
 
-The Iceberg table definition above assumes an external volume named `EXVOL` already exists. If you need to create one, follow the Snowflake external volume documentation and ensure the role you use has permission to write to it.
+The default Iceberg table uses Snowflake-managed internal storage with `EXTERNAL_VOLUME = SNOWFLAKE_MANAGED`. `SNOWFLAKE_MANAGED` is a reserved value, not a user-created external volume, so this setup does not require Azure Blob storage, `CREATE EXTERNAL VOLUME`, or external-volume grants. Use a customer-managed external volume only if you intentionally want Iceberg files in your own cloud storage.
 
 ### Step 5: Update `.env` File
 
@@ -383,10 +385,12 @@ openssl rsa -in snowflake/rsa_key_encrypted.p8 -check
 # Your Snowflake user needs these permissions:
 # 1. CREATE TABLE on the control schema
 # 2. INSERT, SELECT, UPDATE on INGESTION_STATUS table
-# 3. INSERT, CREATE TABLE on ingestion schema
+# 3. INSERT, CREATE TABLE, CREATE ICEBERG TABLE, and CREATE PIPE on ingestion schema
 
 # Ask your Snowflake admin to grant:
 GRANT CREATE TABLE ON SCHEMA <TARGET_SCHEMA> TO ROLE <your_role>;
+GRANT CREATE ICEBERG TABLE ON SCHEMA <TARGET_SCHEMA> TO ROLE <your_role>;
+GRANT CREATE PIPE ON SCHEMA <TARGET_SCHEMA> TO ROLE <your_role>;
 GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STATUS TO ROLE <your_role>;
 ```
 

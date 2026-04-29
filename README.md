@@ -9,9 +9,9 @@ Video: Click the image above for a walkthrough of this repo.
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
-Now supports streaming directly to Iceberg tables.
+Now supports streaming directly to Snowflake-managed Iceberg tables.
 
-EvSnow can also stream-ingest into **Apache Iceberg tables in Snowflake** (Snowflake-managed Iceberg) using **Snowpipe Streaming**—so you can land Event Hub events directly into Iceberg-backed storage while keeping the same pipeline, checkpointing, and operational workflow.
+EvSnow can stream-ingest into **Apache Iceberg tables in Snowflake** using **Snowpipe Streaming**. The default setup uses Snowflake-managed internal Iceberg storage (`EXTERNAL_VOLUME = SNOWFLAKE_MANAGED`), so no Azure Blob external volume is required for the Iceberg target table.
 
 ![alt text](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
 
@@ -247,7 +247,7 @@ The pipeline uses Snowflake's high-performance Snowpipe Streaming SDK (requires 
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 SNOWFLAKE_SCHEMA_NAME=PUBLIC
 
-# Create PIPE in Snowflake (see setup_snowpipe_streaming.sql)
+# Create the internal Iceberg table and PIPE in Snowflake (see setup_snowpipe_streaming.sql)
 ```
 
 One PIPE serves the target table, while EvSnow opens one Snowpipe Streaming channel per Event Hub partition. A batch containing mixed partitions is split before ingestion, sorted by sequence number within each partition, and sent to channels named `<base-channel>-p<sanitized-partition>`.

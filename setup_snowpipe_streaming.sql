@@ -2,7 +2,9 @@
 -- SNOWPIPE STREAMING HIGH-PERFORMANCE ARCHITECTURE SETUP
 -- Run this in Snowflake to create the required Iceberg table and PIPE
 --
--- Reference: https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-getting-started
+-- References:
+--   https://docs.snowflake.com/en/user-guide/tables-iceberg-internal-storage
+--   https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-iceberg
 --
 -- This script matches the following .env.example settings:
 --   SNOWFLAKE_1_DATABASE=INGESTION
@@ -22,6 +24,11 @@ USE WAREHOUSE COMPUTE_WH;
 
 -- ============================================================================
 -- Create the target Iceberg table for Event Hub data
+--
+-- This uses Snowflake-managed internal Iceberg storage. SNOWFLAKE_MANAGED is a
+-- reserved external volume value, not a user-created external volume object.
+-- Do not create EXVOL, grant external-volume privileges, or set a table base path
+-- for the default setup.
 -- ============================================================================
 CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
     EVENT_BODY STRING,
@@ -31,12 +38,11 @@ CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
     ENQUEUED_TIME TIMESTAMP_LTZ(6),
     PROPERTIES STRING,
     SYSTEM_PROPERTIES STRING,
-    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
+    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6)
 )
-CLUSTER BY (ENQUEUED_TIME)
-EXTERNAL_VOLUME = 'EXVOL'
-CATALOG = 'SNOWFLAKE'
-BASE_LOCATION = 'events/';
+CATALOG = SNOWFLAKE
+EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
+ICEBERG_VERSION = 3;
 
 -- ============================================================================
 -- Create PIPE for HIGH-PERFORMANCE Snowpipe Streaming
@@ -56,7 +62,8 @@ COPY INTO INGESTION.PUBLIC.EVENTS_TABLE1 (
     OFFSET,
     ENQUEUED_TIME,
     PROPERTIES,
-    SYSTEM_PROPERTIES
+    SYSTEM_PROPERTIES,
+    INGESTION_TIMESTAMP
 )
 FROM (
     SELECT
@@ -64,9 +71,10 @@ FROM (
         TO_VARCHAR($1:partition_id) AS PARTITION_ID,
         $1:sequence_number::NUMBER(38,0) AS SEQUENCE_NUMBER,
         TO_VARCHAR($1:offset) AS OFFSET,
-        $1:enqueued_time::TIMESTAMP_NTZ(6) AS ENQUEUED_TIME,
+        $1:enqueued_time::TIMESTAMP_LTZ(6) AS ENQUEUED_TIME,
         TO_VARCHAR($1:properties) AS PROPERTIES,
-        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES
+        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES,
+        CURRENT_TIMESTAMP()::TIMESTAMP_LTZ(6) AS INGESTION_TIMESTAMP
     FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
 );
 
@@ -82,7 +90,6 @@ GRANT OPERATE ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT MONITOR ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE TO ROLE STREAM;
 GRANT INSERT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
 GRANT SELECT ON TABLE INGESTION.PUBLIC.EVENTS_TABLE1 TO ROLE STREAM;
-GRANT USAGE ON EXTERNAL VOLUME EXVOL TO ROLE STREAM;
 
 -- ============================================================================
 -- Verify grants

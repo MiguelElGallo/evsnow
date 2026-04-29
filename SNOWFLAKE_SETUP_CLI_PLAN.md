@@ -311,9 +311,8 @@ snow connection test -c evsnow-setup
 
 Once the connection works, ask the user for the following information needed for setup:
 
-1. **Azure Storage Account name** (for External Volume)
-2. **Azure Storage Container name** (for Iceberg data)
-3. **Azure Tenant ID** (for Azure authentication)
+1. Confirm the default Snowflake-managed internal Iceberg storage model
+2. Do not request Azure Storage Account, Container, or Tenant ID unless the user explicitly chooses customer-managed external-volume Iceberg
 
 Ask for these in a clear, conversational manner. Explain why each is needed.
 
@@ -325,8 +324,7 @@ Follow the SNOWFLAKE_COMPLETE_SETUP.md guide below to set up:
 2. Generate RSA keys using the existing script - Step 1
 3. Create INGESTION and CONTROL databases - Steps 2.3, 2.4
 4. Create INGESTION_STATUS control table - Step 2.5
-5. Create External Volume (EXVOL) - Step 3
-6. Create Iceberg Table (EVENTS_TABLE1) - Step 4.1
+5. Create Snowflake-managed internal Iceberg Table (EVENTS_TABLE1) - Step 4.1
 7. Create Streaming Pipe (EVENTS_TABLE_PIPE) - Step 4.2
 8. Set up all necessary grants
 
@@ -527,7 +525,7 @@ async def handle_user_input(request, invocation):
       - Troubleshoot if needed (without asking user)
    
    b) ONCE CONNECTION WORKS
-      - Ask user for: Azure Storage Account, Container, Tenant ID
+      - Confirm default Snowflake-managed internal Iceberg storage
    
    c) EXECUTE FULL SETUP (following SNOWFLAKE_COMPLETE_SETUP.md)
       - Create STREAM role
@@ -536,7 +534,6 @@ async def handle_user_input(request, invocation):
       - Create INGESTION database
       - Create CONTROL database
       - Create INGESTION_STATUS table
-      - Create External Volume EXVOL
       - Create Iceberg table EVENTS_TABLE1
       - Create Pipe EVENTS_TABLE_PIPE
       - Set up all grants
@@ -554,7 +551,7 @@ async def handle_user_input(request, invocation):
 ### 1. Why PAT with ACCOUNTADMIN?
 
 - PAT allows programmatic access without interactive login
-- ACCOUNTADMIN role is needed to create databases, users, external volumes
+- ACCOUNTADMIN role is needed for the initial database, user, role, and grant setup
 - Token can be scoped with expiry for security
 
 ### 2. Why Copilot SDK instead of raw LLM?
