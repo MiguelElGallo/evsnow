@@ -9,9 +9,9 @@ Video: Click the image above for a walkthrough of this repo.
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
-Now supports streaming directly to Iceberg tables.
+Now supports streaming directly to Snowflake-managed Iceberg tables.
 
-EvSnow can also stream-ingest into **Apache Iceberg tables in Snowflake** (Snowflake-managed Iceberg) using **Snowpipe Streaming**—so you can land Event Hub events directly into Iceberg-backed storage while keeping the same pipeline, checkpointing, and operational workflow.
+EvSnow can stream-ingest into **Apache Iceberg tables in Snowflake** using **Snowpipe Streaming**. The default setup uses Snowflake-managed internal Iceberg storage (`EXTERNAL_VOLUME = SNOWFLAKE_MANAGED`), so no Azure Blob external volume is required for the Iceberg target table.
 
 ![alt text](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
 
@@ -34,6 +34,9 @@ cd evsnow
 
 # Install dependencies
 uv sync
+
+# CI/reproducible installs use the checked-in dependency lock
+uv sync --locked
 
 # Quickstart
 uv run evsnow validate-config
@@ -70,7 +73,7 @@ SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=your-password
 SNOWFLAKE_WAREHOUSE=compute_wh
 SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 
 # Control Table (for checkpointing)
@@ -94,6 +97,10 @@ SNOWFLAKE_1_TABLE=EVENTS_TABLE1
 SNOWFLAKE_1_BATCH=100
 ```
 
+Snowpipe Streaming channels are generated per Event Hub partition. The base channel uses the configured pattern (`{event_hub}-{env}-{region}-{client_id}` by default), and each ingest batch appends a sanitized partition suffix such as `-p0`, `-p1`, or `-ppartition-1`. Keep `EVSNOW_CLIENT_ID` stable for a given running instance so channel names remain deterministic across restarts.
+
+`SNOWFLAKE_SCHEMA_NAME` is the shared Snowflake connection schema used by pipe operations. `SNOWFLAKE_1_SCHEMA` is the destination schema for mapping 1.
+
 Postgres control table notes:
 - When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
 - When `CONTROL_PG_AUTH_MODE=azure_token`, the app uses `DefaultAzureCredential` and passes the access token as the password; `CONTROL_PG_PASSWORD` is ignored. Ensure the Azure AD principal exists on the server and has access to the database/schema/table.
@@ -113,18 +120,19 @@ Generate RSA key pair for authentication:
 
 ### Azure authentication
 
-The pipeline uses `DefaultAzureCredential`. Make sure you're logged in:
+For Event Hub consumption, EvSnow uses `EVENTHUBNAME_{N}_CONNECTION_STRING` when it is set. Otherwise it uses the Azure CLI identity from `az login`; that identity needs `Azure Event Hubs Data Receiver` on the Event Hub or namespace.
 
 ```bash
 az login
 ```
 
-Or provide a connection string in `.env`:
+Or provide a least-privilege Listen connection string in `.env`:
 
 ```bash
-AZURE_EVENTHUB_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
-EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
+EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=EvSnowListen;SharedAccessKey=<listen-key>"
 ```
+
+`AZURE_EVENTHUB_CONNECTION_STRING` is used by `tools/eventhub_sender`, not by the main pipeline receiver.
 
 ## Use
 
@@ -159,7 +167,7 @@ uv run evsnow run
 
 ```bash
 # Option 1: BEGINNING of stream (default, recommended)
-# Processes ALL existing messages in the Event Hub partition
+# Processes ALL existing messages in the Event Hub partitions
 # Use to ensure no messages are lost when starting fresh
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
 
@@ -168,15 +176,15 @@ EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
 # Skips messages already in Event Hub
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=@latest
 
-# Option 3: EARLIEST retained message
-# Similar to -1 but explicitly starts from the oldest retained message
-# Depends on Event Hub retention (typically 1-7 days)
+# Option 3: Event Hub offset 0
+# This is a concrete offset, not a synonym for earliest. Prefer -1 for
+# beginning-of-stream behavior unless you intentionally want offset 0.
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
 ```
 
 **How It Works:**
 
-1. **First run (no checkpoints):** Uses `STARTING_POSITION_ON_NO_CHECKPOINT` (`-1/0` = all existing messages; `@latest` = only new messages).
+1. **First run (no checkpoints):** Uses `STARTING_POSITION_ON_NO_CHECKPOINT` (`-1` = beginning; `@latest` = only new messages; `0` = offset zero).
 2. **Subsequent runs (checkpoints exist):** Always resumes from the last saved checkpoint; the setting is ignored.
 3. **After truncating checkpoints:** Same as first run again; uses the configured starting position.
 
@@ -187,7 +195,7 @@ EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
 **Recommendation:** 
 - Use `-1` (default) for production to prevent message loss
 - Use `@latest` for development/testing when you only want new messages
-- Avoid `0` unless you specifically need the earliest retained message (usually same as `-1`)
+- Avoid `0` unless you specifically need to start from Event Hub offset zero
 
 ## Optional features
 
@@ -239,8 +247,12 @@ The pipeline uses Snowflake's high-performance Snowpipe Streaming SDK (requires 
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 SNOWFLAKE_SCHEMA_NAME=PUBLIC
 
-# Create PIPE in Snowflake (see setup_snowpipe_streaming.sql)
+# Create the internal Iceberg table and PIPE in Snowflake (see setup_snowpipe_streaming.sql)
 ```
+
+One PIPE serves the target table, while EvSnow opens one Snowpipe Streaming channel per Event Hub partition. A batch containing mixed partitions is split before ingestion, sorted by sequence number within each partition, and sent to channels named `<base-channel>-p<sanitized-partition>`.
+
+Dependencies are managed through `pyproject.toml` and the checked-in `uv.lock`. Use `uv sync --locked` when you need the exact locked versions, and refresh the lock only when intentionally changing dependencies.
 
 ## Configuration reference
 
@@ -249,7 +261,7 @@ See [`.env.example`](./.env.example) for all available configuration options wit
 ## Docs
 
 - [Step by Step Guide](./SNOWFLAKE_COMPLETE_SETUP.md) - Setup guide for Snowflake
-- [Troubleshooting](./TROUBLESHOOTING.md) - Common issues and solutions
+- [Snowflake Quickstart](./SNOWFLAKE_QUICKSTART.md) - Compact setup and validation checklist
 
 ## License
 

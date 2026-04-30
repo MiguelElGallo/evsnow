@@ -6,9 +6,6 @@ accessing real files, services, or external dependencies.
 """
 
 import os
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -531,16 +528,6 @@ class TestEventHubConfig:
 
         assert "Invalid starting_position" in str(exc_info.value)
 
-    def test_use_connection_string_default(self):
-        """Test that use_connection_string defaults to False."""
-        config = EventHubConfig(
-            name="test-hub",
-            namespace="test.servicebus.windows.net",
-            consumer_group="$Default",
-        )
-
-        assert config.use_connection_string is False
-
     def test_connection_string_optional(self):
         """Test that connection string is optional."""
         config = EventHubConfig(
@@ -706,6 +693,7 @@ class TestEvSnowConfig:
         monkeypatch.setenv("EVENTHUB_NAMESPACE", "test.servicebus.windows.net")
         monkeypatch.setenv("EVENTHUBNAME_1", "hub1")
         monkeypatch.setenv("EVENTHUBNAME_1_CONSUMER_GROUP", "group1")
+        monkeypatch.setenv("EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT", "@latest")
         monkeypatch.setenv("EVENTHUBNAME_2", "hub2")
         monkeypatch.setenv("EVENTHUBNAME_2_CONSUMER_GROUP", "group2")
 
@@ -716,8 +704,25 @@ class TestEvSnowConfig:
         assert "EVENTHUBNAME_2" in config.event_hubs
         assert config.event_hubs["EVENTHUBNAME_1"].name == "hub1"
         assert config.event_hubs["EVENTHUBNAME_1"].consumer_group == "group1"
+        assert config.event_hubs["EVENTHUBNAME_1"].starting_position_on_no_checkpoint == "@latest"
         assert config.event_hubs["EVENTHUBNAME_2"].name == "hub2"
         assert config.event_hubs["EVENTHUBNAME_2"].consumer_group == "group2"
+        assert config.event_hubs["EVENTHUBNAME_2"].starting_position_on_no_checkpoint == "-1"
+
+    def test_parse_dynamic_eventhub_connection_string_from_env(self, monkeypatch):
+        """Test parsing EventHub connection string from environment variables."""
+        connection_string = (
+            "Endpoint=sb://test.servicebus.windows.net/;"
+            "SharedAccessKeyName=listen;SharedAccessKey=test=="
+        )
+        monkeypatch.setenv("EVENTHUB_NAMESPACE", "test.servicebus.windows.net")
+        monkeypatch.setenv("EVENTHUBNAME_1", "hub1")
+        monkeypatch.setenv("EVENTHUBNAME_1_CONSUMER_GROUP", "group1")
+        monkeypatch.setenv("EVENTHUBNAME_1_CONNECTION_STRING", connection_string)
+
+        config = EvSnowConfig(eventhub_namespace="test.servicebus.windows.net")
+
+        assert config.event_hubs["EVENTHUBNAME_1"].connection_string == connection_string
 
     def test_parse_dynamic_snowflake_configs_from_env(self, monkeypatch):
         """Test parsing dynamic Snowflake configurations from environment variables."""

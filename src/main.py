@@ -46,19 +46,18 @@ def _show_rbac_guidance() -> None:
     console.print("═" * 70)
     console.print()
     console.print("[bold]For EventHub Consumer Access:[/bold]")
-    console.print("  ✓ [cyan]Azure Service Bus Data Receiver[/cyan]")
+    console.print("  ✓ [cyan]Azure Event Hubs Data Receiver[/cyan]")
     console.print("    Scope: Event Hub Namespace or Resource Group")
     console.print("    Purpose: Read messages from EventHub partitions")
     console.print()
-    console.print("  ✓ [cyan]Azure Service Bus Data Sender[/cyan] (optional)")
-    console.print("    Scope: Event Hub Namespace or Resource Group")
-    console.print("    Purpose: Send checkpoint updates")
+    console.print("  i [cyan]Azure Event Hubs Data Sender[/cyan] is only needed for sender tools")
+    console.print("    Checkpoints are stored in Snowflake/Postgres, not Event Hubs")
     console.print()
     console.print("[bold]How to Assign in Azure Portal:[/bold]")
     console.print("  1. Navigate to your Event Hub Namespace")
     console.print("  2. Click 'Access Control (IAM)'")
     console.print("  3. Click '+ Add' → 'Add role assignment'")
-    console.print("  4. Select 'Azure Service Bus Data Receiver'")
+    console.print("  4. Select 'Azure Event Hubs Data Receiver'")
     console.print("  5. Click 'Next', select your user/service principal")
     console.print("  6. Click 'Review + assign'")
     console.print()
@@ -134,12 +133,17 @@ def check_credentials() -> None:
 
     console.print("\n[bold blue]🔍 Checking Available Azure Credentials...[/bold blue]\n")
 
-    console.print("[bold]DefaultAzureCredential Priority Order:[/bold]")
+    console.print("[bold]Credential availability check:[/bold]")
     console.print("1. Environment variables")
     console.print("2. Managed Identity (if running in Azure)")
     console.print("3. Azure CLI")
     console.print("4. Azure PowerShell")
     console.print("5. Interactive browser\n")
+
+    console.print(
+        "[dim]Event Hub consumption currently uses Azure CLI credentials unless a per-hub "
+        "connection string is configured.[/dim]\n"
+    )
 
     # Check each credential type
     console.print("[bold]Available Credentials:[/bold]\n")
@@ -154,19 +158,14 @@ def check_credentials() -> None:
         console.print(f"   [dim]{e!s}[/dim]\n")
 
     # Managed Identity
-    has_msi = False
     try:
         _msi_cred = ManagedIdentityCredential()
-        has_msi = True
         console.print("✅ [yellow bold]Managed Identity[/yellow bold] - Available")
         console.print(
-            "   [yellow bold]⚠️  IMPORTANT: System is running in Azure environment![/yellow bold]"
+            "   [dim]Available for services that use DefaultAzureCredential, such as Postgres azure_token auth.[/dim]"
         )
         console.print(
-            "   [yellow bold]⚠️  EventHub will authenticate using MANAGED IDENTITY, not your CLI user![/yellow bold]"
-        )
-        console.print(
-            "   [yellow bold]⚠️  Check RBAC permissions for the Managed Identity resource![/yellow bold]\n"
+            "   [yellow]Event Hub consumption does not use Managed Identity in the current runtime path.[/yellow]\n"
         )
     except Exception:
         console.print("❌ [dim]Managed Identity - Not available[/dim]")
@@ -176,36 +175,21 @@ def check_credentials() -> None:
     try:
         _cli_cred = AzureCliCredential()
         console.print("✅ [green]Azure CLI[/green] - Available")
-        if has_msi:
-            console.print("   [dim](Will NOT be used - Managed Identity has priority)[/dim]\n")
-        else:
-            console.print("   [green](Will be used for authentication)[/green]\n")
+        console.print("   [green](Will be used for Event Hub receiver authentication)[/green]\n")
     except Exception as e:
         console.print("❌ [dim]Azure CLI - Not available[/dim]")
         console.print(f"   [dim]{e!s}[/dim]\n")
 
     # Show conclusion
     console.print("\n[bold yellow]⚠️  CONCLUSION:[/bold yellow]")
-    if has_msi:
-        console.print(
-            "[yellow]• System will use MANAGED IDENTITY for EventHub authentication[/yellow]"
-        )
-        console.print("[yellow]• Your Azure CLI user permissions are NOT relevant[/yellow]")
-        console.print("\n[bold]Next Steps:[/bold]")
-        console.print("1. Identify the Managed Identity resource in Azure Portal")
-        console.print("2. Go to EventHub Namespace → Access Control (IAM)")
-        console.print("3. Verify Managed Identity has 'Azure Event Hubs Data Receiver' role")
-        console.print("\n[bold]To force using Azure CLI credentials instead:[/bold]")
-        console.print('[dim]export MSI_ENDPOINT=""[/dim] (disables Managed Identity detection)')
-    else:
-        console.print(
-            "[green]• System will use AZURE CLI credentials for EventHub authentication[/green]"
-        )
-        console.print("[green]• Ensure your CLI user has required RBAC roles[/green]")
-        console.print("\n[bold]Next Steps:[/bold]")
-        console.print("1. Go to Azure Portal → EventHub Namespace")
-        console.print("2. Access Control (IAM) → Role Assignments")
-        console.print("3. Verify your user has 'Azure Event Hubs Data Receiver' role")
+    console.print(
+        "[green]• Event Hub receiver uses AZURE CLI credentials unless EVENTHUBNAME_{N}_CONNECTION_STRING is set[/green]"
+    )
+    console.print("[green]• Ensure your CLI user has required RBAC roles[/green]")
+    console.print("\n[bold]Next Steps:[/bold]")
+    console.print("1. Go to Azure Portal → EventHub Namespace")
+    console.print("2. Access Control (IAM) → Role Assignments")
+    console.print("3. Verify your user has 'Azure Event Hubs Data Receiver' role")
 
 
 @app.command()
@@ -493,20 +477,22 @@ def run(
             console.print()
             console.print("[bold]Required Roles:[/bold]")
             console.print(
-                "  • [cyan]Azure Service Bus Data Receiver[/cyan] - to read EventHub messages"
+                "  • [cyan]Azure Event Hubs Data Receiver[/cyan] - to read EventHub messages"
             )
-            console.print("  • [cyan]Azure Service Bus Data Sender[/cyan] - to manage checkpoints")
+            console.print(
+                "  • [cyan]Azure Event Hubs Data Sender[/cyan] - only if you use sender tooling"
+            )
             console.print()
             console.print("[bold]How to Fix:[/bold]")
             console.print("  1. Go to Azure Portal → Your Event Hub Namespace")
             console.print("  2. Click 'Access Control (IAM)' → '+ Add' → 'Add role assignment'")
             console.print(
-                "  3. Assign 'Azure Service Bus Data Receiver' to your user/service principal"
+                "  3. Assign 'Azure Event Hubs Data Receiver' to your user/service principal"
             )
-            console.print("  4. Repeat for 'Azure Service Bus Data Sender'")
+            console.print("  4. Do not add Sender unless this identity also publishes test events")
             console.print()
             console.print(
-                "[dim]Run: [bold]evsnow validate-config --show-rbac[/bold] for detailed guidance[/dim]"
+                "[dim]Run: [bold]uv run evsnow validate-config --show-rbac[/bold] for detailed guidance[/dim]"
             )
         else:
             console.print(f"\n[bold red]Pipeline error:[/bold red] {e}")
@@ -516,9 +502,11 @@ def run(
             console.print("   • Check your .env file configuration")
             console.print("   • Verify EventHub namespace and connection settings")
             console.print("   • Ensure Snowflake token is valid")
-            console.print("   • Run: [bold]evsnow validate-config[/bold] to check configuration")
             console.print(
-                "   • Run: [bold]evsnow validate-config --show-rbac[/bold] for permission guidance"
+                "   • Run: [bold]uv run evsnow validate-config[/bold] to check configuration"
+            )
+            console.print(
+                "   • Run: [bold]uv run evsnow validate-config --show-rbac[/bold] for permission guidance"
             )
 
         raise typer.Exit(1) from e

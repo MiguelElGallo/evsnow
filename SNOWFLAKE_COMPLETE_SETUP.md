@@ -12,7 +12,7 @@ This guide walks you through the **complete setup** for EvSnow — from generati
 2. [Architecture Overview](#-architecture-overview)
 3. [Generate RSA Keys](#-step-1-generate-rsa-keys)
 4. [Initial Snowflake Setup](#-step-2-initial-snowflake-setup)
-5. [Create External Volume](#-step-3-create-external-volume)
+5. [Choose Iceberg Storage](#-step-3-choose-iceberg-storage)
 6. [Create Iceberg Table & Pipe](#-step-4-create-iceberg-table--pipe)
 7. [Configure Environment](#-step-5-configure-environment)
 8. [Run the Pipeline](#-step-6-run-the-pipeline)
@@ -32,7 +32,7 @@ Before starting, make sure you have:
 | ✅ Python 3.13+ | With `uv` package manager |
 | ✅ Snowflake Account | With ACCOUNTADMIN access (for initial setup) |
 | ✅ Azure Event Hub | Namespace and topic configured |
-| ✅ Azure Storage Account | For Iceberg external volume |
+| ✅ Azure Storage Account | Optional, only for customer-managed external-volume Iceberg |
 | ✅ DuckDB (optional) | For direct Iceberg queries |
 
 ---
@@ -48,9 +48,9 @@ Before starting, make sure you have:
                                                         │
                                                         ▼
                                                 ┌─────────────────┐
-                                                │  Azure Blob     │
-                                                │  Storage        │
-                                                │  (External Vol) │
+                                                │ Snowflake-      │
+                                                │ managed Iceberg │
+                                                │ storage         │
                                                 └─────────────────┘
                                                         │
                                                         ▼
@@ -141,12 +141,14 @@ CREATE SCHEMA IF NOT EXISTS INGESTION.PUBLIC;
 GRANT USAGE ON DATABASE INGESTION TO ROLE STREAM;
 GRANT USAGE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 GRANT CREATE TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT CREATE ICEBERG TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
+GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 ```
 
 | Object | Name | Maps to `.env.example` |
 |--------|------|------------------------|
 | Database | `INGESTION` | `SNOWFLAKE_DATABASE`, `SNOWFLAKE_1_DATABASE` |
-| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA`, `SNOWFLAKE_1_SCHEMA` |
+| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA_NAME`, `SNOWFLAKE_1_SCHEMA` |
 
 ### 2.4 Create CONTROL Database
 
@@ -233,49 +235,33 @@ GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE STREAM;
 
 ---
 
-## ☁️ Step 3: Create External Volume
+## ☁️ Step 3: Choose Iceberg Storage
 
 > **Where**: ❄️ Snowflake SQL Worksheet
 
-The External Volume connects Snowflake to Azure Blob Storage for Iceberg table data.
+EvSnow defaults to Snowflake-managed internal Iceberg storage. This uses
+`EXTERNAL_VOLUME = SNOWFLAKE_MANAGED`, where `SNOWFLAKE_MANAGED` is a reserved
+Snowflake value rather than a user-created external volume object.
 
-### 3.1 Create the External Volume
+With the default path, you do not create `EXVOL`, configure Azure Blob storage,
+run `SYSTEM$VERIFY_EXTERNAL_VOLUME`, or grant external-volume privileges.
 
-```sql
-CREATE OR REPLACE EXTERNAL VOLUME EXVOL
-  STORAGE_LOCATIONS = (
-    (
-      NAME = 'azure-iceberg-storage'
-      STORAGE_PROVIDER = 'AZURE'
-      STORAGE_BASE_URL = 'azure://<YOUR_STORAGE_ACCOUNT>.blob.core.windows.net/<YOUR_CONTAINER>/'
-      AZURE_TENANT_ID = '<YOUR_AZURE_TENANT_ID>'
-    )
-  );
-```
+### 3.1 Default: Snowflake-Managed Internal Storage
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `<YOUR_STORAGE_ACCOUNT>` | Azure Storage account name | `mystorageaccount` |
-| `<YOUR_CONTAINER>` | Blob container name | `iceberg-data` |
-| `<YOUR_AZURE_TENANT_ID>` | Azure AD tenant ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-
-### 3.2 Verify the External Volume
+No setup SQL is required for the storage layer. The Iceberg table in Step 4
+selects internal storage directly:
 
 ```sql
--- Check volume was created
-SHOW EXTERNAL VOLUMES LIKE 'EXVOL';
-
--- Verify connectivity (may take a moment)
-SELECT SYSTEM$VERIFY_EXTERNAL_VOLUME('EXVOL');
+EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
 ```
 
-> ✅ You should see a success message confirming Azure connectivity.
+### 3.2 Optional: Customer-Managed External Volume
 
-### 3.3 Grant Permissions
+Use this only when you intentionally want Iceberg files in your own cloud
+storage. That path requires `CREATE EXTERNAL VOLUME`, cloud IAM/RBAC, external
+volume verification, `USAGE` grants, and `BASE_LOCATION` on the table.
 
-```sql
-GRANT USAGE ON EXTERNAL VOLUME EXVOL TO ROLE STREAM;
-```
+The rest of this guide uses the default Snowflake-managed internal storage.
 
 ---
 
@@ -290,8 +276,7 @@ USE DATABASE INGESTION;
 USE SCHEMA PUBLIC;
 USE WAREHOUSE COMPUTE_WH;
 
-CREATE OR REPLACE ICEBERG TABLE EVENTS_TABLE1 
-  CLUSTER BY (ENQUEUED_TIME) (
+CREATE OR REPLACE ICEBERG TABLE EVENTS_TABLE1 (
     EVENT_BODY STRING,
     PARTITION_ID STRING,
     SEQUENCE_NUMBER DECIMAL(38, 0),
@@ -299,11 +284,11 @@ CREATE OR REPLACE ICEBERG TABLE EVENTS_TABLE1
     ENQUEUED_TIME TIMESTAMP_LTZ(6),
     PROPERTIES STRING,
     SYSTEM_PROPERTIES STRING,
-    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6) DEFAULT CAST(CURRENT_TIMESTAMP() AS TIMESTAMP_LTZ(6))
+    INGESTION_TIMESTAMP TIMESTAMP_LTZ(6)
 )
-EXTERNAL_VOLUME = 'EXVOL'
-CATALOG = 'SNOWFLAKE'
-BASE_LOCATION = 'events/';
+CATALOG = SNOWFLAKE
+EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
+ICEBERG_VERSION = 3;
 ```
 
 | Object | Name | Maps to `.env.example` |
@@ -323,7 +308,8 @@ COPY INTO INGESTION.PUBLIC.EVENTS_TABLE1 (
     OFFSET,
     ENQUEUED_TIME,
     PROPERTIES,
-    SYSTEM_PROPERTIES
+    SYSTEM_PROPERTIES,
+    INGESTION_TIMESTAMP
 )
 FROM (
     SELECT
@@ -331,9 +317,10 @@ FROM (
         TO_VARCHAR($1:partition_id) AS PARTITION_ID,
         $1:sequence_number::NUMBER(38,0) AS SEQUENCE_NUMBER,
         TO_VARCHAR($1:offset) AS OFFSET,
-        $1:enqueued_time::TIMESTAMP_NTZ(6) AS ENQUEUED_TIME,
+        $1:enqueued_time::TIMESTAMP_LTZ(6) AS ENQUEUED_TIME,
         TO_VARCHAR($1:properties) AS PROPERTIES,
-        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES
+        TO_VARCHAR($1:system_properties) AS SYSTEM_PROPERTIES,
+        CURRENT_TIMESTAMP()::TIMESTAMP_LTZ(6) AS INGESTION_TIMESTAMP
     FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING'))
 );
 ```
@@ -395,7 +382,7 @@ SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=<YOUR_KEY_PASSWORD>
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
 SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 
 # ============================================================================
@@ -523,9 +510,14 @@ INSTALL azure;
 LOAD azure;
 ```
 
-### 7.4 Create Azure Storage Secret
+### 7.4 Optional: Create Azure Storage Secret
 
 > **Where**: 🦆 DuckDB
+
+Skip this for Snowflake-managed internal Iceberg storage unless your external
+query workflow specifically requires direct cloud-storage credentials. For
+customer-managed external-volume Iceberg tables, create a DuckDB Azure secret
+for the storage account that contains the table files.
 
 ```sql
 CREATE SECRET azure_auto (
@@ -600,8 +592,8 @@ GROUP BY PARTITION_ID;
 | Warehouse | `COMPUTE_WH` | `SNOWFLAKE_WAREHOUSE` | (pre-existing) |
 | Database | `INGESTION` | `SNOWFLAKE_DATABASE` | Step 2.3 |
 | Database | `CONTROL` | `TARGET_DB` | Step 2.4 |
-| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA` | Steps 2.3, 2.4 |
-| External Volume | `EXVOL` | — | Step 3.1 |
+| Schema | `PUBLIC` | `SNOWFLAKE_SCHEMA_NAME` | Steps 2.3, 2.4 |
+| Iceberg storage | `SNOWFLAKE_MANAGED` | — | Step 3.1 |
 | Iceberg Table | `EVENTS_TABLE1` | `SNOWFLAKE_1_TABLE` | Step 4.1 |
 | Pipe | `EVENTS_TABLE_PIPE` | `SNOWFLAKE_PIPE_NAME` | Step 4.2 |
 | Control Table | `INGESTION_STATUS` | `TARGET_TABLE` | Step 2.5 |
@@ -649,9 +641,12 @@ GROUP BY PARTITION_ID;
 
 ---
 
-### ❌ External Volume Error
+### ❌ Customer-Managed External Volume Error
 
 **Symptom**: `SYSTEM$VERIFY_EXTERNAL_VOLUME failed`
+
+This applies only if you opted into customer-managed external-volume Iceberg
+storage instead of the default Snowflake-managed internal storage.
 
 **Solutions**:
 
@@ -673,9 +668,9 @@ GROUP BY PARTITION_ID;
 
 ---
 
-### ❌ Azure Credential Chain Failed
+### ❌ Azure CLI Credential Failed
 
-**Symptom**: `DefaultAzureCredential failed`
+**Symptom**: `AzureCliCredential failed` during Event Hub startup
 
 **Solutions**:
 
@@ -702,7 +697,7 @@ GROUP BY PARTITION_ID;
 - [ ] Created user `STREAMEV` and role `STREAM` in Snowflake
 - [ ] Assigned RSA public key to user
 - [ ] Created `INGESTION` and `CONTROL` databases
-- [ ] Created External Volume `EXVOL`
+- [ ] Confirmed default Iceberg storage is `SNOWFLAKE_MANAGED`
 - [ ] Created Iceberg table `EVENTS_TABLE1`
 - [ ] Created Pipe `EVENTS_TABLE_PIPE`
 - [ ] Configured `.env` file

@@ -163,7 +163,8 @@ class EventHubAsyncConsumer:
         except Exception:
             # Fallback: some mocks or SDK versions may expose `body` differently
             try:
-                body_bytes = bytes(event.body)  # type: ignore[arg-type]
+                body_text = event.body_as_str(encoding="UTF-8")
+                body_bytes = body_text.encode("utf-8", errors="replace")
             except Exception:
                 body_bytes = b""
         return body_bytes.decode("utf-8", errors="replace")
@@ -340,7 +341,7 @@ class EventHubAsyncConsumer:
             )
         elif starting_pos == "0":
             logger.info(
-                f"   Starting from EARLIEST available (starting_position='{starting_pos}') - processes from oldest retained message."
+                f"   Starting from Event Hub offset 0 (starting_position='{starting_pos}') - use -1 for beginning-of-stream semantics."
             )
 
         logger.info(
@@ -365,10 +366,10 @@ class EventHubAsyncConsumer:
         logger.warning("      - The authenticated identity HAS the required role")
         logger.warning("      - Check logs above to see WHICH identity was used")
         logger.warning("")
-        logger.warning("   NOTE: System may use Managed Identity (not your CLI user)!")
         logger.warning(
-            "   Look for MSI endpoint in logs: http://169.254.169.254/metadata/identity/..."
+            "   NOTE: Without EVENTHUBNAME_{N}_CONNECTION_STRING, this receiver uses Azure CLI credentials."
         )
+        logger.warning("   Check the Azure CLI user shown by `az account show`.")
         logger.warning("")
 
     def _log_receive_error_header(self, *, error_type: str, receive_error: Exception) -> None:
@@ -435,14 +436,14 @@ class EventHubAsyncConsumer:
         logger.error("")
         logger.error("How to Fix:")
         logger.error("  1. Check which authentication method was used (see logs above)")
-        logger.error("  2. If using Managed Identity, assign the role to the managed identity")
-        logger.error("  3. If using Azure CLI, assign the role to your Azure CLI user")
+        logger.error("  2. If using connection-string auth, verify it has Listen permission")
+        logger.error("  3. If using Azure CLI auth, assign the role to your Azure CLI user")
         logger.error("  4. Go to Azure Portal → Event Hubs")
         logger.error(f"  5. Find namespace: {self.eventhub_config.namespace}")
         logger.error(f"  6. Click on Event Hub: {self.eventhub_config.name}")
         logger.error("  7. Go to 'Access Control (IAM)' → 'Add role assignment'")
         logger.error("  8. Select role: 'Azure Event Hubs Data Receiver'")
-        logger.error("  9. Assign to the correct identity (MSI or user)")
+        logger.error("  9. Assign to the Azure CLI user shown by `az account show`")
         logger.error("")
         raise RuntimeError(
             "Missing Azure RBAC permission: 'Azure Event Hubs Data Receiver' role required for the authenticated identity"
@@ -650,7 +651,8 @@ class EventHubAsyncConsumer:
                     )
                     logger.error("")
                     logger.error("For PRODUCTION/CLOUD:")
-                    logger.error("  - Use Managed Identity (automatically available in Azure)")
+                    logger.error("  - Configure EVENTHUBNAME_{N}_CONNECTION_STRING")
+                    logger.error("  - Or run under an Azure CLI login for the intended identity")
                     logger.error(
                         "  - Ensure the identity has 'Azure Event Hubs Data Receiver' role"
                     )
@@ -723,11 +725,11 @@ class EventHubAsyncConsumer:
                 if not has_checkpoints:
                     starting_pos = self.eventhub_config.starting_position_on_no_checkpoint
                     receive_kwargs["starting_position"] = starting_pos
-                    # CRITICAL: Set starting_position_inclusive=False to avoid reprocessing
-                    # Without this, SDK may re-process messages from checkpoints
-                    receive_kwargs["starting_position_inclusive"] = False
+                    receive_kwargs["starting_position_inclusive"] = starting_pos == "0"
                     logger.info(
-                        f"📍 Setting starting_position='{starting_pos}' (exclusive, configured value)"
+                        "📍 Setting starting_position='%s' (inclusive=%s, configured value)",
+                        starting_pos,
+                        receive_kwargs["starting_position_inclusive"],
                     )
 
                 await self.client.receive(**receive_kwargs)

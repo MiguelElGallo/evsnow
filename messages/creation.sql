@@ -1,21 +1,21 @@
 CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE (
   TIMESTAMP_NS        NUMBER(19,0),          -- 64-bit ns epoch fits in NUMBER(19,0)
-  EVENTHUB_NAMESPACE  VARCHAR(134217728),
-  EVENTHUB_NAME       VARCHAR(134217728),
-  CONSUMER_GROUP      VARCHAR(134217728),
-  PARTITION_ID        VARCHAR(134217728),
-  OFFSET              VARCHAR(134217728),
+  EVENTHUB_NAMESPACE  STRING,
+  EVENTHUB_NAME       STRING,
+  CONSUMER_GROUP      STRING,
+  PARTITION_ID        STRING,
+  OFFSET              STRING,
   SEQUENCE_NUMBER     NUMBER(19,0),
   ENQUEUED_TIME       TIMESTAMP_LTZ(6),       -- ISO8601 w/ timezone -> LTZ(6)
-  CONTENT_TYPE        VARCHAR(134217728),
-  BODY                VARCHAR(134217728),     -- JSON string (your inner payload)
-  PROPERTIES          VARCHAR(134217728),     -- recommend sending as JSON string (see note below)
-  SYSTEM_PROPERTIES   VARCHAR(134217728),     -- recommend sending as JSON string (see note below)
+  CONTENT_TYPE        STRING,
+  BODY                STRING,                 -- JSON string (your inner payload)
+  PROPERTIES          STRING,                 -- recommend sending as JSON string (see note below)
+  SYSTEM_PROPERTIES   STRING,                 -- recommend sending as JSON string (see note below)
   INGESTION_TIMESTAMP TIMESTAMP_LTZ(6)        -- MUST be provided in payload if you want it populated
 )
-CATALOG = 'SNOWFLAKE'
-EXTERNAL_VOLUME = 'my_ext_volume'
-BASE_LOCATION = 'events/'
+CATALOG = SNOWFLAKE
+EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
+ICEBERG_VERSION = 3;
 
 CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
 COPY INTO INGESTION.PUBLIC.EVENTS_TABLE

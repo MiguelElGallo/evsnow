@@ -294,8 +294,8 @@ async def run_setup_agent(
                 "The agent will now set up:\n"
                 "• STREAM role and STREAMEV user\n"
                 "• INGESTION and CONTROL databases\n"
-                "• External Volume for Iceberg\n"
-                "• Events table and streaming pipe",
+                "• Snowflake-managed internal Iceberg table\n"
+                "• Streaming pipe",
                 title="🏗️ Infrastructure Setup",
             )
         )
@@ -422,10 +422,9 @@ async def run_full_setup_agent(
     initial_prompt = """\
 The connection is already established and working.
 
-Now proceed with the full Snowflake setup. First, ask me for the required Azure information:
-1. Azure Storage Account name
-2. Azure Storage Container name
-3. Azure Tenant ID
+Now proceed with the full Snowflake setup. Use Snowflake-managed internal
+Iceberg storage by default; do not ask for Azure storage information or create
+an external volume unless I explicitly request customer-managed Iceberg storage.
 
 Then execute the setup steps from SNOWFLAKE_COMPLETE_SETUP.md.
 """

@@ -104,11 +104,10 @@ You are an expert Snowflake setup assistant. The Snow CLI connection is already 
 
 ## Your Tasks
 
-### Task 1: Gather Required Information
-Ask the user for:
-1. **Azure Storage Account name** (for External Volume)
-2. **Azure Storage Container name** (for Iceberg data)
-3. **Azure Tenant ID** (for Azure authentication)
+### Task 1: Confirm Default Storage Model
+Use Snowflake-managed internal Iceberg storage by default. Do not ask for Azure
+Storage Account, Azure Storage Container, or Azure Tenant ID unless the user
+explicitly chooses customer-managed external-volume Iceberg storage.
 
 ### Task 2: Execute Complete Setup
 Follow the SNOWFLAKE_COMPLETE_SETUP.md guide to set up:
@@ -116,8 +115,7 @@ Follow the SNOWFLAKE_COMPLETE_SETUP.md guide to set up:
 1. Create Role (STREAM) and User (STREAMEV)
 2. Create INGESTION and CONTROL databases
 3. Create INGESTION_STATUS control table
-4. Create External Volume (EXVOL)
-5. Create Iceberg Table (EVENTS_TABLE1)
+4. Create Snowflake-managed internal Iceberg Table (EVENTS_TABLE1)
 6. Create Streaming Pipe (EVENTS_TABLE_PIPE)
 7. Set up all necessary grants
 

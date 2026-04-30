@@ -7,9 +7,9 @@ This guide shows you how to query your Snowflake Iceberg table directly using Du
 ## 📋 Prerequisites
 
 - ✅ Snowflake account with the Iceberg table created
-- ✅ Azure Storage account configured as External Volume in Snowflake and in use for the Iceberg table
+- ✅ Snowflake-managed Iceberg table created
 - ✅ DuckDB installed locally
-- ✅ Azure CLI authenticated (for credential chain)
+- ✅ Azure CLI authenticated only if you use the optional Azure storage secret for customer-managed external-volume tables
 - ✅ A valid PAT created in Snowflake (see Step 1)
 
 ---
@@ -76,10 +76,9 @@ LOAD azure;
 
 ---
 
-## ☁️ Step 4: Create Azure Storage Secret
+## ☁️ Step 4: Optional Azure Storage Secret
 
-Create a secret to authenticate with Azure Storage (same account used in the External Volume):
-In the near future, the Catalog / DuckDB (not sure) should also support vending credentials, removing the need for this step.
+Skip this step for EvSnow's default Snowflake-managed internal Iceberg storage unless your external query workflow requires direct cloud-storage credentials. For customer-managed external-volume Iceberg tables, create a secret to authenticate with the Azure Storage account that contains the table files.
 
 ```sql
 CREATE SECRET azure_auto (
@@ -91,7 +90,7 @@ CREATE SECRET azure_auto (
 
 | Parameter | Description |
 |-----------|-------------|
-| `<YOUR_STORAGE_ACCOUNT>` | Same Azure Storage account from Step 0 |
+| `<YOUR_STORAGE_ACCOUNT>` | Azure Storage account used by a customer-managed external volume |
 
 > 💡 **Tip**: The `credential_chain` provider uses your local Azure CLI credentials. Make sure you're logged in with `az login`.
 

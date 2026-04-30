@@ -43,7 +43,7 @@ def test_log_no_checkpoint_behavior_variants(sample_eventhub_config, caplog):
 
     caplog.clear()
     consumer._log_no_checkpoint_behavior("0")
-    assert "EARLIEST" in caplog.text
+    assert "offset 0" in caplog.text
 
 
 @pytest.mark.unit

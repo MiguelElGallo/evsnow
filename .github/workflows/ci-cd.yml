@@ -40,11 +40,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
-
-      - name: Install ty
-        run: |
-          uv tool install ty
+          uv sync --all-groups --locked
 
       - name: Check formatting with ruff
         run: |
@@ -56,7 +52,7 @@ jobs:
 
       - name: Type check with ty
         run: |
-          uv tool run ty check src/
+          uv run ty check src/
 
   test-unit:
     name: Unit Tests
@@ -83,7 +79,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
+          uv sync --all-groups --locked
 
       - name: Run unit tests
         run: |
@@ -118,7 +114,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
+          uv sync --all-groups --locked
 
       - name: Run integration tests
         run: |
@@ -156,7 +152,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
+          uv sync --all-groups --locked
 
       - name: Generate coverage report
         run: |

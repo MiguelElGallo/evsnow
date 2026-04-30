@@ -72,13 +72,12 @@ The Copilot agent then:
 
 1. **Creates Snow CLI connection** using PAT authentication
 2. **Tests the connection** and troubleshoots any issues
-3. **Gathers required info** (Azure Storage Account, Container, Tenant ID)
+3. **Uses Snowflake-managed internal Iceberg storage by default**
 4. **Executes full setup** following `SNOWFLAKE_COMPLETE_SETUP.md`:
    - Creates STREAM role and STREAMEV user
    - Generates RSA keys
    - Creates INGESTION and CONTROL databases
-   - Creates External Volume (EXVOL)
-   - Creates Iceberg table and streaming pipe
+   - Creates a Snowflake-managed internal Iceberg table and streaming pipe
    - Sets up all necessary grants
 
 ### Step 3: Output

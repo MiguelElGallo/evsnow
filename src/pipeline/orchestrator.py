@@ -15,7 +15,9 @@ The orchestrator:
 import asyncio
 import logging
 import os
+import re
 import signal
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -35,6 +37,17 @@ from utils.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_partition_channel_suffix(partition_id: str) -> str:
+    """Normalize a source partition id for Snowflake channel names."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", str(partition_id).strip())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+    return cleaned or "unknown"
+
+
+def _partition_channel_name(base_channel_name: str, partition_id: str) -> str:
+    return f"{base_channel_name}-p{_sanitize_partition_channel_suffix(partition_id)}"
 
 
 class PipelineMapping:
@@ -215,30 +228,58 @@ class PipelineMapping:
                 return False
 
             try:
-                logger.debug(f"Converting {len(messages)} messages to dict format...")
-                # Convert messages to data format
-                data_batch = [msg.to_dict() for msg in messages]
+                messages_by_partition: defaultdict[str, list[EventHubMessage]] = defaultdict(list)
+                for message in messages:
+                    messages_by_partition[str(message.partition_id)].append(message)
 
-                # Log first message as sample
-                if data_batch:
-                    logger.debug(f"Sample message: {str(data_batch[0])[:200]}...")
+                span.set_attribute("base_channel_name", self.channel_name)
+                span.set_attribute("partition_count", len(messages_by_partition))
 
-                # Ingest data with channel name (for logging/tracking)
-                channel_name = self.channel_name
-                span.set_attribute("channel_name", channel_name)
+                success = True
+                failed_partition_id: str | None = None
+                failed_partition_count = 0
+                for partition_id in sorted(messages_by_partition):
+                    partition_messages = sorted(
+                        messages_by_partition[partition_id],
+                        key=lambda msg: msg.sequence_number,
+                    )
+                    logger.debug(
+                        "Converting %d messages from partition %s to dict format...",
+                        len(partition_messages),
+                        partition_id,
+                    )
+                    data_batch = [msg.to_dict() for msg in partition_messages]
 
-                # Get partition_id from first message for Snowflake channel management
-                partition_id = messages[0].partition_id if messages else "0"
+                    # Log first message as sample
+                    if data_batch:
+                        logger.debug(f"Sample message: {str(data_batch[0])[:200]}...")
 
-                logger.debug(
-                    f"Sending batch of {len(data_batch)} messages to Snowflake (channel: {channel_name})..."
-                )
+                    channel_name = _partition_channel_name(self.channel_name, partition_id)
 
-                success = self.snowflake_client.ingest_batch(
-                    channel_name=channel_name,
-                    data_batch=data_batch,
-                    partition_id=partition_id,
-                )
+                    logger.debug(
+                        "Sending partition batch of %d messages to Snowflake "
+                        "(channel: %s, partition: %s)...",
+                        len(data_batch),
+                        channel_name,
+                        partition_id,
+                    )
+
+                    partition_success = self.snowflake_client.ingest_batch(
+                        channel_name=channel_name,
+                        data_batch=data_batch,
+                        partition_id=partition_id,
+                    )
+
+                    if not partition_success:
+                        success = False
+                        failed_partition_id = partition_id
+                        failed_partition_count = len(partition_messages)
+                        logger.error(
+                            "❌ Failed to ingest %d messages from partition %s",
+                            len(partition_messages),
+                            partition_id,
+                        )
+                        break
 
                 if success:
                     self.stats["messages_processed"] += len(messages)
@@ -253,9 +294,14 @@ class PipelineMapping:
                     return True
                 else:
                     logger.error(f"❌ Failed to ingest {len(messages)} messages")
-                    self.stats["errors"].append(
-                        {"timestamp": datetime.now(UTC), "message_count": len(messages)}
-                    )
+                    error_entry: dict[str, Any] = {
+                        "timestamp": datetime.now(UTC),
+                        "message_count": len(messages),
+                    }
+                    if failed_partition_id is not None:
+                        error_entry["partition_id"] = failed_partition_id
+                        error_entry["partition_message_count"] = failed_partition_count
+                    self.stats["errors"].append(error_entry)
                     span.set_attribute("success", False)
                     return False
 

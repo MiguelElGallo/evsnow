@@ -55,11 +55,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
-
-      - name: Install ty
-        run: |
-          uv tool install ty
+          uv sync --all-groups --locked
 
       - name: Determine test scope
         id: test_scope
@@ -149,7 +145,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --all-groups
+          uv sync --all-groups --locked
 
       - name: Check formatting with ruff
         run: |
@@ -161,7 +157,7 @@ jobs:
 
       - name: Run type checking
         run: |
-          uv tool run ty check src/
+          uv run ty check src/
 
       - name: Run coverage check
         run: |
