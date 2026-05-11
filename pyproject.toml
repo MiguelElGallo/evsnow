@@ -22,7 +22,7 @@ dependencies = [
     "psycopg[binary]>=3.3.3",
     "snowflake-connector-python>=4.3.0",
     "cryptography>=46.0.5",
-    "snowpipe-streaming>=1.2.0",
+    "snowpipe-streaming>=1.4.0",
 ]
 
 [project.scripts]
