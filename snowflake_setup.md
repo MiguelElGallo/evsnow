@@ -6,7 +6,7 @@ Set up key-pair authentication for EvSnow using RSA keys (JWT).
 
 - OpenSSL installed
 - Snowflake account with a role that can set user keys
-- Ability to run SQL in Snowflake (Snowsight or SnowSQL)
+- Ability to run SQL in Snowflake (Snowsight or Snowflake CLI `snow`)
 
 ## 1) Generate RSA keys (PKCS#8, encrypted)
 
@@ -35,15 +35,18 @@ USE ROLE ACCOUNTADMIN;
 ALTER USER <your_username> SET RSA_PUBLIC_KEY='<public_key_value>';
 ```
 
-## 4) Test authentication with SnowSQL
+## 4) Test authentication with Snowflake CLI
 
 ```bash
-snowsql -a <account_identifier> \
-        -u <username> \
-        --private-key-path rsa_key_encrypted.p8 \
-        -w <warehouse> -d <database> -s <schema>
-# Prompts for the key password
+snow connection test \
+  --account <account_identifier> \
+  --user <username> \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-path rsa_key_encrypted.p8
 ```
+
+Private-key authentication requires `SNOWFLAKE_JWT`. EvSnow uses the same key
+file through `SNOWFLAKE_PRIVATE_KEY_FILE`.
 
 ## 5) Configure EvSnow
 
@@ -58,12 +61,17 @@ SNOWFLAKE_WAREHOUSE=COMPUTE_WH
 SNOWFLAKE_DATABASE=MYDB
 SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=DATA_ENGINEER
+SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
+
+EvSnow passes the encrypted private-key file and
+`SNOWFLAKE_PRIVATE_KEY_PASSWORD` directly to Snowpipe Streaming SDK `1.4.0`.
+It does not create an unencrypted temporary private-key file.
 
 Then validate:
 
 ```bash
-uv run evsnow validate-config
+uv run evsnow validate-config --show-rbac
 ```
 
 ## Checkpoint table (INGESTION_STATUS)

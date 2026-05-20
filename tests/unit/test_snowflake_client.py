@@ -11,13 +11,7 @@ This module tests the SnowflakeHighPerformanceStreamingClient class including:
 - Statistics tracking
 """
 
-import os
-import sys
-import tempfile
-import types
-from contextlib import contextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,39 +21,6 @@ from streaming.snowflake_high_performance import (
     create_snowflake_streaming_client,
 )
 from utils.config import SnowflakeConnectionConfig
-
-
-def _install_snowflake_tempfile_stub(mocker) -> None:
-    """Install a light utils.snowflake stub for start() temp-file tests."""
-    module = types.ModuleType("utils.snowflake")
-
-    @contextmanager
-    def temporary_private_key_file(_private_key_pem: str):
-        import os
-        import tempfile
-
-        fd, path = tempfile.mkstemp(suffix=".pem", prefix="snowflake_key_")
-        os.close(fd)
-        try:
-            yield path
-        finally:
-            os.unlink(path)
-
-    @contextmanager
-    def temporary_profile_file(_profile):
-        import os
-        import tempfile
-
-        fd, path = tempfile.mkstemp(suffix=".json", prefix="snowflake_profile_")
-        os.close(fd)
-        try:
-            yield path
-        finally:
-            os.unlink(path)
-
-    module.temporary_private_key_file = temporary_private_key_file
-    module.temporary_profile_file = temporary_profile_file
-    mocker.patch.dict(sys.modules, {"utils.snowflake": module})
 
 
 class TestSnowflakeHighPerformanceStreamingClient:
@@ -190,28 +151,20 @@ class TestSnowflakeHighPerformanceStreamingClient:
             connection_config=sample_snowflake_connection_config,
         )
 
-        # Mock private key file content
-        mock_key_content = b"-----BEGIN PRIVATE KEY-----\ntest_key_data\n-----END PRIVATE KEY-----"
-        mock_private_key = mocker.MagicMock()
-        mock_private_key.private_bytes.return_value = mock_key_content
-
-        mocker.patch("pathlib.Path.open", mocker.mock_open(read_data=mock_key_content))
-        mocker.patch(
-            "cryptography.hazmat.primitives.serialization.load_pem_private_key",
-            return_value=mock_private_key,
-        )
-
         # Act
         profile = client._build_connection_profile()
 
         # Assert
+        assert profile["authorization_type"] == "JWT"
         assert profile["user"] == sample_snowflake_connection_config.user
         assert profile["account"] == sample_snowflake_connection_config.account
         assert (
             profile["url"]
             == f"https://{sample_snowflake_connection_config.account}.snowflakecomputing.com:443"
         )
-        assert "private_key" in profile
+        assert profile["private_key_file"] == sample_snowflake_connection_config.private_key_file
+        assert "private_key" not in profile
+        assert "private_key_passphrase" not in profile
         assert profile["role"] == sample_snowflake_connection_config.role
 
     def test_build_connection_profile_with_encrypted_key(
@@ -244,30 +197,13 @@ class TestSnowflakeHighPerformanceStreamingClient:
             connection_config=connection_config,
         )
 
-        # Mock private key decryption
-        mock_key_content = (
-            b"-----BEGIN ENCRYPTED PRIVATE KEY-----\ntest\n-----END ENCRYPTED PRIVATE KEY-----"
-        )
-        mock_private_key = mocker.MagicMock()
-        mock_private_key.private_bytes.return_value = (
-            b"-----BEGIN PRIVATE KEY-----\ndecrypted\n-----END PRIVATE KEY-----"
-        )
-
-        mocker.patch("pathlib.Path.open", mocker.mock_open(read_data=mock_key_content))
-        mock_load_key = mocker.patch(
-            "cryptography.hazmat.primitives.serialization.load_pem_private_key",
-            return_value=mock_private_key,
-        )
-
         # Act
         profile = client._build_connection_profile()
 
         # Assert
-        assert "private_key" in profile
-        # Verify password was passed to load_pem_private_key
-        mock_load_key.assert_called_once()
-        call_args = mock_load_key.call_args
-        assert call_args[1]["password"] == b"test_password"
+        assert profile["private_key_file"] == str(key_file.resolve())
+        assert profile["private_key_passphrase"] == "test_password"
+        assert "private_key" not in profile
 
     def test_build_connection_profile_without_role(
         self,
@@ -295,17 +231,6 @@ class TestSnowflakeHighPerformanceStreamingClient:
         client = SnowflakeHighPerformanceStreamingClient(
             snowflake_config=sample_snowflake_config,
             connection_config=connection_config,
-        )
-
-        # Mock private key loading
-        mock_key_content = b"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----"
-        mock_private_key = mocker.MagicMock()
-        mock_private_key.private_bytes.return_value = mock_key_content
-
-        mocker.patch("pathlib.Path.open", mocker.mock_open(read_data=mock_key_content))
-        mocker.patch(
-            "cryptography.hazmat.primitives.serialization.load_pem_private_key",
-            return_value=mock_private_key,
         )
 
         # Act
@@ -342,8 +267,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
             connection_config=connection_config,
         )
 
-        # Mock file open to raise FileNotFoundError
-        mocker.patch("pathlib.Path.open", side_effect=FileNotFoundError("File not found"))
+        key_file.unlink()
 
         # Act & Assert
         with pytest.raises(ValueError, match="Cannot build Snowflake connection profile"):
@@ -360,7 +284,6 @@ class TestSnowflakeHighPerformanceStreamingClient:
         mock_snowflake_streaming_client,
         mock_logfire,
         mocker,
-        tmp_path,
     ):
         """Test that start() initializes the streaming client successfully."""
         # Arrange
@@ -368,28 +291,6 @@ class TestSnowflakeHighPerformanceStreamingClient:
             snowflake_config=sample_snowflake_config,
             connection_config=sample_snowflake_connection_config,
         )
-
-        # Mock private key handling
-        mock_key_content = b"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----"
-        mock_private_key = mocker.MagicMock()
-        mock_private_key.private_bytes.return_value = mock_key_content
-
-        mocker.patch("pathlib.Path.open", mocker.mock_open(read_data=mock_key_content))
-        mocker.patch(
-            "cryptography.hazmat.primitives.serialization.load_pem_private_key",
-            return_value=mock_private_key,
-        )
-
-        # Mock tempfile creation under tmp_path while returning real file descriptors.
-        real_mkstemp = tempfile.mkstemp
-        mock_mkstemp = mocker.patch("tempfile.mkstemp")
-        mock_mkstemp.side_effect = lambda suffix, prefix: real_mkstemp(
-            suffix=suffix,
-            prefix=prefix,
-            dir=tmp_path,
-        )
-
-        _install_snowflake_tempfile_stub(mocker)
 
         # Mock StreamingIngestClient to prevent real instantiation
         mock_streaming_client_class = mocker.patch(
@@ -405,48 +306,26 @@ class TestSnowflakeHighPerformanceStreamingClient:
         assert client.streaming_client is not None
         assert client.stats["client_created_at"] is not None
         mock_streaming_client_class.assert_called_once()
+        _, kwargs = mock_streaming_client_class.call_args
+        assert "profile_json" not in kwargs
+        assert kwargs["properties"]["private_key_file"] == (
+            sample_snowflake_connection_config.private_key_file
+        )
 
-    def test_start_creates_temporary_files_and_cleans_up(
+    def test_start_passes_profile_as_inline_properties(
         self,
         sample_snowflake_config,
         sample_snowflake_connection_config,
         mock_snowflake_streaming_client,
         mock_logfire,
         mocker,
-        tmp_path,
     ):
-        """Test that start() creates and cleans up temporary files."""
+        """Test that start() passes profile properties directly to the SDK."""
         # Arrange
         client = SnowflakeHighPerformanceStreamingClient(
             snowflake_config=sample_snowflake_config,
             connection_config=sample_snowflake_connection_config,
         )
-
-        # Mock private key handling
-        mock_key_content = b"-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----"
-        mock_private_key = mocker.MagicMock()
-        mock_private_key.private_bytes.return_value = mock_key_content
-
-        mocker.patch("pathlib.Path.open", mocker.mock_open(read_data=mock_key_content))
-        mocker.patch(
-            "cryptography.hazmat.primitives.serialization.load_pem_private_key",
-            return_value=mock_private_key,
-        )
-
-        # Mock tempfile creation under tmp_path while returning real file descriptors.
-        real_mkstemp = tempfile.mkstemp
-        mock_mkstemp = mocker.patch("tempfile.mkstemp")
-        created_paths: list[str] = []
-
-        def mkstemp_in_tmp_path(suffix: str, prefix: str):
-            fd, path = real_mkstemp(suffix=suffix, prefix=prefix, dir=tmp_path)
-            created_paths.append(path)
-            return fd, path
-
-        mock_mkstemp.side_effect = mkstemp_in_tmp_path
-        _install_snowflake_tempfile_stub(mocker)
-        mock_close = mocker.spy(os, "close")
-        mock_unlink = mocker.spy(os, "unlink")
 
         # Mock StreamingIngestClient
         mock_streaming_client_class = mocker.patch(
@@ -457,13 +336,13 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Act
         client.start()
 
-        # Assert - verify temp files were created and cleaned up
-        assert mock_mkstemp.call_count == 2
-        assert mock_close.call_count >= 2
-        assert mock_unlink.call_count == 2
-        for path in created_paths:
-            mock_unlink.assert_any_call(path)
-            assert not Path(path).exists()
+        # Assert
+        _, kwargs = mock_streaming_client_class.call_args
+        assert kwargs["properties"]["authorization_type"] == "JWT"
+        assert kwargs["properties"]["private_key_file"] == (
+            sample_snowflake_connection_config.private_key_file
+        )
+        assert "profile_json" not in kwargs
 
     def test_start_with_error_calls_stop(
         self,

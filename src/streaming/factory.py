@@ -36,7 +36,7 @@ def create_snowflake_client(
     """
     Create a Snowflake High-Performance streaming client.
 
-    Uses the High-Performance Snowpipe Streaming SDK (v1.0.2+) with PIPE objects
+    Uses the High-Performance Snowpipe Streaming SDK with PIPE objects
     for maximum throughput (~10 GB/s per table).
 
     Reference: https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-getting-started

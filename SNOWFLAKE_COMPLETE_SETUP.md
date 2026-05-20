@@ -31,6 +31,7 @@ Before starting, make sure you have:
 | ✅ Azure CLI | Authenticated with `az login` |
 | ✅ Python 3.13+ | With `uv` package manager |
 | ✅ Snowflake Account | With ACCOUNTADMIN access (for initial setup) |
+| ✅ Snowflake CLI | The `snow` command for key-pair auth checks |
 | ✅ Azure Event Hub | Namespace and topic configured |
 | ✅ Azure Storage Account | Optional, only for customer-managed external-volume Iceberg |
 | ✅ DuckDB (optional) | For direct Iceberg queries |
@@ -82,6 +83,10 @@ This creates two files in the `snowflake/` directory:
 | `rsa_key_pub_value.txt` | Public key (for Snowflake) | — |
 
 > 💡 **Tip**: Remember the password you set! You'll need it for `SNOWFLAKE_PRIVATE_KEY_PASSWORD` in your `.env` file.
+
+EvSnow passes the encrypted private-key file and passphrase directly to the
+Snowpipe Streaming SDK. It does not create an unencrypted temporary private-key
+file during startup.
 
 ### Verify the keys were created
 
@@ -298,6 +303,7 @@ ICEBERG_VERSION = 3;
 ### 4.2 Create the Streaming Pipe
 
 > ⚠️ **Important**: The high-performance Snowpipe Streaming SDK **requires** a PIPE object.
+> The checked-in EvSnow lockfile currently uses `snowpipe-streaming` `1.4.0`.
 
 ```sql
 CREATE OR REPLACE PIPE EVENTS_TABLE_PIPE AS
@@ -418,8 +424,19 @@ USE_HYBRID_TABLE=false
 # Install dependencies
 uv sync
 
+# Test Snowflake key-pair authentication
+set -a
+source .env
+set +a
+
+snow connection test \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-path "$SNOWFLAKE_PRIVATE_KEY_FILE"
+
 # Validate your configuration
-uv run python src/main.py validate-config
+uv run evsnow validate-config --show-rbac
 ```
 
 > ✅ You should see all checks passing.
@@ -434,26 +451,68 @@ uv run python src/main.py validate-config
 
 ```bash
 # Normal run
-uv run python src/main.py run
+uv run evsnow run
 
 # Dry run (no actual data ingestion)
-uv run python src/main.py run --dry-run
+uv run evsnow run --dry-run
 
 # With smart retry enabled
-uv run python src/main.py run --smart
+uv run evsnow run --smart
 ```
 
 ### Monitor Status
 
 ```bash
 # Check pipeline status
-uv run python src/main.py status
+uv run evsnow status
 
 # Show version
-uv run python src/main.py version
+uv run evsnow version
 ```
 
 > 🎉 **Success**: Events from your Event Hub topic are now streaming into the Snowflake Iceberg table!
+
+### Send and Check a Small Batch
+
+For a quick end-to-end check, start EvSnow in one shell:
+
+```bash
+SNOWFLAKE_1_BATCH=3 uv run evsnow run
+```
+
+Then send three messages from another shell:
+
+```bash
+RUN_ID="evsnow-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
+START_ID=$(date -u +%s)
+
+uv run python tools/eventhub_sender/main.py \
+  --count 3 \
+  --start-id "$START_ID" \
+  --batch-size 3 \
+  --partition-key "$RUN_ID" \
+  --payload "{\"run_id\":\"$RUN_ID\",\"purpose\":\"arrival-check\"}"
+```
+
+Check Snowflake for the same `run_id`:
+
+```bash
+snow sql -x \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+  --role "$SNOWFLAKE_ROLE" \
+  --warehouse "$SNOWFLAKE_WAREHOUSE" \
+  --database "$SNOWFLAKE_1_DATABASE" \
+  --schema "$SNOWFLAKE_1_SCHEMA" \
+  --format JSON \
+  -q "SELECT COUNT(*) AS rows_arrived
+      FROM ${SNOWFLAKE_1_DATABASE}.${SNOWFLAKE_1_SCHEMA}.${SNOWFLAKE_1_TABLE}
+      WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID';"
+```
+
+For this smoke test, `rows_arrived` should be `3`.
 
 ---
 
@@ -701,8 +760,8 @@ storage instead of the default Snowflake-managed internal storage.
 - [ ] Created Iceberg table `EVENTS_TABLE1`
 - [ ] Created Pipe `EVENTS_TABLE_PIPE`
 - [ ] Configured `.env` file
-- [ ] Validated config with `uv run python src/main.py validate-config`
-- [ ] Started pipeline with `uv run python src/main.py run`
+- [ ] Validated config with `uv run evsnow validate-config --show-rbac`
+- [ ] Started pipeline with `uv run evsnow run`
 
 ---
 

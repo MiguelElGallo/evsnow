@@ -23,7 +23,7 @@ See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
 - Snowflake account/role with permission to create/use the target database, schema, and pipe
 - Azure Event Hub namespace with read access (consumer group) and either `az login` or a connection string
 - Ability to run OpenSSL to generate RSA keys for Snowflake key-pair auth
-- `snowsql` (or Snowflake UI) to truncate tables/checkpoints when testing from scratch
+- Snowflake CLI `snow` (or Snowflake UI) to test key-pair auth and query Snowflake
 
 ## Install
 
@@ -75,6 +75,7 @@ SNOWFLAKE_WAREHOUSE=compute_wh
 SNOWFLAKE_DATABASE=INGESTION
 SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
+SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 
 # Control Table (for checkpointing)
 TARGET_DB=CONTROL
@@ -118,6 +119,21 @@ Generate RSA key pair for authentication:
 # Example: ALTER USER STREAMEV SET RSA_PUBLIC_KEY='MIIBIjANBgkqhki...';
 ```
 
+Test the same RSA key with Snowflake CLI:
+
+```bash
+snow connection test \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-path "$SNOWFLAKE_PRIVATE_KEY_FILE"
+```
+
+The `SNOWFLAKE_JWT` authenticator is required for private-key authentication.
+EvSnow passes `SNOWFLAKE_PRIVATE_KEY_FILE` and `SNOWFLAKE_PRIVATE_KEY_PASSWORD`
+directly to the Snowpipe Streaming SDK. It does not write an unencrypted copy
+of the private key to a temporary file.
+
 ### Azure authentication
 
 For Event Hub consumption, EvSnow uses `EVENTHUBNAME_{N}_CONNECTION_STRING` when it is set. Otherwise it uses the Azure CLI identity from `az login`; that identity needs `Azure Event Hubs Data Receiver` on the Event Hub or namespace.
@@ -156,8 +172,23 @@ When starting the pipeline **without existing checkpoints** (e.g., after truncat
 
 ```bash
 # Example: Starting fresh after truncating tables
-snowsql -q "truncate table ingestion.public.events_table1;"
-snowsql -q "truncate table control.public.ingestion_status;"
+snow sql -x \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+  --role "$SNOWFLAKE_ROLE" \
+  --warehouse "$SNOWFLAKE_WAREHOUSE" \
+  -q "TRUNCATE TABLE ingestion.public.events_table1;"
+
+snow sql -x \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+  --role "$SNOWFLAKE_ROLE" \
+  --warehouse "$SNOWFLAKE_WAREHOUSE" \
+  -q "TRUNCATE TABLE control.public.ingestion_status;"
 
 # Consumer will process based on STARTING_POSITION_ON_NO_CHECKPOINT setting
 uv run evsnow run
@@ -240,7 +271,9 @@ Get your token at [logfire.pydantic.dev](https://logfire.pydantic.dev)
 
 ### Snowpipe Streaming Configuration
 
-The pipeline uses Snowflake's high-performance Snowpipe Streaming SDK (requires PIPE object):
+The pipeline uses Snowflake's high-performance Snowpipe Streaming SDK with a
+PIPE object. The checked-in lockfile currently resolves `snowpipe-streaming` to
+`1.4.0`.
 
 ```bash
 # Add to .env
@@ -251,6 +284,10 @@ SNOWFLAKE_SCHEMA_NAME=PUBLIC
 ```
 
 One PIPE serves the target table, while EvSnow opens one Snowpipe Streaming channel per Event Hub partition. A batch containing mixed partitions is split before ingestion, sorted by sequence number within each partition, and sent to channels named `<base-channel>-p<sanitized-partition>`.
+
+Version `1.4.0` adds OAuth and Programmatic Access Token support in the SDK.
+EvSnow still defaults to JWT/RSA key-pair auth because that keeps the runtime
+configuration simple and works with Snowflake trial accounts.
 
 Dependencies are managed through `pyproject.toml` and the checked-in `uv.lock`. Use `uv sync --locked` when you need the exact locked versions, and refresh the lock only when intentionally changing dependencies.
 
