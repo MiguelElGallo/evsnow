@@ -87,7 +87,7 @@ class TestVersionCommand:
         result = cli_runner.invoke(app, ["version"])
 
         assert result.exit_code == 0
-        assert "EvSnow v0.1.0" in self._strip_ansi(result.stdout)
+        assert "EvSnow v0.1.1" in self._strip_ansi(result.stdout)
         assert "EventHub to Snowflake streaming pipeline" in result.stdout
         assert "Azure EventHub async consumer" in result.stdout
 
