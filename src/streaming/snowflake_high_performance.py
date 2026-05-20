@@ -19,7 +19,7 @@ from typing import Any
 
 import logfire
 
-# Snowflake High-Performance Streaming SDK (v1.1.0+)
+# Snowflake High-Performance Streaming SDK
 from snowflake.ingest.streaming import StreamingIngestClient
 from snowflake.ingest.streaming.channel_status import ChannelStatus
 
@@ -96,59 +96,40 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         """
         Build connection profile for StreamingIngestClient.
 
-        For the NEW high-performance architecture (v1.0.2+), the profile requires:
+        For the high-performance architecture, the profile requires:
         - user: Snowflake username
         - account: Account identifier (e.g., "ZZZZUUUU-YU88540")
         - url: Full Snowflake URL with port
-        - private_key_file: Path to PEM private key file (we write temp file in start())
+        - private_key_file: Path to PEM private key file
+        - private_key_passphrase: Optional passphrase for encrypted private keys
         - role: Role to use (optional)
 
         IMPORTANT: The profile does NOT include:
         - warehouse, database, schema (passed to StreamingIngestClient constructor instead)
         - host (use full 'url' instead)
-        - private_key content (use 'private_key_file' path instead)
 
         Reference:
-        https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-getting-started
+        https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-configurations
 
         Returns a dictionary with connection parameters including private key authentication.
         """
         logger.info("Building Snowflake connection profile for high-performance SDK")
 
         try:
-            # Load and decrypt private key to write to temp file later
-            from cryptography.hazmat.backends import default_backend
-            from cryptography.hazmat.primitives import serialization
-
             private_key_path = Path(self.connection_config.private_key_file).expanduser().resolve()
+            if not private_key_path.is_file():
+                raise FileNotFoundError(f"Private key file not found: {private_key_path}")
 
-            with private_key_path.open("rb") as key_file:
-                key_data = key_file.read()
-
-            # Decrypt the private key if password is provided
-            password = None
-            if self.connection_config.private_key_password:
-                password = self.connection_config.private_key_password.encode()
-
-            private_key_obj = serialization.load_pem_private_key(
-                key_data, password=password, backend=default_backend()
-            )
-
-            # Convert to unencrypted PEM format (high-performance SDK requires unencrypted key file)
-            private_key_pem = private_key_obj.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),  # No encryption for high-performance SDK
-            ).decode("utf-8")
-
-            # Build simplified profile for HIGH-PERFORMANCE SDK (v1.0.2+)
-            # Reference: https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe-streaming-high-performance-getting-started
             profile = {
+                "authorization_type": "JWT",
                 "user": self.connection_config.user,
                 "account": self.connection_config.account,
                 "url": f"https://{self.connection_config.account}.snowflakecomputing.com:443",
-                "private_key": private_key_pem,  # Will write to temp file in start() and replace with path
+                "private_key_file": str(private_key_path),
             }
+
+            if self.connection_config.private_key_password:
+                profile["private_key_passphrase"] = self.connection_config.private_key_password
 
             # Add role if specified
             if self.connection_config.role:
@@ -183,53 +164,41 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 # Build connection profile
                 profile = self._build_connection_profile()
 
-                # Create StreamingIngestClient using HIGH-PERFORMANCE SDK (v1.0.2+)
-                # Reference: https://gist.github.com/sfc-gh-chathomas/a7b06bb46907bead737954d53b3a8495
+                # Create StreamingIngestClient using the high-performance SDK.
                 client_name = f"evsnow_{self.client_name_suffix}"
                 logger.info(f"Creating High-Performance StreamingIngestClient: {client_name}")
 
-                private_key_pem = profile.pop("private_key")  # Remove from profile dict
+                pipe_name = self.connection_config.pipe_name
+                if not pipe_name:
+                    raise ValueError(
+                        "pipe_name is required for high-performance streaming. "
+                        "Set SNOWFLAKE_PIPE_NAME environment variable."
+                    )
 
-                from utils.snowflake import temporary_private_key_file, temporary_profile_file
+                self.streaming_client = StreamingIngestClient(
+                    client_name=client_name,
+                    db_name=self.snowflake_config.database,
+                    schema_name=self.snowflake_config.schema_name,
+                    pipe_name=pipe_name,
+                    properties=profile,
+                )
 
-                with temporary_private_key_file(private_key_pem) as key_path:
-                    profile["private_key_file"] = key_path
-                    with temporary_profile_file(profile) as profile_path:
-                        pipe_name = self.connection_config.pipe_name
-                        if not pipe_name:
-                            raise ValueError(
-                                "pipe_name is required for high-performance streaming. "
-                                "Set SNOWFLAKE_PIPE_NAME environment variable."
-                            )
-
-                        self.streaming_client = StreamingIngestClient(
-                            client_name=client_name,
-                            db_name=self.snowflake_config.database,
-                            schema_name=self.snowflake_config.schema_name,
-                            pipe_name=pipe_name,
-                            profile_json=profile_path,  # Pass file path, not JSON string
-                        )
-
-                        logger.info(
-                            f"✅ High-Performance StreamingIngestClient created: {client_name}"
-                        )
-                        logfire.info(
-                            "Snowflake StreamingIngestClient initialized (high-performance SDK v1.0.2+)",
-                            client_name=client_name,
-                            database=self.snowflake_config.database,
-                            schema=self.snowflake_config.schema_name,
-                            pipe=pipe_name,
-                            table=self.snowflake_config.table_name,
-                        )
+                logger.info(f"✅ High-Performance StreamingIngestClient created: {client_name}")
+                logfire.info(
+                    "Snowflake StreamingIngestClient initialized",
+                    client_name=client_name,
+                    database=self.snowflake_config.database,
+                    schema=self.snowflake_config.schema_name,
+                    pipe=pipe_name,
+                    table=self.snowflake_config.table_name,
+                )
 
                 # Ensure target table exists
                 self._ensure_target_table()
 
                 self.stats["client_created_at"] = datetime.now(UTC)
                 self._last_client_refresh_at = self.stats["client_created_at"]
-                logger.info(
-                    "✅ Snowflake streaming client started successfully (high-performance SDK v1.0.2+)"
-                )
+                logger.info("✅ Snowflake streaming client started successfully")
 
             except Exception as e:
                 logger.error(f"Failed to start Snowflake streaming client: {e}", exc_info=True)

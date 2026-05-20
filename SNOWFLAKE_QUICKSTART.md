@@ -4,6 +4,9 @@ This guide will walk you through setting up EvSnow to connect to Snowflake in 6 
 
 Official detailed documentation is available in [Snowflake key-pair authentication docs](https://docs.snowflake.com/en/user-guide/key-pair-auth).
 
+EvSnow uses Snowpipe Streaming through the checked-in `uv.lock`. The current
+lock resolves `snowpipe-streaming` to `1.4.0`.
+
 ## Prerequisites
 
 - Snowflake account with appropriate permissions (ACCOUNTADMIN or equivalent)
@@ -39,7 +42,7 @@ Run the automated key generation script:
 
 ### Step 2: Assign Public Key to Snowflake User
 
-1. Log into Snowflake (Web UI or SnowSQL)
+1. Log into Snowflake (Web UI or Snowflake CLI)
 2. Run this SQL command (replace placeholders):
 
 ```sql
@@ -273,6 +276,7 @@ SNOWFLAKE_WAREHOUSE=COMPUTE_WH                   # Your warehouse name
 SNOWFLAKE_DATABASE=MYDB                          # Your database
 SNOWFLAKE_SCHEMA_NAME=PUBLIC                     # Connection/default schema
 SNOWFLAKE_ROLE=DATA_ENGINEER                     # Optional: your role
+SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE            # Pipe created in Step 4
 
 # Control table configuration
 TARGET_DB=MYDB                                   # Database for control table
@@ -294,7 +298,24 @@ SNOWFLAKE_1_BATCH=1000                           # Batch size (leave as-is)
 
 ### Step 6: Verify Configuration
 
-Validate the environment file and RBAC guidance:
+First, test the RSA key with Snowflake CLI:
+
+```bash
+set -a
+source .env
+set +a
+
+snow connection test \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-path "$SNOWFLAKE_PRIVATE_KEY_FILE"
+```
+
+Private-key authentication requires `--authenticator SNOWFLAKE_JWT`. Without it,
+Snowflake CLI will reject the connection before it reaches Snowflake.
+
+Then validate the environment file and RBAC guidance:
 
 ```bash
 uv run evsnow validate-config --show-rbac
@@ -323,6 +344,7 @@ uv run evsnow validate-config
 **What this does:**
 
 - Tests Snowflake connection using key-pair authentication
+- Passes the encrypted private-key file and passphrase directly to the Snowpipe Streaming SDK
 - Creates the `INGESTION_STATUS` hybrid table (if it doesn't exist)
 - Verifies permissions
 
@@ -397,7 +419,16 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
 ### Still having issues?
 
 1. Check configuration and RBAC guidance: `uv run evsnow validate-config --show-rbac`
-2. Verify Snowflake connectivity: `snowsql -a <account> -u <user> --private-key-path snowflake/rsa_key_encrypted.p8`
+2. Verify Snowflake connectivity:
+
+   ```bash
+   snow connection test \
+     --account "$SNOWFLAKE_ACCOUNT" \
+     --user "$SNOWFLAKE_USER" \
+     --authenticator SNOWFLAKE_JWT \
+     --private-key-path "$SNOWFLAKE_PRIVATE_KEY_FILE"
+   ```
+
 3. Check the full setup guide: [snowflake_setup.md](./snowflake_setup.md)
 
 ## Key Files Reference
@@ -423,6 +454,9 @@ GRANT INSERT, SELECT, UPDATE ON TABLE <TARGET_DB>.<TARGET_SCHEMA>.INGESTION_STAT
    ```bash
    chmod 600 snowflake/rsa_key_encrypted.p8
    ```
+
+   Keep the key encrypted. EvSnow and Snowpipe Streaming SDK `1.4.0` can read
+   the encrypted key file with `SNOWFLAKE_PRIVATE_KEY_PASSWORD`.
 
 3. **Rotate keys regularly:**
    - Generate new keys every 90 days

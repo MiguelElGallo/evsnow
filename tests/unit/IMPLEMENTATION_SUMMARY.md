@@ -84,8 +84,19 @@ sys.modules['tenacity'] = MagicMock()
 ### Fixture-Based Mocking
 Configuration objects provided via fixtures:
 - Mock classes with `model_copy()` method for pydantic compatibility
-- Temporary file creation for private key validation
+- Temporary private-key fixture paths for validation
 - Realistic test data
+
+High-performance Snowpipe Streaming client tests now assert the current SDK
+startup shape:
+
+- `StreamingIngestClient(..., properties=profile)`
+- `authorization_type="JWT"`
+- `private_key_file=<resolved key path>`
+- optional `private_key_passphrase`
+
+They should not expect `profile_json` files or unencrypted temporary private-key
+files.
 
 ### Patch-Based Mocking
 Per-test mocking using `@patch`:
