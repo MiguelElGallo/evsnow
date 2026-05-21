@@ -7,6 +7,7 @@ Video: Click the image above for a walkthrough of this repo.
 [![Tests](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml)
 [![CI/CD Pipeline](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml)
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/MiguelElGallo/evsnow?utm_source=badge)
 Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
 Now supports streaming directly to Snowflake-managed Iceberg tables.
