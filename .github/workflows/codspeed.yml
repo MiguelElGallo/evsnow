@@ -18,7 +18,7 @@ permissions:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    runs-on: codspeed-macro
 
     steps:
       - name: Checkout code
@@ -40,5 +40,5 @@ jobs:
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          mode: simulation
+          mode: walltime
           run: uv run pytest tests/benchmarks/ --codspeed
