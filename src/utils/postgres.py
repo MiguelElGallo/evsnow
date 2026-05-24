@@ -1,6 +1,7 @@
 """Postgres utilities for control table storage."""
 
 import contextlib
+import hashlib
 import json
 import logging
 import time
@@ -30,6 +31,12 @@ def _checkpoint_value(waterlevel: Any, metadata: Any) -> dict[str, Any]:
 
 def _ownership_table_name(control_table: str) -> str:
     return f"{control_table}_ownership"
+
+
+def _advisory_lock_key(*parts: str) -> int:
+    lock_name = ".".join(parts)
+    digest = hashlib.blake2b(lock_name.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)
 
 
 def _get_cache_key(config: PostgresConnectionConfig, database: str) -> str:
@@ -311,34 +318,44 @@ def get_partition_checkpoints(
 
 
 def _ensure_postgres_ownership_table(cursor: Any, schema_name: str, table_name: str) -> None:
-    cursor.execute(
-        sql.SQL(
-            """
-            CREATE TABLE IF NOT EXISTS {}.{} (
-                fully_qualified_namespace TEXT NOT NULL,
-                eventhub_name TEXT NOT NULL,
-                consumer_group TEXT NOT NULL,
-                target_db TEXT NOT NULL,
-                target_schema TEXT NOT NULL,
-                target_table TEXT NOT NULL,
-                partition_id TEXT NOT NULL,
-                owner_id TEXT NOT NULL,
-                etag TEXT NOT NULL,
-                last_modified_time DOUBLE PRECISION NOT NULL,
-                ts_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (
-                    fully_qualified_namespace,
-                    eventhub_name,
-                    consumer_group,
-                    target_db,
-                    target_schema,
-                    target_table,
-                    partition_id
+    lock_key = _advisory_lock_key("evsnow", schema_name, table_name)
+    cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+    try:
+        # Concurrent CREATE TABLE IF NOT EXISTS can still race on Postgres catalog
+        # rows (for example pg_type) when fresh consumers start together. A
+        # session advisory lock serializes only this lazy DDL path while keeping
+        # normal checkpoint writes unlocked.
+        # https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS
+        cursor.execute(
+            sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {}.{} (
+                    fully_qualified_namespace TEXT NOT NULL,
+                    eventhub_name TEXT NOT NULL,
+                    consumer_group TEXT NOT NULL,
+                    target_db TEXT NOT NULL,
+                    target_schema TEXT NOT NULL,
+                    target_table TEXT NOT NULL,
+                    partition_id TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    etag TEXT NOT NULL,
+                    last_modified_time DOUBLE PRECISION NOT NULL,
+                    ts_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (
+                        fully_qualified_namespace,
+                        eventhub_name,
+                        consumer_group,
+                        target_db,
+                        target_schema,
+                        target_table,
+                        partition_id
+                    )
                 )
-            )
-            """
-        ).format(sql.Identifier(schema_name), sql.Identifier(table_name))
-    )
+                """
+            ).format(sql.Identifier(schema_name), sql.Identifier(table_name))
+        )
+    finally:
+        cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
 
 
 def list_partition_ownership(

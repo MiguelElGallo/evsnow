@@ -1,10 +1,11 @@
 """Tests for Postgres control table utilities."""
 
-import pytest
 from unittest.mock import MagicMock, Mock
 
-from utils.config_models import PostgresConnectionConfig
+import pytest
+
 from utils import postgres as pg
+from utils.config_models import PostgresConnectionConfig
 
 
 def test_get_connection_password_auth_uses_password(mocker):
@@ -107,24 +108,65 @@ def test_insert_partition_checkpoint_executes(monkeypatch):
     assert executed.get("called") is True
 
 
+def test_ensure_postgres_ownership_table_uses_advisory_lock():
+    """Ownership table DDL is serialized for concurrent fresh consumers."""
+    cursor = MagicMock()
+
+    pg._ensure_postgres_ownership_table(cursor, "public", "ingestion_status_ownership")
+
+    assert cursor.execute.call_count == 3
+    lock_query, lock_params = cursor.execute.call_args_list[0].args
+    create_query = cursor.execute.call_args_list[1].args[0]
+    unlock_query, unlock_params = cursor.execute.call_args_list[2].args
+
+    assert lock_query == "SELECT pg_advisory_lock(%s)"
+    assert unlock_query == "SELECT pg_advisory_unlock(%s)"
+    assert lock_params == unlock_params
+    assert isinstance(lock_params[0], int)
+    assert "CREATE TABLE IF NOT EXISTS" in str(create_query)
+
+
+def test_ensure_postgres_ownership_table_unlocks_after_ddl_failure():
+    """The session advisory lock is released even if ownership DDL fails."""
+    calls = []
+
+    class DummyCursor:
+        def execute(self, query, params=None):
+            calls.append((query, params))
+            if len(calls) == 2:
+                raise RuntimeError("ddl failed")
+
+    with pytest.raises(RuntimeError, match="ddl failed"):
+        pg._ensure_postgres_ownership_table(
+            DummyCursor(),
+            "public",
+            "ingestion_status_ownership",
+        )
+
+    assert len(calls) == 3
+    assert calls[0][0] == "SELECT pg_advisory_lock(%s)"
+    assert calls[2][0] == "SELECT pg_advisory_unlock(%s)"
+    assert calls[0][1] == calls[2][1]
+
+
 def test_get_connection_azure_token_auth_success(mocker):
     """Ensure azure_token auth retrieves token and passes it to psycopg.connect."""
     # Reset the global azure credential cache to ensure clean test
     pg._azure_credential = None
-    
+
     dummy_conn = MagicMock()
     dummy_conn.closed = False
 
     mock_connect = mocker.patch("utils.postgres.psycopg.connect", return_value=dummy_conn)
-    
+
     # Mock the Azure credential and token
     mock_token = Mock()
     mock_token.token = "mock-azure-token-12345"
     mock_token.expires_on = 1234567890
-    
+
     mock_credential = Mock()
     mock_credential.get_token = Mock(return_value=mock_token)
-    
+
     mock_default_azure_credential = mocker.patch(
         "utils.postgres.DefaultAzureCredential",
         return_value=mock_credential
@@ -155,15 +197,15 @@ def test_get_connection_azure_token_auth_failure(mocker):
     """Ensure azure_token auth raises exception when token acquisition fails."""
     # Reset the global azure credential cache to ensure clean test
     pg._azure_credential = None
-    
+
     # Mock psycopg.connect so we don't make real connection attempts
     mocker.patch("utils.postgres.psycopg.connect")
-    
+
     mock_credential = Mock()
     mock_credential.get_token = Mock(
         side_effect=Exception("Failed to acquire Azure token")
     )
-    
+
     mocker.patch(
         "utils.postgres.DefaultAzureCredential",
         return_value=mock_credential
@@ -180,7 +222,7 @@ def test_get_connection_azure_token_auth_failure(mocker):
     # Should raise an exception when trying to get connection
     with pytest.raises(Exception) as exc_info:
         pg.get_connection(config, "control_db", use_cache=False)
-    
+
     assert "Failed to acquire Azure token" in str(exc_info.value)
     mock_credential.get_token.assert_called_once_with(
         "https://ossrdbms-aad.database.windows.net/.default"
