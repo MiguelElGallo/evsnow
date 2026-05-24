@@ -161,10 +161,10 @@ To force Azure CLI-only auth for local testing, opt in explicitly:
 EVENTHUBNAME_1_CREDENTIAL_MODE=azure_cli
 ```
 
-Or provide a connection string in `.env`:
+Or provide a least-privilege Listen connection string in `.env`:
 
 ```bash
-EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
+EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=EvSnowListen;SharedAccessKey=<listen-key>"
 ```
 
 Reference:

@@ -158,14 +158,16 @@ def check_credentials() -> None:
         console.print(f"   [dim]{e!s}[/dim]\n")
 
     # Managed Identity
+    has_msi = False
     try:
         _msi_cred = ManagedIdentityCredential()
+        has_msi = True
         console.print("✅ [yellow bold]Managed Identity[/yellow bold] - Available")
         console.print(
             "   [dim]Available for services that use DefaultAzureCredential, such as Postgres azure_token auth.[/dim]"
         )
         console.print(
-            "   [yellow]Event Hub consumption does not use Managed Identity in the current runtime path.[/yellow]\n"
+            "   [yellow]Event Hub consumption may use Managed Identity when credential_mode=default.[/yellow]\n"
         )
     except Exception:
         console.print("❌ [dim]Managed Identity - Not available[/dim]")
@@ -184,9 +186,9 @@ def check_credentials() -> None:
     console.print("\n[bold yellow]⚠️  CONCLUSION:[/bold yellow]")
     if has_msi:
         console.print(
-            "[yellow]• System will use MANAGED IDENTITY for EventHub authentication[/yellow]"
+            "[yellow]• Event Hub receiver may use MANAGED IDENTITY through DefaultAzureCredential[/yellow]"
         )
-        console.print("[yellow]• Your Azure CLI user permissions are NOT relevant[/yellow]")
+        console.print("[yellow]• Verify both managed identity and Azure CLI RBAC if configs differ[/yellow]")
         console.print("\n[bold]Next Steps:[/bold]")
         console.print("1. Identify the Managed Identity resource in Azure Portal")
         console.print("2. Go to EventHub Namespace → Access Control (IAM)")

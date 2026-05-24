@@ -11,7 +11,6 @@ Documentation: https://docs.snowflake.com/user-guide/snowpipe-streaming/snowpipe
 """
 
 import logging
-import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -209,6 +208,21 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 logfire.error("Failed to start Snowflake client", error=str(e))
                 self.stop()
                 raise
+
+    def _close_with_flush(self, closeable: Any) -> None:
+        """Close SDK objects while preserving flush semantics across SDK versions."""
+        close = getattr(closeable, "close", None)
+        if not callable(close):
+            return
+
+        try:
+            close(wait_for_flush=True)
+        except TypeError:
+            # Some Snowpipe Streaming SDK versions expose close(wait_for_flush=True),
+            # while older Python bindings only expose close(). The append path already
+            # waits for commits before checkpoints advance:
+            # https://docs.snowflake.com/en/user-guide/snowpipe-streaming-sdk-python/reference/latest/api/snowflake/ingest/streaming/index
+            close()
 
     def stop(self) -> None:
         """Stop the Snowflake streaming client and clean up resources."""
@@ -815,7 +829,6 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                 )
 
             # Insert rows into the channel with a single SDK batch append.
-            flush_result = None
             try:
                 offset_tokens = [
                     self._offset_token_for_row(row, partition_id)
@@ -858,7 +871,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
                     f"Appended {rows_inserted} rows to channel {channel_name} (partition {partition_id})"
                 )
 
-                flush_result = self._wait_for_channel_commit(
+                self._wait_for_channel_commit(
                     channel,
                     channel_name,
                     append_offset_tokens[-1],

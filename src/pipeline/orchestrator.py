@@ -17,7 +17,6 @@ import logging
 import os
 import re
 import signal
-from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 

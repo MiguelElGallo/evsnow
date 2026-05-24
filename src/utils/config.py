@@ -271,13 +271,6 @@ class EvSnowConfig(BaseSettings):
                     event_hub_data[hub_num] = {}
                 event_hub_data[hub_num][field_name] = value
 
-            match = event_hub_starting_position_pattern.match(key)
-            if match:
-                hub_num = match.group(1)
-                if hub_num not in event_hub_data:
-                    event_hub_data[hub_num] = {}
-                event_hub_data[hub_num]["starting_position_on_no_checkpoint"] = value
-
         # Create EventHubConfig instances with consumer groups
         for hub_num, data in event_hub_data.items():
             if "name" in data:  # Only create if we have a name

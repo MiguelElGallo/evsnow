@@ -14,6 +14,11 @@ class EventHubConfig(BaseModel):
     connection_string: str | None = None
     consumer_group: str = Field(..., description="Consumer group name (required)")
 
+    @property
+    def use_connection_string(self) -> bool:
+        """Return whether this hub should authenticate with a connection string."""
+        return self.connection_string is not None
+
     max_batch_size: int = 1000
     max_wait_time: int = 60
     prefetch_count: int = 300
