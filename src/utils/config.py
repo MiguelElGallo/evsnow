@@ -283,8 +283,8 @@ class EvSnowConfig(BaseSettings):
                     **data,
                     "namespace": self.eventhub_namespace,
                 }
-                self.event_hubs[f"EVENTHUBNAME_{hub_num}"] = EventHubConfig(
-                    **event_hub_kwargs,
+                self.event_hubs[f"EVENTHUBNAME_{hub_num}"] = EventHubConfig.model_validate(
+                    event_hub_kwargs
                 )
 
         # Parse Snowflake configurations

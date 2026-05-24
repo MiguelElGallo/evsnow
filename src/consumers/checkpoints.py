@@ -531,6 +531,8 @@ class DatabaseCheckpointStore(CheckpointStore):
             else:
                 offset_value = checkpoint_value
                 sequence_number = checkpoint_value
+            if sequence_number is None:
+                sequence_number = offset_value if offset_value is not None else 0
 
             checkpoint = {
                 "fully_qualified_namespace": fully_qualified_namespace,

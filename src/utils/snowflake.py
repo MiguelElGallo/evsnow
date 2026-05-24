@@ -597,7 +597,7 @@ def get_partition_checkpoints(
     control_db: str | None = None,
     control_schema: str | None = None,
     control_table: str | None = None,
-) -> dict[str, int] | None:
+) -> dict[str, dict[str, Any]] | None:
     """
     Retrieve the latest checkpoint for each partition.
 
@@ -613,7 +613,7 @@ def get_partition_checkpoints(
         control_table: Control table name (default: INGESTION_STATUS)
 
     Returns:
-        Dictionary mapping partition_id to waterlevel, or None if no checkpoints found
+        Dictionary mapping partition_id to checkpoint metadata, or None if no checkpoints found
 
     Raises:
         Exception: If query fails
@@ -692,8 +692,7 @@ def get_partition_checkpoints(
             return None
 
         partition_checkpoints = {
-            row[0]: _checkpoint_value(row[1], row[2] if len(row) > 2 else None)
-            for row in results
+            row[0]: _checkpoint_value(row[1], row[2] if len(row) > 2 else None) for row in results
         }
 
         logger.info(
@@ -711,7 +710,9 @@ def get_partition_checkpoints(
 def _ensure_snowflake_ownership_table(cursor: Any, ownership_table_fqn: str) -> None:
     database_name, schema_name, table_name = ownership_table_fqn.split(".", maxsplit=2)
 
-    cursor.execute(f"SHOW HYBRID TABLES LIKE '{table_name}' IN SCHEMA {database_name}.{schema_name}")
+    cursor.execute(
+        f"SHOW HYBRID TABLES LIKE '{table_name}' IN SCHEMA {database_name}.{schema_name}"
+    )
     if cursor.fetchall():
         return
 
@@ -853,12 +854,12 @@ def claim_partition_ownership(
     ownership_table_fqn = f"{actual_control_db}.{actual_control_schema}.{ownership_table}"
 
     identifiers = [
-            actual_control_db,
-            actual_control_schema,
-            ownership_table,
-            target_db,
-            target_schema,
-            target_table,
+        actual_control_db,
+        actual_control_schema,
+        ownership_table,
+        target_db,
+        target_schema,
+        target_table,
     ]
     if config.warehouse:
         identifiers.append(config.warehouse)

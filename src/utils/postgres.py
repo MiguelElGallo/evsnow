@@ -263,7 +263,7 @@ def get_partition_checkpoints(
     control_db: str | None = None,
     control_schema: str | None = None,
     control_table: str | None = None,
-) -> dict[str, int] | None:
+) -> dict[str, dict[str, Any]] | None:
     if config is None:
         config = PostgresConnectionConfig()
 
@@ -305,8 +305,7 @@ def get_partition_checkpoints(
         return None
 
     partition_checkpoints = {
-        row[0]: _checkpoint_value(row[1], row[2] if len(row) > 2 else None)
-        for row in results
+        row[0]: _checkpoint_value(row[1], row[2] if len(row) > 2 else None) for row in results
     }
     logger.info(
         "Retrieved partition checkpoints: %s for %s/%s",

@@ -188,7 +188,9 @@ def check_credentials() -> None:
         console.print(
             "[yellow]• Event Hub receiver may use MANAGED IDENTITY through DefaultAzureCredential[/yellow]"
         )
-        console.print("[yellow]• Verify both managed identity and Azure CLI RBAC if configs differ[/yellow]")
+        console.print(
+            "[yellow]• Verify both managed identity and Azure CLI RBAC if configs differ[/yellow]"
+        )
         console.print("\n[bold]Next Steps:[/bold]")
         console.print("1. Identify the Managed Identity resource in Azure Portal")
         console.print("2. Go to EventHub Namespace → Access Control (IAM)")

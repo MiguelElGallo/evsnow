@@ -905,7 +905,9 @@ class EventHubAsyncConsumer:
                             f"✅ {message_count} remaining messages processed and checkpoints updated"
                         )
                     else:
-                        logger.error("❌ Remaining batch failed during shutdown; leaving it uncheckpointed")
+                        logger.error(
+                            "❌ Remaining batch failed during shutdown; leaving it uncheckpointed"
+                        )
                 except Exception as e:
                     logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
             else:
@@ -1108,7 +1110,9 @@ class EventHubAsyncConsumer:
         return int(checkpoint_value)
 
     async def _run_message_processor(self, messages: list[EventHubMessage]) -> bool:
-        processor_call = self.message_processor.__call__ if callable(self.message_processor) else None
+        processor_call = (
+            self.message_processor.__call__ if callable(self.message_processor) else None
+        )
         async_call = inspect.iscoroutinefunction(
             self.message_processor
         ) or inspect.iscoroutinefunction(processor_call)
@@ -1376,17 +1380,13 @@ class EventHubAsyncConsumer:
                     return True
                 else:
                     logger.error("❌ Message processor returned failure")
-                    logfire.error(
-                        "Message processor returned failure", batch_size=len(messages)
-                    )
+                    logfire.error("Message processor returned failure", batch_size=len(messages))
                     span.set_attribute("processor_failure", True)
                     return False
 
             except Exception as e:
                 logger.error(f"❌ Error processing batch: {e}", exc_info=True)
-                logfire.error(
-                    "Batch processing error", error=str(e), batch_size=len(messages)
-                )
+                logfire.error("Batch processing error", error=str(e), batch_size=len(messages))
                 span.set_attribute("error", str(e))
                 return False
 

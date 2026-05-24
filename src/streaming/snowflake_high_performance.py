@@ -367,8 +367,11 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             return
 
         now = datetime.now(UTC)
-        if not force and self._last_channel_status_check_at is not None:
-            elapsed = (now - self._last_channel_status_check_at).total_seconds()
+        last_channel_status_check_at = self._last_channel_status_check_at_by_channel.get(
+            channel_name
+        )
+        if not force and last_channel_status_check_at is not None:
+            elapsed = (now - last_channel_status_check_at).total_seconds()
             if elapsed < interval:
                 return
 
@@ -400,6 +403,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
         self.stats["channel_status_checks"] += 1
         self.stats["last_channel_status_check"] = now
         self.stats["last_channel_status_code"] = status.status_code
+        self._last_channel_status_check_at_by_channel[channel_name] = now
 
         logger.info(
             "Channel status: name=%s status=%s rows_inserted=%s rows_parsed=%s rows_error=%s",
@@ -831,8 +835,7 @@ class SnowflakeHighPerformanceStreamingClient(SnowflakeStreamingClientBase):
             # Insert rows into the channel with a single SDK batch append.
             try:
                 offset_tokens = [
-                    self._offset_token_for_row(row, partition_id)
-                    for row in data_batch
+                    self._offset_token_for_row(row, partition_id) for row in data_batch
                 ]
                 committed_before_append = channel.get_latest_committed_offset_token()
                 rows_to_append = [

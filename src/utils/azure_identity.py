@@ -7,7 +7,7 @@ authentication.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from azure.identity.aio import AzureCliCredential, DefaultAzureCredential
@@ -97,4 +97,4 @@ async def build_eventhub_cli_credential(
         logger=logger,
         credential_mode="azure_cli",
     )
-    return credential, expires_on
+    return cast("AzureCliCredential", credential), expires_on
