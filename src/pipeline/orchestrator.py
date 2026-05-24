@@ -141,6 +141,7 @@ class PipelineMapping:
                 control_table=self.pipeline_config.target_table,
                 control_table_backend=self.pipeline_config.control_table_backend,
                 control_postgres_config=self.pipeline_config.control_postgres,
+                control_ownership_mode=self.pipeline_config.control_ownership_mode,
                 capture_messages=bool(getattr(self.pipeline_config, "capture_messages", False)),
                 capture_messages_dir=str(
                     getattr(self.pipeline_config, "capture_messages_dir", "messages")

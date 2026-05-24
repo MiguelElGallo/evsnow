@@ -1074,6 +1074,27 @@ class TestEvSnowConfig:
         assert config.target_schema == "public"
         assert config.target_table == "ingestion_status"
 
+    def test_local_single_consumer_ownership_mode_opt_in(self, monkeypatch):
+        """Test explicit Snowflake checkpoint smoke ownership mode opt-in."""
+        monkeypatch.setenv("CONTROL_OWNERSHIP_MODE", "local_single_consumer_smoke")
+
+        config = EvSnowConfig(eventhub_namespace="test.servicebus.windows.net")
+
+        assert config.control_ownership_mode == "local_single_consumer_smoke"
+
+    def test_local_single_consumer_ownership_mode_requires_snowflake_backend(self, monkeypatch):
+        """Test diagnostic ownership mode is limited to Snowflake checkpoint smoke tests."""
+        monkeypatch.setenv("CONTROL_PG_HOST", "localhost")
+        monkeypatch.setenv("CONTROL_PG_USER", "pguser")
+        monkeypatch.setenv("CONTROL_PG_PASSWORD", "pgpass")
+
+        with pytest.raises(ValueError, match="local_single_consumer_smoke"):
+            EvSnowConfig(
+                eventhub_namespace="test.servicebus.windows.net",
+                control_table_backend="postgres",
+                control_ownership_mode="local_single_consumer_smoke",
+            )
+
 
 class TestLoadConfig:
     """Tests for load_config function."""

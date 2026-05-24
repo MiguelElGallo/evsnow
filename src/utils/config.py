@@ -138,6 +138,14 @@ class EvSnowConfig(BaseSettings):
         validation_alias="USE_HYBRID_TABLE",
         description="Use Hybrid Table for control table (requires paid Snowflake account)",
     )
+    control_ownership_mode: Literal["durable", "local_single_consumer_smoke"] = Field(
+        default="durable",
+        validation_alias="CONTROL_OWNERSHIP_MODE",
+        description=(
+            "Partition ownership mode. durable uses the configured control backend; "
+            "local_single_consumer_smoke keeps ownership in memory and persists only checkpoints."
+        ),
+    )
     control_table_backend: Literal["snowflake", "postgres"] = Field(
         default="snowflake",
         validation_alias="CONTROL_TABLE_BACKEND",
@@ -371,9 +379,25 @@ class EvSnowConfig(BaseSettings):
             return v.strip().lower()
         return v
 
+    @field_validator("control_ownership_mode", mode="before")
+    @classmethod
+    def normalize_control_ownership_mode(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
     @model_validator(mode="after")
     def validate_mappings_exist(self):
         """Validate that all mappings reference existing configurations."""
+        if (
+            self.control_ownership_mode == "local_single_consumer_smoke"
+            and self.control_table_backend != "snowflake"
+        ):
+            raise ValueError(
+                "CONTROL_OWNERSHIP_MODE=local_single_consumer_smoke is only valid with "
+                "CONTROL_TABLE_BACKEND=snowflake"
+            )
+
         for mapping in self.mappings:
             if mapping.event_hub_key not in self.event_hubs:
                 raise ValueError(

@@ -107,6 +107,10 @@ Postgres control table notes:
 - When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
 - When `CONTROL_PG_AUTH_MODE=azure_token`, the app uses `DefaultAzureCredential` and passes the access token as the password; `CONTROL_PG_PASSWORD` is ignored. Ensure the Azure AD principal exists on the server and has access to the database/schema/table.
 
+Snowflake control table notes:
+- `CONTROL_OWNERSHIP_MODE=durable` is the production mode. With `CONTROL_TABLE_BACKEND=snowflake`, durable Event Hubs partition ownership requires a Snowflake Hybrid Table because standard-table primary and unique constraints are not enforced.
+- `CONTROL_OWNERSHIP_MODE=local_single_consumer_smoke` is only for a local single-consumer smoke test when Hybrid Tables are unavailable. It keeps partition ownership in memory while persisting checkpoints to a standard Snowflake table, so it does not validate multi-consumer ownership or failover.
+
 ### Snowflake authentication
 
 Generate RSA key pair for authentication:

@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,11 +27,11 @@ from consumers.eventhub import (
     MessageBatch,
     PostgresCheckpointManager,
     PostgresCheckpointStore,
+    SingleConsumerSnowflakeCheckpointStore,
     SnowflakeCheckpointManager,
     SnowflakeCheckpointStore,
     _convert_bytes_to_str,
 )
-
 
 # ============================================================================
 # Tests for BytesEncoder
@@ -720,6 +720,51 @@ class TestSnowflakeCheckpointStore:
         mock_manager.claim_ownership.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_single_consumer_store_keeps_ownership_local(self):
+        """Test local ownership mode avoids Snowflake durable ownership calls."""
+        mock_manager = MagicMock()
+        store = SingleConsumerSnowflakeCheckpointStore(mock_manager)
+        ownership = {
+            "fully_qualified_namespace": "test.servicebus.windows.net",
+            "eventhub_name": "test-hub",
+            "consumer_group": "test-group",
+            "partition_id": "0",
+            "owner_id": "owner-1",
+        }
+
+        claimed = await store.claim_ownership([ownership])
+        listed = await store.list_ownership(
+            "test.servicebus.windows.net",
+            "test-hub",
+            "test-group",
+        )
+
+        assert len(claimed) == 1
+        assert claimed[0]["partition_id"] == "0"
+        assert "etag" in claimed[0]
+        assert listed == claimed
+        mock_manager.claim_ownership.assert_not_called()
+        mock_manager.list_ownership.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_single_consumer_store_rejects_stale_etag(self):
+        """Test local ownership honors the SDK etag compare-and-set shape."""
+        store = SingleConsumerSnowflakeCheckpointStore(MagicMock())
+        ownership = {
+            "fully_qualified_namespace": "test.servicebus.windows.net",
+            "eventhub_name": "test-hub",
+            "consumer_group": "test-group",
+            "partition_id": "0",
+            "owner_id": "owner-1",
+        }
+
+        claimed = await store.claim_ownership([ownership])
+        stale_claim = {**ownership, "owner_id": "owner-2", "etag": "stale"}
+
+        assert claimed
+        assert await store.claim_ownership([stale_claim]) == []
+
+    @pytest.mark.asyncio
     async def test_update_checkpoint_via_sdk(self, mocker):
         """Test updating checkpoint through SDK interface."""
         mock_manager = MagicMock()
@@ -906,9 +951,96 @@ class TestEventHubAsyncConsumer:
         assert consumer.target_table == "TEST_TABLE"
         assert consumer.batch_size == 100
         assert consumer.batch_timeout_seconds == 60
+
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_active_batch_processing(self, sample_eventhub_config):
+        """Test shutdown waits before downstream clients are closed."""
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+        consumer.running = True
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        consumer.client = mock_client
+        consumer.checkpoint_manager = MagicMock()
+
+        await consumer._processing_lock.acquire()
+        stop_task = asyncio.create_task(consumer.stop())
+        await asyncio.sleep(0)
+
+        mock_client.close.assert_not_called()
+
+        consumer._processing_lock.release()
+        await stop_task
+
+        mock_client.close.assert_awaited_once()
         assert consumer.running is False
         assert consumer.client is None
         assert consumer.checkpoint_manager is None
+
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_active_on_event_before_final_drain(
+        self, sample_eventhub_config
+    ):
+        """Test shutdown waits for already-dispatched callbacks before final batch drain."""
+        processed_sequences = []
+
+        def mock_processor(messages):
+            processed_sequences.extend(message.sequence_number for message in messages)
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+            batch_size=10,
+        )
+        consumer.running = True
+        consumer.current_batch = MessageBatch(max_size=10, max_wait_seconds=60)
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        consumer.client = mock_client
+        consumer.checkpoint_manager = MagicMock()
+
+        context = MagicMock()
+        context.partition_id = "0"
+        context.update_checkpoint = AsyncMock()
+
+        event = MagicMock()
+        event.body_as_str.return_value = '{"test": "data"}'
+        event.enqueued_time = datetime.now(UTC)
+        event.properties = {}
+        event.system_properties = {}
+        event.sequence_number = 100
+        event.offset = "12345"
+
+        await consumer._batch_lock.acquire()
+        event_task = asyncio.create_task(consumer._on_event(context, event))
+        await asyncio.sleep(0)
+
+        stop_task = asyncio.create_task(consumer.stop())
+        await asyncio.sleep(0)
+
+        mock_client.close.assert_not_called()
+        context.update_checkpoint.assert_not_called()
+
+        consumer._batch_lock.release()
+        await asyncio.gather(event_task, stop_task)
+
+        assert processed_sequences == [100]
+        context.update_checkpoint.assert_awaited_once_with(event)
+        mock_client.close.assert_awaited_once()
+        assert consumer.client is None
 
     @pytest.mark.asyncio
     async def test_start_initializes_checkpoint_manager(

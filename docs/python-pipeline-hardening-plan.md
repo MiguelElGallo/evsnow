@@ -52,6 +52,7 @@ Scope:
 - Added Snowflake and Postgres ownership list/claim helpers.
 - Snowflake ownership requires a Hybrid Table with an enforced primary key for safe compare-and-set claims.
 - If an existing Snowflake ownership table is a standard table, setup fails closed with migration guidance.
+- A `CONTROL_OWNERSHIP_MODE=local_single_consumer_smoke` diagnostic path keeps ownership in memory while persisting Snowflake checkpoints to a standard table; it is only for single-consumer smoke tests when Hybrid Tables are unavailable.
 - Postgres ownership uses primary-key-backed upsert/update semantics.
 - Checkpoint backend calls are offloaded with `asyncio.to_thread(...)` behind manager-level I/O locks.
 - Checkpoint loads fail closed instead of silently starting from an unsafe position.
@@ -101,8 +102,10 @@ Gate 5 - Verification And Handoff:
 - Document that Snowflake ownership uses a Hybrid Table for enforced primary-key claims; operators without Hybrid Table support/privileges should use Postgres control tables or migrate/drop an existing standard ownership table before enabling Snowflake ownership.
 
 Latest live-smoke status:
-- Full mocked test suite passes: `405 passed`, with 2 existing warnings.
+- Full mocked test suite passes: `415 passed`, with 2 existing warnings.
 - Live Event Hub sender succeeds against `evsnowqa20260428230344.servicebus.windows.net/topic1` when using a namespace SAS connection string retrieved from Azure CLI.
 - Live pipeline with Snowflake control-table ownership fails closed before receiving messages because Snowflake Hybrid Tables are not available on the current trial account.
 - Live pipeline with Docker-backed Postgres control tables succeeds end to end: the sender wrote 5 marker messages, Event Hub receive processed them, Snowpipe Streaming flushed partition channels, and Snowflake query found 5 marker rows.
+- Live pipeline with Docker-backed Postgres control tables also passes a two-consumer load-balancing smoke: 80 unique marker rows reached Snowflake across partitions `0,1`.
+- Live Snowflake standard-table checkpoint smoke passes in single-consumer mode: `INGESTION.PUBLIC.INGESTION_STATUS_SMOKE_20260524180843` was seeded from current Event Hub offsets, phase A ingested 20 rows for marker `snowflake-control-smoke-a-20260524180843`, phase B restarted from the Snowflake checkpoints and ingested 20 rows for marker `snowflake-control-smoke-b-20260524180843`, and checkpoint rows advanced for both partitions. This validates Snowflake-backed checkpoints/resume only; partition ownership remains local and is not a durable multi-consumer ownership proof.
 - The configured Azure Postgres fallback is still not currently usable from this machine: the configured host is stale, and the discovered Azure Postgres hosts reject the configured credentials.

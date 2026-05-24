@@ -13,19 +13,18 @@ All tests use mocks and do not connect to real Snowflake instances.
 
 import json
 import re
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, call
 from typing import Any
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 
-from utils.config import SnowflakeConnectionConfig
 import utils.snowflake as snowflake_utils
-
+from utils.config import SnowflakeConnectionConfig
 
 # ============================================================================
 # Test Fixtures
@@ -569,6 +568,27 @@ class TestControlTable:
         assert "PARTITION_ID" in table_ddl_call
 
         mock_snowflake_connection.close.assert_called_once()
+
+    @patch("utils.snowflake.get_connection")
+    def test_create_control_table_can_create_standard_table(
+        self, mock_get_connection, mock_snowflake_connection, snowflake_config
+    ):
+        """Test standard control table creation for single-consumer smoke tests."""
+        mock_cursor = mock_snowflake_connection.cursor.return_value
+        mock_get_connection.return_value = mock_snowflake_connection
+
+        result = snowflake_utils.create_control_table(
+            target_db="CONTROL_DB",
+            target_schema="PUBLIC",
+            target_table="INGESTION_STATUS",
+            config=snowflake_config,
+            use_hybrid_table=False,
+        )
+
+        assert result is True
+        execute_calls = [call[0][0] for call in mock_cursor.execute.call_args_list]
+        assert any("CREATE TABLE IF NOT EXISTS" in call for call in execute_calls)
+        assert not any("CREATE HYBRID TABLE IF NOT EXISTS" in call for call in execute_calls)
 
     @patch("utils.snowflake.get_connection")
     def test_create_control_table_validates_identifiers(

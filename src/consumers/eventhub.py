@@ -30,6 +30,7 @@ from consumers.checkpoints import (
     CheckpointManagerProtocol,
     PostgresCheckpointManager,
     PostgresCheckpointStore,
+    SingleConsumerSnowflakeCheckpointStore,
     SnowflakeCheckpointManager,
     SnowflakeCheckpointStore,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "MessageBatch",
     "PostgresCheckpointManager",
     "PostgresCheckpointStore",
+    "SingleConsumerSnowflakeCheckpointStore",
     "SnowflakeCheckpointManager",
     "SnowflakeCheckpointStore",
     "_convert_bytes_to_str",
@@ -85,6 +87,7 @@ class EventHubAsyncConsumer:
         control_table: str | None = None,
         control_table_backend: str = "snowflake",
         control_postgres_config: PostgresConnectionConfig | None = None,
+        control_ownership_mode: str = "durable",
         capture_messages: bool = False,
         capture_messages_dir: str = "messages",
     ):
@@ -110,6 +113,7 @@ class EventHubAsyncConsumer:
         self.control_table = control_table or "INGESTION_STATUS"
         self.control_table_backend = control_table_backend.strip().lower()
         self.control_postgres_config = control_postgres_config
+        self.control_ownership_mode = control_ownership_mode.strip().lower()
         self.checkpoint_backend_label = (
             "Postgres" if self.control_table_backend == "postgres" else "Snowflake"
         )
@@ -131,6 +135,9 @@ class EventHubAsyncConsumer:
         self._batch_counter = 0
         self._batch_lock = asyncio.Lock()
         self._processing_lock = asyncio.Lock()
+        self._active_event_callbacks = 0
+        self._event_callbacks_drained = asyncio.Event()
+        self._event_callbacks_drained.set()
         self._detached_batches: list[MessageBatch] = []
         self._restored_detached_batch_ids: set[str] = set()
         self._receive_error: Exception | None = None
@@ -647,7 +654,17 @@ class EventHubAsyncConsumer:
                     control_schema=self.control_schema,
                     control_table=self.control_table,
                 )
-                checkpoint_store = SnowflakeCheckpointStore(self.checkpoint_manager)
+                if self.control_ownership_mode == "local_single_consumer_smoke":
+                    logger.warning(
+                        "Using local in-memory Snowflake partition ownership. This mode is "
+                        "only for a single-consumer smoke test; do not run multiple consumers "
+                        "with the same consumer group."
+                    )
+                    checkpoint_store = SingleConsumerSnowflakeCheckpointStore(
+                        self.checkpoint_manager
+                    )
+                else:
+                    checkpoint_store = SnowflakeCheckpointStore(self.checkpoint_manager)
 
             # Create Azure SDK-compatible checkpoint store
             logger.info("🔐 Creating checkpoint store...")
@@ -855,6 +872,9 @@ class EventHubAsyncConsumer:
                 await asyncio.gather(*self.tasks, return_exceptions=True)
                 logger.info("✅ All tasks completed")
             self.tasks.clear()
+            await self._wait_for_active_event_callbacks()
+            await self._wait_for_active_batch_processing()
+            await self._restore_detached_batches_for_shutdown()
         except Exception as e:
             logger.error(f"❌ Error during initial shutdown steps: {e}", exc_info=True)
             raise
@@ -935,88 +955,92 @@ class EventHubAsyncConsumer:
         because it would be too expensive (thousands of events per second).
         Instead, we log to console and only create spans for batch operations.
         """
-        if not self.running:
-            logger.debug("Consumer not running, ignoring event")
-            return
-
-        if event is None:
-            logger.debug(f"Received None event on partition {partition_context.partition_id}")
-            return
-
+        self._begin_event_callback()
         try:
-            # Log FIRST message received on each partition to verify checkpoint resumption
-            if partition_context.partition_id not in self._first_message_logged:
-                logger.warning(
-                    f"🎯 FIRST MESSAGE on partition {partition_context.partition_id}: "
-                    f"offset={event.offset}, sequence={event.sequence_number}, "
-                    f"enqueued_time={event.enqueued_time}"
-                )
-                # Log first message to Logfire for monitoring checkpoint resumption
-                logfire.info(
-                    "First message on partition",
-                    partition_id=partition_context.partition_id,
-                    offset=event.offset,
-                    sequence_number=event.sequence_number,
-                )
-                self._first_message_logged.add(partition_context.partition_id)
-
-            logger.debug(
-                f"📨 Received event on partition {partition_context.partition_id}, "
-                f"offset: {event.offset}, sequence: {event.sequence_number}, "
-                f"enqueued_time: {event.enqueued_time}"
-            )
-
-            # Ensure sequence_number is not None
-            if event.sequence_number is None:
-                logger.warning(
-                    f"Received event with None sequence_number on partition {partition_context.partition_id}"
-                )
+            if not self.running:
+                logger.debug("Consumer not running, ignoring event")
                 return
 
-            # Optional capture of the raw message (as received)
-            self._enqueue_capture(partition_context.partition_id, event)
+            if event is None:
+                logger.debug(f"Received None event on partition {partition_context.partition_id}")
+                return
 
-            # Create message wrapper
-            message = EventHubMessage(
-                event_data=event,
-                partition_id=partition_context.partition_id,
-                sequence_number=event.sequence_number,
-                eventhub_namespace=self.eventhub_config.namespace,
-                eventhub_name=self.eventhub_config.name,
-                consumer_group=self.eventhub_config.consumer_group,
-            )
+            try:
+                # Log FIRST message received on each partition to verify checkpoint resumption
+                if partition_context.partition_id not in self._first_message_logged:
+                    logger.warning(
+                        f"🎯 FIRST MESSAGE on partition {partition_context.partition_id}: "
+                        f"offset={event.offset}, sequence={event.sequence_number}, "
+                        f"enqueued_time={event.enqueued_time}"
+                    )
+                    # Log first message to Logfire for monitoring checkpoint resumption
+                    logfire.info(
+                        "First message on partition",
+                        partition_id=partition_context.partition_id,
+                        offset=event.offset,
+                        sequence_number=event.sequence_number,
+                    )
+                    self._first_message_logged.add(partition_context.partition_id)
 
-            # Store partition_context with message for later checkpoint update
-            message.partition_context = partition_context
-
-            self.stats["messages_received"] += 1
-
-            logger.debug(
-                f"✅ Message {self.stats['messages_received']} added to batch. "
-                f"Current batch size: {len(self.current_batch.messages) if self.current_batch else 0}"
-            )
-
-            batch_to_process: MessageBatch | None = None
-            async with self._batch_lock:
-                if self.current_batch and self.current_batch.add_message(message):
-                    batch_to_process = self.current_batch
-                    self._detached_batches.append(batch_to_process)
-                    self._restored_detached_batch_ids.discard(batch_to_process.batch_id)
-                    self.current_batch = self._new_batch(reason="after_process")
-
-            if batch_to_process:
-                logger.info(
-                    f"🔄 Batch ready for processing ({len(batch_to_process.messages)} messages)"
+                logger.debug(
+                    f"📨 Received event on partition {partition_context.partition_id}, "
+                    f"offset: {event.offset}, sequence: {event.sequence_number}, "
+                    f"enqueued_time: {event.enqueued_time}"
                 )
-                await self._process_detached_batch(batch_to_process)
 
-        except Exception as e:
-            logger.error(f"Error processing event: {e}", exc_info=True)
-            logfire.error(
-                "Error processing event",
-                error=str(e),
-                partition_id=partition_context.partition_id,
-            )
+                # Ensure sequence_number is not None
+                if event.sequence_number is None:
+                    logger.warning(
+                        f"Received event with None sequence_number on partition {partition_context.partition_id}"
+                    )
+                    return
+
+                # Optional capture of the raw message (as received)
+                self._enqueue_capture(partition_context.partition_id, event)
+
+                # Create message wrapper
+                message = EventHubMessage(
+                    event_data=event,
+                    partition_id=partition_context.partition_id,
+                    sequence_number=event.sequence_number,
+                    eventhub_namespace=self.eventhub_config.namespace,
+                    eventhub_name=self.eventhub_config.name,
+                    consumer_group=self.eventhub_config.consumer_group,
+                )
+
+                # Store partition_context with message for later checkpoint update
+                message.partition_context = partition_context
+
+                self.stats["messages_received"] += 1
+
+                logger.debug(
+                    f"✅ Message {self.stats['messages_received']} added to batch. "
+                    f"Current batch size: {len(self.current_batch.messages) if self.current_batch else 0}"
+                )
+
+                batch_to_process: MessageBatch | None = None
+                async with self._batch_lock:
+                    if self.current_batch and self.current_batch.add_message(message):
+                        batch_to_process = self.current_batch
+                        self._detached_batches.append(batch_to_process)
+                        self._restored_detached_batch_ids.discard(batch_to_process.batch_id)
+                        self.current_batch = self._new_batch(reason="after_process")
+
+                if batch_to_process:
+                    logger.info(
+                        f"🔄 Batch ready for processing ({len(batch_to_process.messages)} messages)"
+                    )
+                    await self._process_detached_batch(batch_to_process)
+
+            except Exception as e:
+                logger.error(f"Error processing event: {e}", exc_info=True)
+                logfire.error(
+                    "Error processing event",
+                    error=str(e),
+                    partition_id=partition_context.partition_id,
+                )
+        finally:
+            self._finish_event_callback()
 
     async def _batch_timeout_handler(self) -> None:
         """Handle batch timeout - process partial batches."""
@@ -1134,6 +1158,67 @@ class EventHubAsyncConsumer:
                 self._restored_detached_batch_ids.discard(batch.batch_id)
             else:
                 self._restored_detached_batch_ids.clear()
+
+    def _begin_event_callback(self) -> None:
+        self._active_event_callbacks += 1
+        self._event_callbacks_drained.clear()
+
+    def _finish_event_callback(self) -> None:
+        self._active_event_callbacks = max(0, self._active_event_callbacks - 1)
+        if self._active_event_callbacks == 0:
+            self._event_callbacks_drained.set()
+
+    async def _wait_for_active_event_callbacks(self) -> None:
+        if self._active_event_callbacks == 0:
+            return
+
+        logger.info(
+            "⏳ Waiting for %s active Event Hub callback(s) before shutdown drain...",
+            self._active_event_callbacks,
+        )
+        # EventHubConsumerClient.close stops retrieval, but receive() may already
+        # have dispatched callbacks. Wait for those callbacks before draining the
+        # final batch so Snowflake clients are still open for checkpoint-safe work.
+        # https://learn.microsoft.com/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient
+        await self._event_callbacks_drained.wait()
+
+    async def _wait_for_active_batch_processing(self) -> None:
+        if not self._processing_lock.locked():
+            return
+
+        logger.info("⏳ Waiting for active batch processing to finish before shutdown...")
+        async with self._processing_lock:
+            return
+
+    async def _restore_detached_batches_for_shutdown(self) -> None:
+        async with self._batch_lock:
+            if not self._detached_batches:
+                return
+
+            restored_batch = self._detached_batches[0]
+            for queued_batch in self._detached_batches[1:]:
+                if queued_batch is restored_batch:
+                    continue
+                for message in queued_batch.messages:
+                    restored_batch.add_message(message)
+
+            if (
+                self.current_batch
+                and self.current_batch not in self._detached_batches
+                and self.current_batch.messages
+            ):
+                for message in self.current_batch.messages:
+                    restored_batch.add_message(message)
+
+            # The Azure SDK can still have an on_event callback queued while
+            # shutdown starts. Restore detached batches before Snowflake is closed
+            # so final checkpoint-safe ingestion happens while downstream clients
+            # are still alive.
+            self.current_batch = restored_batch
+            self._restored_detached_batch_ids.update(
+                batch.batch_id for batch in self._detached_batches
+            )
+            self._detached_batches.clear()
 
     async def _stop_after_batch_failure(self) -> None:
         self.running = False
@@ -1330,6 +1415,7 @@ async def create_eventhub_consumer(
     control_table: str | None = None,
     control_table_backend: str = "snowflake",
     control_postgres_config: PostgresConnectionConfig | None = None,
+    control_ownership_mode: str = "durable",
 ) -> EventHubAsyncConsumer:
     """Factory function to create an EventHub consumer."""
     return EventHubAsyncConsumer(
@@ -1346,6 +1432,7 @@ async def create_eventhub_consumer(
         control_table=control_table,
         control_table_backend=control_table_backend,
         control_postgres_config=control_postgres_config,
+        control_ownership_mode=control_ownership_mode,
     )
 
 

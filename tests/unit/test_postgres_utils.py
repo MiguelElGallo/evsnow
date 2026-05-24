@@ -126,6 +126,17 @@ def test_ensure_postgres_ownership_table_uses_advisory_lock():
     assert "CREATE TABLE IF NOT EXISTS" in str(create_query)
 
 
+def test_advisory_lock_key_is_stable_signed_bigint():
+    """Lock keys stay stable and fit Postgres pg_advisory_lock(bigint)."""
+    first = pg._advisory_lock_key("evsnow", "public", "ingestion_status_ownership")
+    second = pg._advisory_lock_key("evsnow", "public", "ingestion_status_ownership")
+    different = pg._advisory_lock_key("evsnow", "public", "other_ownership")
+
+    assert first == second
+    assert first != different
+    assert -(2**63) <= first <= 2**63 - 1
+
+
 def test_ensure_postgres_ownership_table_unlocks_after_ddl_failure():
     """The session advisory lock is released even if ownership DDL fails."""
     calls = []

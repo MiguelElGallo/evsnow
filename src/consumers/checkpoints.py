@@ -7,6 +7,8 @@ Snowflake or Postgres control tables.
 
 import asyncio
 import logging
+import time
+import uuid
 from collections.abc import Iterable
 from typing import Any, Protocol
 
@@ -22,6 +24,7 @@ __all__ = [
     "DatabaseCheckpointStore",
     "PostgresCheckpointManager",
     "PostgresCheckpointStore",
+    "SingleConsumerSnowflakeCheckpointStore",
     "SnowflakeCheckpointManager",
     "SnowflakeCheckpointStore",
 ]
@@ -554,6 +557,75 @@ class SnowflakeCheckpointStore(DatabaseCheckpointStore):
 
     def __init__(self, checkpoint_manager: SnowflakeCheckpointManager):
         super().__init__(checkpoint_manager, backend_label="Snowflake")
+
+
+class SingleConsumerSnowflakeCheckpointStore(DatabaseCheckpointStore):
+    """Snowflake checkpoint store with local ownership for diagnostic smoke tests.
+
+    Azure's Event Hubs SDK uses the checkpoint store for both partition ownership
+    and checkpoints. Snowflake standard tables can persist checkpoint MERGEs, but
+    they cannot enforce the compare-and-set ownership contract because standard
+    PRIMARY KEY / UNIQUE constraints are not enforced. This store keeps ownership
+    in memory for a single process while still persisting checkpoints to Snowflake.
+    Do not use it for multiple consumers in the same consumer group.
+    https://docs.snowflake.com/en/sql-reference/constraints-overview
+    """
+
+    def __init__(self, checkpoint_manager: SnowflakeCheckpointManager):
+        super().__init__(checkpoint_manager, backend_label="Snowflake")
+        self._ownership: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        self._ownership_lock = asyncio.Lock()
+
+    async def list_ownership(
+        self,
+        fully_qualified_namespace: str,
+        eventhub_name: str,
+        consumer_group: str,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        async with self._ownership_lock:
+            return [
+                ownership.copy()
+                for (
+                    namespace,
+                    hub_name,
+                    group_name,
+                    _partition_id,
+                ), ownership in self._ownership.items()
+                if (
+                    namespace == fully_qualified_namespace
+                    and hub_name == eventhub_name
+                    and group_name == consumer_group
+                )
+            ]
+
+    async def claim_ownership(
+        self, ownership_list: Iterable[dict[str, Any]], **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        async with self._ownership_lock:
+            claimed: list[dict[str, Any]] = []
+            for ownership in ownership_list:
+                key = (
+                    ownership["fully_qualified_namespace"],
+                    ownership["eventhub_name"],
+                    ownership["consumer_group"],
+                    ownership["partition_id"],
+                )
+                current = self._ownership.get(key)
+                requested_etag = ownership.get("etag")
+                if current is not None and requested_etag != current.get("etag"):
+                    continue
+
+                updated = {
+                    **ownership,
+                    "etag": uuid.uuid4().hex,
+                    "last_modified_time": time.time(),
+                }
+                self._ownership[key] = updated
+                claimed.append(updated.copy())
+
+        logger.debug("Locally claimed ownership for %s partitions", len(claimed))
+        return claimed
 
 
 class PostgresCheckpointStore(DatabaseCheckpointStore):
