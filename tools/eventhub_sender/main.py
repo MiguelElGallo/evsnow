@@ -49,13 +49,16 @@ async def _build_producer(
     connection_string: str | None,
     namespace: str | None,
     eventhub: str,
-) -> EventHubProducerClient:
+) -> tuple[EventHubProducerClient, DefaultAzureCredential | None]:
     """Create an Event Hub producer using connection string or DefaultAzureCredential."""
     if connection_string:
         logger.info("Using connection string authentication")
-        return EventHubProducerClient.from_connection_string(
-            conn_str=connection_string,
-            eventhub_name=eventhub,
+        return (
+            EventHubProducerClient.from_connection_string(
+                conn_str=connection_string,
+                eventhub_name=eventhub,
+            ),
+            None,
         )
 
     if not namespace:
@@ -63,10 +66,13 @@ async def _build_producer(
 
     logger.info("Using DefaultAzureCredential for authentication")
     credential = DefaultAzureCredential()
-    return EventHubProducerClient(
-        fully_qualified_namespace=namespace,
-        eventhub_name=eventhub,
-        credential=credential,
+    return (
+        EventHubProducerClient(
+            fully_qualified_namespace=namespace,
+            eventhub_name=eventhub,
+            credential=credential,
+        ),
+        credential,
     )
 
 
@@ -174,64 +180,62 @@ async def send_messages(
         except Exception as err:
             raise typer.BadParameter(f"Invalid JSON for --payload: {err}") from err
 
-    producer = await _build_producer(connection_string, namespace, eventhub)
-    async with producer:
-        batch = await producer.create_batch(partition_key=partition_key)
-        batch_count = 0
-        sent = 0
-        sequence_id = start_id
-        start_time = time.time()
+    producer, credential = await _build_producer(connection_string, namespace, eventhub)
+    try:
+        async with producer:
+            await _send_messages_with_producer(
+                producer=producer,
+                count=count,
+                start_id=start_id,
+                batch_size=batch_size,
+                interval_seconds=interval_seconds,
+                max_messages_per_second=max_messages_per_second,
+                batch_pause_seconds=batch_pause_seconds,
+                max_retries=max_retries,
+                retry_base_delay_seconds=retry_base_delay_seconds,
+                retry_max_delay_seconds=retry_max_delay_seconds,
+                partition_key=partition_key,
+                base_payload=base_payload,
+            )
+    finally:
+        if credential is not None:
+            # Async Azure credentials own transport sessions; close them even when
+            # producer creation/send fails so local smoke tests do not leak aiohttp clients.
+            # https://learn.microsoft.com/python/api/azure-identity/azure.identity.aio.defaultazurecredential
+            await credential.close()
 
-        while sent < count:
-            message_body = _build_payload(sequence_id, base_payload)
-            event = EventData(message_body)
 
-            try:
-                batch.add(event)
-                batch_count += 1
-            except ValueError:
-                logger.info("Sending batch of %d messages", batch_count)
-                await _send_batch_with_retry(
-                    producer,
-                    batch,
-                    max_retries=max_retries,
-                    base_delay=retry_base_delay_seconds,
-                    max_delay=retry_max_delay_seconds,
-                )
-                if batch_pause_seconds > 0:
-                    await asyncio.sleep(batch_pause_seconds)
-                batch = await producer.create_batch(partition_key=partition_key)
-                batch.add(event)
-                batch_count = 1
+async def _send_messages_with_producer(
+    *,
+    producer: EventHubProducerClient,
+    count: int,
+    start_id: int,
+    batch_size: int,
+    interval_seconds: float,
+    max_messages_per_second: float,
+    batch_pause_seconds: float,
+    max_retries: int,
+    retry_base_delay_seconds: float,
+    retry_max_delay_seconds: float,
+    partition_key: str | None,
+    base_payload: dict[str, Any],
+) -> None:
+    """Send messages using an already-created producer."""
+    batch = await producer.create_batch(partition_key=partition_key)
+    batch_count = 0
+    sent = 0
+    sequence_id = start_id
+    start_time = time.time()
 
-            if batch_count >= batch_size:
-                logger.info("Sending batch of %d messages (size threshold)", batch_count)
-                await _send_batch_with_retry(
-                    producer,
-                    batch,
-                    max_retries=max_retries,
-                    base_delay=retry_base_delay_seconds,
-                    max_delay=retry_max_delay_seconds,
-                )
-                if batch_pause_seconds > 0:
-                    await asyncio.sleep(batch_pause_seconds)
-                batch = await producer.create_batch(partition_key=partition_key)
-                batch_count = 0
+    while sent < count:
+        message_body = _build_payload(sequence_id, base_payload)
+        event = EventData(message_body)
 
-            sent += 1
-            sequence_id += 1
-
-            if interval_seconds > 0:
-                await asyncio.sleep(interval_seconds)
-
-            if max_messages_per_second > 0:
-                target_time = start_time + (sent / max_messages_per_second)
-                now = time.time()
-                if target_time > now:
-                    await asyncio.sleep(target_time - now)
-
-        if batch_count > 0:
-            logger.info("Sending final batch of %d messages", batch_count)
+        try:
+            batch.add(event)
+            batch_count += 1
+        except ValueError:
+            logger.info("Sending batch of %d messages", batch_count)
             await _send_batch_with_retry(
                 producer,
                 batch,
@@ -241,9 +245,50 @@ async def send_messages(
             )
             if batch_pause_seconds > 0:
                 await asyncio.sleep(batch_pause_seconds)
+            batch = await producer.create_batch(partition_key=partition_key)
+            batch.add(event)
+            batch_count = 1
 
-        duration = time.time() - start_time
-        logger.info("Completed sending %d messages in %.2fs", sent, duration)
+        if batch_count >= batch_size:
+            logger.info("Sending batch of %d messages (size threshold)", batch_count)
+            await _send_batch_with_retry(
+                producer,
+                batch,
+                max_retries=max_retries,
+                base_delay=retry_base_delay_seconds,
+                max_delay=retry_max_delay_seconds,
+            )
+            if batch_pause_seconds > 0:
+                await asyncio.sleep(batch_pause_seconds)
+            batch = await producer.create_batch(partition_key=partition_key)
+            batch_count = 0
+
+        sent += 1
+        sequence_id += 1
+
+        if interval_seconds > 0:
+            await asyncio.sleep(interval_seconds)
+
+        if max_messages_per_second > 0:
+            target_time = start_time + (sent / max_messages_per_second)
+            now = time.time()
+            if target_time > now:
+                await asyncio.sleep(target_time - now)
+
+    if batch_count > 0:
+        logger.info("Sending final batch of %d messages", batch_count)
+        await _send_batch_with_retry(
+            producer,
+            batch,
+            max_retries=max_retries,
+            base_delay=retry_base_delay_seconds,
+            max_delay=retry_max_delay_seconds,
+        )
+        if batch_pause_seconds > 0:
+            await asyncio.sleep(batch_pause_seconds)
+
+    duration = time.time() - start_time
+    logger.info("Completed sending %d messages in %.2fs", sent, duration)
 
 
 @app.command()

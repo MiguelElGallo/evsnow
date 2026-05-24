@@ -300,7 +300,10 @@ def mock_snowflake_streaming_client(mocker):
     """Mock Snowflake StreamingIngestClient (high-performance SDK)."""
     mock_client = mocker.MagicMock()
     mock_channel = mocker.MagicMock()
+    mock_channel.append_rows.return_value = None
     mock_channel.append_row.return_value = None
+    mock_channel.initiate_flush.return_value = None
+    mock_channel.wait_for_commit.return_value = None
     mock_channel.get_latest_committed_offset_token.return_value = "12345"
     mock_channel.close.return_value = None
 

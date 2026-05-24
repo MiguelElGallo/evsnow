@@ -15,6 +15,8 @@ import json
 import logging
 import os
 import tempfile
+import time
+import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -31,6 +33,41 @@ logger = logging.getLogger(__name__)
 # Connection cache for reusing connections in high-performance streaming scenarios
 # Key: (account, user, database, schema, warehouse, role)
 _connection_cache: dict[tuple, sc.SnowflakeConnection] = {}
+
+
+def _decode_checkpoint_metadata(metadata: Any) -> dict[str, Any]:
+    if metadata is None:
+        return {}
+    if isinstance(metadata, dict):
+        return metadata
+    if isinstance(metadata, str):
+        try:
+            return json.loads(metadata)
+        except json.JSONDecodeError:
+            return {}
+    if hasattr(metadata, "as_py"):
+        value = metadata.as_py()
+        return value if isinstance(value, dict) else {}
+    return {}
+
+
+def _checkpoint_value(waterlevel: Any, metadata: Any) -> dict[str, Any]:
+    decoded_metadata = _decode_checkpoint_metadata(metadata)
+    sequence_number = decoded_metadata.get("sequence_number", waterlevel)
+    offset = decoded_metadata.get("offset_string", decoded_metadata.get("offset", waterlevel))
+    return {"offset": str(offset), "sequence_number": int(sequence_number)}
+
+
+def _ownership_table_name(control_table: str) -> str:
+    return f"{control_table}_OWNERSHIP"
+
+
+def _validate_snowflake_identifiers(identifiers: list[str]) -> None:
+    import re
+
+    for identifier in identifiers:
+        if not re.match(r"^[A-Za-z0-9_$]+$", identifier):
+            raise ValueError(f"Invalid Snowflake identifier: {identifier}")
 
 
 @contextmanager
@@ -622,7 +659,7 @@ def get_partition_checkpoints(
                 logger.debug(f"Activated warehouse: {config.warehouse}")
 
             sql = f"""
-                SELECT PARTITION_ID, WATERLEVEL
+                SELECT PARTITION_ID, WATERLEVEL, METADATA
                 FROM {control_table_fqn}
                 WHERE EVENTHUB_NAMESPACE = %s
                   AND EVENTHUB = %s
@@ -654,7 +691,10 @@ def get_partition_checkpoints(
             logger.info(f"No partition checkpoints found for {eventhub_namespace}/{eventhub}")
             return None
 
-        partition_checkpoints = {row[0]: row[1] for row in results}
+        partition_checkpoints = {
+            row[0]: _checkpoint_value(row[1], row[2] if len(row) > 2 else None)
+            for row in results
+        }
 
         logger.info(
             f"Retrieved partition checkpoints: {partition_checkpoints} for {eventhub_namespace}/{eventhub}"
@@ -666,6 +706,252 @@ def get_partition_checkpoints(
         logger.error(f"  EventHub: {eventhub_namespace}/{eventhub}")
         logger.error(f"  Control Table: {target_db}.{target_schema}.{target_table}")
         raise
+
+
+def _ensure_snowflake_ownership_table(cursor: Any, ownership_table_fqn: str) -> None:
+    database_name, schema_name, table_name = ownership_table_fqn.split(".", maxsplit=2)
+
+    cursor.execute(f"SHOW HYBRID TABLES LIKE '{table_name}' IN SCHEMA {database_name}.{schema_name}")
+    if cursor.fetchall():
+        return
+
+    cursor.execute(f"SHOW TABLES LIKE '{table_name}' IN SCHEMA {database_name}.{schema_name}")
+    if cursor.fetchall():
+        raise RuntimeError(
+            f"Existing Snowflake ownership table {ownership_table_fqn} is not a Hybrid Table. "
+            "Migrate or drop it before enabling multi-consumer Event Hub ownership."
+        )
+
+    # Snowflake standard-table unique constraints are not enforced; ownership
+    # claims need a Hybrid Table primary key for real compare-and-set behavior.
+    # See: https://docs.snowflake.com/en/sql-reference/constraints-overview
+    cursor.execute(
+        f"""
+        CREATE HYBRID TABLE IF NOT EXISTS {ownership_table_fqn} (
+            FULLY_QUALIFIED_NAMESPACE VARCHAR(500) NOT NULL,
+            EVENTHUB_NAME VARCHAR(500) NOT NULL,
+            CONSUMER_GROUP VARCHAR(200) NOT NULL,
+            TARGET_DB VARCHAR(200) NOT NULL,
+            TARGET_SCHEMA VARCHAR(200) NOT NULL,
+            TARGET_TABLE VARCHAR(200) NOT NULL,
+            PARTITION_ID VARCHAR(50) NOT NULL,
+            OWNER_ID VARCHAR(500) NOT NULL,
+            ETAG VARCHAR(100) NOT NULL,
+            LAST_MODIFIED_TIME FLOAT NOT NULL,
+            TS_MODIFIED TIMESTAMP_NTZ NOT NULL,
+            PRIMARY KEY (
+                FULLY_QUALIFIED_NAMESPACE,
+                EVENTHUB_NAME,
+                CONSUMER_GROUP,
+                TARGET_DB,
+                TARGET_SCHEMA,
+                TARGET_TABLE,
+                PARTITION_ID
+            )
+        )
+        """
+    )
+
+
+def list_partition_ownership(
+    fully_qualified_namespace: str,
+    eventhub_name: str,
+    consumer_group: str,
+    target_db: str,
+    target_schema: str,
+    target_table: str,
+    config: SnowflakeConnectionConfig | None = None,
+    control_db: str | None = None,
+    control_schema: str | None = None,
+    control_table: str | None = None,
+) -> list[dict[str, Any]]:
+    if config is None:
+        config = SnowflakeConnectionConfig()
+
+    actual_control_db = control_db or config.database
+    actual_control_schema = control_schema or config.schema_name
+    actual_control_table = control_table or "INGESTION_STATUS"
+    ownership_table = _ownership_table_name(actual_control_table)
+
+    identifiers = [
+        actual_control_db,
+        actual_control_schema,
+        ownership_table,
+        target_db,
+        target_schema,
+        target_table,
+    ]
+    if config.warehouse:
+        identifiers.append(config.warehouse)
+    _validate_snowflake_identifiers(identifiers)
+
+    ownership_table_fqn = f"{actual_control_db}.{actual_control_schema}.{ownership_table}"
+    conn = get_connection(config, use_cache=True)
+    cursor = conn.cursor()
+    try:
+        if config.warehouse:
+            cursor.execute(f"USE WAREHOUSE {config.warehouse}")
+        _ensure_snowflake_ownership_table(cursor, ownership_table_fqn)
+        cursor.execute(
+            f"""
+            SELECT PARTITION_ID, OWNER_ID, ETAG, LAST_MODIFIED_TIME
+            FROM {ownership_table_fqn}
+            WHERE FULLY_QUALIFIED_NAMESPACE = %s
+              AND EVENTHUB_NAME = %s
+              AND CONSUMER_GROUP = %s
+              AND TARGET_DB = %s
+              AND TARGET_SCHEMA = %s
+              AND TARGET_TABLE = %s
+            """,
+            (
+                fully_qualified_namespace,
+                eventhub_name,
+                consumer_group,
+                target_db,
+                target_schema,
+                target_table,
+            ),
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+
+    return [
+        {
+            "fully_qualified_namespace": fully_qualified_namespace,
+            "eventhub_name": eventhub_name,
+            "consumer_group": consumer_group,
+            "partition_id": row[0],
+            "owner_id": row[1],
+            "etag": row[2],
+            "last_modified_time": float(row[3]),
+        }
+        for row in rows
+    ]
+
+
+def claim_partition_ownership(
+    ownership_list: list[dict[str, Any]],
+    target_db: str,
+    target_schema: str,
+    target_table: str,
+    config: SnowflakeConnectionConfig | None = None,
+    control_db: str | None = None,
+    control_schema: str | None = None,
+    control_table: str | None = None,
+) -> list[dict[str, Any]]:
+    if not ownership_list:
+        return []
+
+    if config is None:
+        config = SnowflakeConnectionConfig()
+
+    actual_control_db = control_db or config.database
+    actual_control_schema = control_schema or config.schema_name
+    actual_control_table = control_table or "INGESTION_STATUS"
+    ownership_table = _ownership_table_name(actual_control_table)
+    ownership_table_fqn = f"{actual_control_db}.{actual_control_schema}.{ownership_table}"
+
+    identifiers = [
+            actual_control_db,
+            actual_control_schema,
+            ownership_table,
+            target_db,
+            target_schema,
+            target_table,
+    ]
+    if config.warehouse:
+        identifiers.append(config.warehouse)
+    _validate_snowflake_identifiers(identifiers)
+
+    conn = get_connection(config, use_cache=True)
+    cursor = conn.cursor()
+    claimed: list[dict[str, Any]] = []
+    try:
+        if config.warehouse:
+            cursor.execute(f"USE WAREHOUSE {config.warehouse}")
+        _ensure_snowflake_ownership_table(cursor, ownership_table_fqn)
+
+        for ownership in ownership_list:
+            now = time.time()
+            new_etag = uuid.uuid4().hex
+            base_values = (
+                ownership["fully_qualified_namespace"],
+                ownership["eventhub_name"],
+                ownership["consumer_group"],
+                target_db,
+                target_schema,
+                target_table,
+                ownership["partition_id"],
+                ownership["owner_id"],
+                new_etag,
+                now,
+            )
+
+            try:
+                if ownership.get("etag"):
+                    cursor.execute(
+                        f"""
+                        UPDATE {ownership_table_fqn}
+                        SET OWNER_ID = %s,
+                            ETAG = %s,
+                            LAST_MODIFIED_TIME = %s,
+                            TS_MODIFIED = CURRENT_TIMESTAMP()
+                        WHERE FULLY_QUALIFIED_NAMESPACE = %s
+                          AND EVENTHUB_NAME = %s
+                          AND CONSUMER_GROUP = %s
+                          AND TARGET_DB = %s
+                          AND TARGET_SCHEMA = %s
+                          AND TARGET_TABLE = %s
+                          AND PARTITION_ID = %s
+                          AND ETAG = %s
+                        """,
+                        (
+                            ownership["owner_id"],
+                            new_etag,
+                            now,
+                            ownership["fully_qualified_namespace"],
+                            ownership["eventhub_name"],
+                            ownership["consumer_group"],
+                            target_db,
+                            target_schema,
+                            target_table,
+                            ownership["partition_id"],
+                            ownership["etag"],
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {ownership_table_fqn} (
+                            FULLY_QUALIFIED_NAMESPACE, EVENTHUB_NAME, CONSUMER_GROUP,
+                            TARGET_DB, TARGET_SCHEMA, TARGET_TABLE, PARTITION_ID,
+                            OWNER_ID, ETAG, LAST_MODIFIED_TIME, TS_MODIFIED
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP())
+                        """,
+                        base_values,
+                    )
+            except Exception as exc:
+                logger.info(
+                    "Ownership claim skipped for partition %s: %s",
+                    ownership.get("partition_id"),
+                    exc,
+                )
+                continue
+
+            if getattr(cursor, "rowcount", 0) == 1:
+                claimed.append(
+                    {
+                        **ownership,
+                        "etag": new_etag,
+                        "last_modified_time": now,
+                    }
+                )
+    finally:
+        cursor.close()
+
+    return claimed
 
 
 # Example usage

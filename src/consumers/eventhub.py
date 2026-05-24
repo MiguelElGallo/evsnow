@@ -12,6 +12,7 @@ Based on Azure EventHub SDK patterns but adapted for database checkpointing.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -33,7 +34,7 @@ from consumers.checkpoints import (
     SnowflakeCheckpointStore,
 )
 from consumers.messages import BytesEncoder, EventHubMessage, MessageBatch, _convert_bytes_to_str
-from utils.azure_identity import build_eventhub_cli_credential
+from utils.azure_identity import build_eventhub_credential
 from utils.config import EventHubConfig, PostgresConnectionConfig, SnowflakeConnectionConfig
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,12 @@ class EventHubAsyncConsumer:
         self.tasks: set[asyncio.Task] = set()
         self._first_message_logged: set[str] = set()  # Track first message per partition
         self._batch_counter = 0
+        self._batch_lock = asyncio.Lock()
+        self._processing_lock = asyncio.Lock()
+        self._detached_batches: list[MessageBatch] = []
+        self._restored_detached_batch_ids: set[str] = set()
+        self._receive_error: Exception | None = None
+        self._receive_error_close_task: asyncio.Task[None] | None = None
 
         # Statistics
         self.stats: dict[str, Any] = {
@@ -339,10 +346,6 @@ class EventHubAsyncConsumer:
             logger.info(
                 f"   Starting from LATEST (starting_position='{starting_pos}') - only NEW messages after connection will be received."
             )
-        elif starting_pos == "0":
-            logger.info(
-                f"   Starting from Event Hub offset 0 (starting_position='{starting_pos}') - use -1 for beginning-of-stream semantics."
-            )
 
         logger.info(
             "   This ensures consistent behavior when starting fresh. Change with EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT."
@@ -418,6 +421,80 @@ class EventHubAsyncConsumer:
             eventhub=self.eventhub_config.name,
         )
 
+    def _eventhub_client_options(self, checkpoint_store: Any) -> dict[str, Any]:
+        """Build Azure Event Hubs client options from validated config.
+
+        The Azure SDK documents retry and load-balancing options on the
+        EventHubConsumerClient constructor/from_connection_string API, not on
+        receive(). Keeping that split here prevents operator config from being
+        silently ignored. Reference:
+        https://learn.microsoft.com/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient
+        """
+        options: dict[str, Any] = {
+            "checkpoint_store": checkpoint_store,
+            "retry_total": self.eventhub_config.retry_total,
+            "retry_backoff_factor": self.eventhub_config.retry_backoff_factor,
+            "retry_backoff_max": self.eventhub_config.retry_backoff_max,
+            "retry_mode": self.eventhub_config.retry_mode,
+            "load_balancing_interval": self.eventhub_config.load_balancing_interval,
+            "load_balancing_strategy": self.eventhub_config.load_balancing_strategy,
+        }
+        if self.eventhub_config.partition_ownership_expiration_interval is not None:
+            options["partition_ownership_expiration_interval"] = (
+                self.eventhub_config.partition_ownership_expiration_interval
+            )
+        return options
+
+    def _eventhub_receive_options(self) -> dict[str, Any]:
+        """Build receive-loop options from validated config."""
+        return {
+            "max_wait_time": self.eventhub_config.max_wait_time,
+            "prefetch": self.eventhub_config.prefetch_count,
+            "track_last_enqueued_event_properties": (
+                self.eventhub_config.track_last_enqueued_event_properties
+            ),
+            "on_error": self._on_receive_error,
+        }
+
+    async def _on_receive_error(
+        self,
+        partition_context: PartitionContext | None,
+        error: Exception,
+    ) -> None:
+        """Fail closed when the SDK reports a partition receive error."""
+        partition_id = getattr(partition_context, "partition_id", "<unknown>")
+        logger.error(
+            "❌ Event Hub receive callback failed for partition %s: %s",
+            partition_id,
+            error,
+            exc_info=True,
+        )
+        self._receive_error = error
+        self.running = False
+        if self.client is not None:
+            # The Azure SDK may log and swallow exceptions raised by on_error,
+            # so closing the client is the deterministic stop signal. We trigger
+            # close out-of-band instead of awaiting it inside the callback because
+            # EventHubConsumerClient.close() can cancel the active receive task that
+            # is currently executing this callback.
+            # https://learn.microsoft.com/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient
+            self._receive_error_close_task = asyncio.create_task(
+                self._close_client_after_receive_error()
+            )
+        return None
+
+    async def _close_client_after_receive_error(self) -> None:
+        client = self.client
+        if client is None:
+            return
+        try:
+            await client.close()
+        except asyncio.CancelledError:
+            logger.debug("EventHub client close task cancelled after receive error")
+            raise
+        except Exception as close_error:
+            logger.warning("Error closing EventHub client after receive error: %s", close_error)
+
     def _raise_rbac_permission_error(
         self,
         *,
@@ -456,8 +533,9 @@ class EventHubAsyncConsumer:
             True if the error was handled (and should not be re-raised).
             False if the caller should re-raise the original exception.
 
-        Note: This preserves the current behavior, including swallowing certain
-        credential-chain errors after printing guidance.
+        Credential-chain errors are logged with actionable guidance and then
+        re-raised by the caller so startup/receive failures do not leave the
+        consumer running with open resources.
         """
 
         error_msg = str(receive_error).lower()
@@ -479,7 +557,7 @@ class EventHubAsyncConsumer:
                 error_type=error_type,
                 receive_error=receive_error,
             )
-            return True
+            return False
 
         if (
             any(
@@ -592,7 +670,8 @@ class EventHubAsyncConsumer:
                 logger.info(
                     "   SDK will automatically resume from NEXT sequence after these checkpoints:"
                 )
-                for partition_id, seq_num in partition_checkpoints.items():
+                for partition_id, checkpoint_value in partition_checkpoints.items():
+                    seq_num = self._checkpoint_sequence_number(checkpoint_value)
                     logger.info(
                         f"      Partition {partition_id}: last processed seq={seq_num}, will resume from seq={seq_num + 1}"
                     )
@@ -607,6 +686,7 @@ class EventHubAsyncConsumer:
             logger.info("🔌 Creating EventHub client with checkpoint store...")
 
             logger.info("🔗 Creating EventHub client...")
+            client_options = self._eventhub_client_options(checkpoint_store)
 
             # Use connection string if configured, otherwise use credential
             if self.eventhub_config.connection_string:
@@ -615,33 +695,44 @@ class EventHubAsyncConsumer:
                     conn_str=self.eventhub_config.connection_string,
                     consumer_group=self.eventhub_config.consumer_group,
                     eventhub_name=self.eventhub_config.name,
-                    checkpoint_store=checkpoint_store,
+                    **client_options,
                 )
                 logger.info("✅ EventHub client created with connection string")
             else:
-                logger.info("🔐 Initializing Azure CLI credential (Event Hub scope)...")
+                logger.info(
+                    "🔐 Initializing %s credential (Event Hub scope)...",
+                    self.eventhub_config.credential_mode,
+                )
                 try:
-                    credential, expiry = await build_eventhub_cli_credential(
+                    credential, expiry, credential_label = await build_eventhub_credential(
                         namespace=self.eventhub_config.namespace,
                         logger=logger,
+                        credential_mode=self.eventhub_config.credential_mode,
+                        managed_identity_client_id=(
+                            self.eventhub_config.managed_identity_client_id
+                        ),
                     )
                     self.credential = credential
                     logfire.info(
                         "Azure credential test successful",
                         token_expiry=expiry,
                         namespace=self.eventhub_config.namespace,
+                        credential=credential_label,
                     )
                 except Exception as cred_error:
-                    logger.error(f"❌ Failed to create or test AzureCliCredential: {cred_error}")
+                    logger.error(f"❌ Failed to create or test Azure credential: {cred_error}")
                     logger.error("")
                     logger.error("🔧 TROUBLESHOOTING - Azure Authentication:")
                     logger.error("")
                     logger.error("For LOCAL DEVELOPMENT:")
-                    logger.error("  Option 1: Use Azure CLI (Recommended)")
+                    logger.error("  Option 1: Use DefaultAzureCredential with Azure CLI login")
                     logger.error("    1. Run: az login")
                     logger.error("    2. Run: az account show")
                     logger.error(
                         "    3. Ensure your account has 'Azure Event Hubs Data Receiver' role"
+                    )
+                    logger.error(
+                        "    4. For CLI-only local auth, set EVENTHUBNAME_{N}_CREDENTIAL_MODE=azure_cli"
                     )
                     logger.error("")
                     logger.error("  Option 2: Use Connection String (Quick Testing)")
@@ -662,7 +753,7 @@ class EventHubAsyncConsumer:
                     )
                     logger.error("")
                     logfire.error(
-                        "AzureCliCredential creation failed",
+                        "Azure credential creation failed",
                         error=str(cred_error),
                         namespace=self.eventhub_config.namespace,
                     )
@@ -679,7 +770,7 @@ class EventHubAsyncConsumer:
                     eventhub_name=self.eventhub_config.name,
                     credential=self.credential,
                     consumer_group=self.eventhub_config.consumer_group,
-                    checkpoint_store=checkpoint_store,
+                    **client_options,
                 )
                 logger.info("✅ EventHub client created with credential-based auth")
 
@@ -716,8 +807,10 @@ class EventHubAsyncConsumer:
 
             try:
                 # Determine starting position based on checkpoint existence
+                self._receive_error = None
                 receive_kwargs: dict[str, Any] = {
                     "on_event": self._on_event,
+                    **self._eventhub_receive_options(),
                 }
 
                 # Only set starting_position if NO checkpoints exist
@@ -733,6 +826,8 @@ class EventHubAsyncConsumer:
                     )
 
                 await self.client.receive(**receive_kwargs)
+                if self._receive_error is not None:
+                    raise self._receive_error
             except Exception as receive_error:
                 handled = self._handle_receive_error(receive_error)
                 if not handled:
@@ -780,10 +875,17 @@ class EventHubAsyncConsumer:
                 try:
                     if not self.current_batch.ready_reason:
                         self.current_batch.ready_reason = "shutdown"
-                    await self._process_batch(self.current_batch)
-                    logger.info(
-                        f"✅ {message_count} remaining messages processed and checkpoints updated"
+                    batch_to_process = self.current_batch
+                    success = await self._process_detached_batch(
+                        batch_to_process,
+                        allow_when_stopped=True,
                     )
+                    if success:
+                        logger.info(
+                            f"✅ {message_count} remaining messages processed and checkpoints updated"
+                        )
+                    else:
+                        logger.error("❌ Remaining batch failed during shutdown; leaving it uncheckpointed")
                 except Exception as e:
                     logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
             else:
@@ -894,14 +996,19 @@ class EventHubAsyncConsumer:
                 f"Current batch size: {len(self.current_batch.messages) if self.current_batch else 0}"
             )
 
-            # Add to current batch
-            if self.current_batch and self.current_batch.add_message(message):
-                # Batch is ready - process it
+            batch_to_process: MessageBatch | None = None
+            async with self._batch_lock:
+                if self.current_batch and self.current_batch.add_message(message):
+                    batch_to_process = self.current_batch
+                    self._detached_batches.append(batch_to_process)
+                    self._restored_detached_batch_ids.discard(batch_to_process.batch_id)
+                    self.current_batch = self._new_batch(reason="after_process")
+
+            if batch_to_process:
                 logger.info(
-                    f"🔄 Batch ready for processing ({len(self.current_batch.messages)} messages)"
+                    f"🔄 Batch ready for processing ({len(batch_to_process.messages)} messages)"
                 )
-                await self._process_batch(self.current_batch)
-                self.current_batch = self._new_batch(reason="after_process")
+                await self._process_detached_batch(batch_to_process)
 
         except Exception as e:
             logger.error(f"Error processing event: {e}", exc_info=True)
@@ -927,18 +1034,25 @@ class EventHubAsyncConsumer:
                         f"age: {time.time() - self.current_batch.created_at if self.current_batch else 0:.1f}s"
                     )
 
-                if (
-                    self.current_batch
-                    and self.current_batch.messages
-                    and self.current_batch.is_ready()
-                ):
+                batch_to_process = None
+                async with self._batch_lock:
+                    if (
+                        self.current_batch
+                        and self.current_batch.messages
+                        and self.current_batch.is_ready()
+                    ):
+                        batch_to_process = self.current_batch
+                        batch_to_process.mark_timeout_ready()
+                        self._detached_batches.append(batch_to_process)
+                        self._restored_detached_batch_ids.discard(batch_to_process.batch_id)
+                        self.current_batch = self._new_batch(reason="timeout_reset")
+
+                if batch_to_process:
                     # Process timed-out batch
                     logger.info(
-                        f"⏱️ Batch timeout reached! Processing {len(self.current_batch.messages)} messages"
+                        f"⏱️ Batch timeout reached! Processing {len(batch_to_process.messages)} messages"
                     )
-                    self.current_batch.mark_timeout_ready()
-                    await self._process_batch(self.current_batch)
-                    self.current_batch = self._new_batch(reason="timeout_reset")
+                    await self._process_detached_batch(batch_to_process)
 
             except asyncio.CancelledError:
                 logger.info("⏰ Batch timeout handler cancelled")
@@ -963,31 +1077,125 @@ class EventHubAsyncConsumer:
         )
         return batch
 
-    async def _process_batch(self, batch: MessageBatch) -> None:
+    @staticmethod
+    def _checkpoint_sequence_number(checkpoint_value: Any) -> int:
+        if isinstance(checkpoint_value, dict):
+            return int(checkpoint_value["sequence_number"])
+        return int(checkpoint_value)
+
+    async def _run_message_processor(self, messages: list[EventHubMessage]) -> bool:
+        processor_call = self.message_processor.__call__ if callable(self.message_processor) else None
+        async_call = inspect.iscoroutinefunction(
+            self.message_processor
+        ) or inspect.iscoroutinefunction(processor_call)
+        if async_call:
+            result = self.message_processor(messages)
+        else:
+            result = await asyncio.to_thread(self.message_processor, messages)
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+
+    async def _restore_failed_batch(self, failed_batch: MessageBatch) -> None:
+        async with self._batch_lock:
+            if failed_batch.batch_id in self._restored_detached_batch_ids:
+                return
+
+            current_batch = self.current_batch
+            ordered_batches = list(self._detached_batches)
+            if failed_batch not in ordered_batches:
+                ordered_batches.append(failed_batch)
+
+            restored_batch = ordered_batches[0]
+            for queued_batch in ordered_batches[1:]:
+                if queued_batch is restored_batch:
+                    continue
+                for message in queued_batch.messages:
+                    restored_batch.add_message(message)
+
+            if current_batch and current_batch not in ordered_batches and current_batch.messages:
+                for message in current_batch.messages:
+                    restored_batch.add_message(message)
+
+            self.current_batch = restored_batch
+            self._restored_detached_batch_ids.update(batch.batch_id for batch in ordered_batches)
+            self._detached_batches.clear()
+
+    async def _remove_detached_batch(self, batch: MessageBatch) -> None:
+        async with self._batch_lock:
+            self._detached_batches = [
+                detached_batch
+                for detached_batch in self._detached_batches
+                if detached_batch is not batch
+            ]
+            self._restored_detached_batch_ids.discard(batch.batch_id)
+
+            if self.current_batch is batch:
+                self._restored_detached_batch_ids.discard(batch.batch_id)
+            else:
+                self._restored_detached_batch_ids.clear()
+
+    async def _stop_after_batch_failure(self) -> None:
+        self.running = False
+        if not self.client:
+            return
+
+        try:
+            await self.client.close()
+        except Exception as exc:
+            logger.warning("Error closing EventHub client after batch failure: %s", exc)
+        finally:
+            self.client = None
+
+    async def _process_detached_batch(
+        self,
+        batch: MessageBatch,
+        *,
+        allow_when_stopped: bool = False,
+    ) -> bool:
+        async with self._processing_lock:
+            if not self.running and not allow_when_stopped:
+                await self._restore_failed_batch(batch)
+                return False
+
+            success = await self._process_batch(batch)
+
+            if success:
+                await self._remove_detached_batch(batch)
+                return True
+
+            await self._restore_failed_batch(batch)
+            if not allow_when_stopped:
+                logger.error("❌ Batch failed; leaving batch intact and stopping consumer")
+                await self._stop_after_batch_failure()
+            return False
+
+    async def _process_batch(self, batch: MessageBatch) -> bool:
         """Process a batch of messages."""
+        messages = list(batch.messages)
         batch_age_seconds = time.time() - batch.created_at
         with logfire.span(
             "eventhub.batch",
             batch_id=batch.batch_id,
             ready_reason=batch.ready_reason or "unknown",
-            batch_size=len(batch.messages),
+            batch_size=len(messages),
             partitions=list(batch.last_sequence_by_partition.keys()),
             eventhub_name=self.eventhub_config.name,
             batch_age_seconds=batch_age_seconds,
         ) as span:
-            if not batch.messages:
+            if not messages:
                 logger.debug("No messages in batch to process")
                 span.set_attribute("empty_batch", True)
-                return
+                return True
 
-            logger.info(f"🔄 Processing batch of {len(batch.messages)} messages")
+            logger.info(f"🔄 Processing batch of {len(messages)} messages")
             logger.info(f"   Partitions in batch: {list(batch.last_sequence_by_partition.keys())}")
             logger.info(f"   Sequence ranges: {batch.last_sequence_by_partition}")
 
             try:
                 # Call the message processor
                 logger.info("📤 Calling message processor...")
-                success = self.message_processor(batch.messages)
+                success = await self._run_message_processor(messages)
 
                 span.set_attribute("processor_success", success)
 
@@ -998,7 +1206,7 @@ class EventHubAsyncConsumer:
                     # This tells EventHub where we've successfully processed up to
                     # Group messages by partition to get the last message per partition
                     last_message_by_partition: dict[str, EventHubMessage] = {}
-                    for message in batch.messages:
+                    for message in messages:
                         partition_id = message.partition_id
                         if (
                             partition_id not in last_message_by_partition
@@ -1014,40 +1222,51 @@ class EventHubAsyncConsumer:
                     checkpoints_updated = 0
                     max_checkpoint_attempts = 3
                     for partition_id, last_message in last_message_by_partition.items():
-                        if last_message.partition_context:
-                            for attempt in range(1, max_checkpoint_attempts + 1):
-                                try:
-                                    await last_message.partition_context.update_checkpoint(
-                                        last_message.event_data
-                                    )
-                                    checkpoints_updated += 1
-                                    logger.info(
-                                        f"✅ Updated SDK checkpoint for partition {partition_id}: "
-                                        f"offset={last_message.event_data.offset}, sequence={last_message.sequence_number}"
-                                    )
-                                    break
-                                except Exception as e:
-                                    logger.error(
-                                        "❌ Failed to update SDK checkpoint for partition %s (attempt %s/%s): %s",
-                                        partition_id,
-                                        attempt,
-                                        max_checkpoint_attempts,
-                                        e,
-                                        exc_info=True,
-                                    )
-                                    logfire.error(
-                                        "Checkpoint update failed",
-                                        partition_id=partition_id,
-                                        attempt=attempt,
-                                        max_attempts=max_checkpoint_attempts,
-                                        error=str(e),
-                                    )
-                                    if attempt < max_checkpoint_attempts:
-                                        await asyncio.sleep(2 ** (attempt - 1))
-                        else:
-                            logger.warning(
-                                f"⚠️ No partition_context for partition {partition_id}, cannot update SDK checkpoint"
+                        if not last_message.partition_context:
+                            raise RuntimeError(
+                                f"No partition_context for partition {partition_id}; "
+                                "cannot update SDK checkpoint"
                             )
+
+                        checkpoint_updated = False
+                        last_checkpoint_error: Exception | None = None
+                        for attempt in range(1, max_checkpoint_attempts + 1):
+                            try:
+                                await last_message.partition_context.update_checkpoint(
+                                    last_message.event_data
+                                )
+                                checkpoints_updated += 1
+                                checkpoint_updated = True
+                                logger.info(
+                                    f"✅ Updated SDK checkpoint for partition {partition_id}: "
+                                    f"offset={last_message.event_data.offset}, sequence={last_message.sequence_number}"
+                                )
+                                break
+                            except Exception as e:
+                                last_checkpoint_error = e
+                                logger.error(
+                                    "❌ Failed to update SDK checkpoint for partition %s (attempt %s/%s): %s",
+                                    partition_id,
+                                    attempt,
+                                    max_checkpoint_attempts,
+                                    e,
+                                    exc_info=True,
+                                )
+                                logfire.error(
+                                    "Checkpoint update failed",
+                                    partition_id=partition_id,
+                                    attempt=attempt,
+                                    max_attempts=max_checkpoint_attempts,
+                                    error=str(e),
+                                )
+                                if attempt < max_checkpoint_attempts:
+                                    await asyncio.sleep(2 ** (attempt - 1))
+
+                        if not checkpoint_updated:
+                            raise RuntimeError(
+                                f"Failed to update SDK checkpoint for partition {partition_id} "
+                                f"after {max_checkpoint_attempts} attempts"
+                            ) from last_checkpoint_error
 
                     span.set_attribute("checkpoints_updated", checkpoints_updated)
                     span.set_attribute("partitions_count", len(last_message_by_partition))
@@ -1058,26 +1277,33 @@ class EventHubAsyncConsumer:
                     self.stats["batches_processed"] += 1
                     span.set_attribute("total_batches_processed", self.stats["batches_processed"])
                     # Store checkpoint data in stats for monitoring (sequence numbers for display)
-                    partition_checkpoints = batch.get_checkpoint_data()
+                    partition_checkpoints: dict[str, int] = {}
+                    for message in messages:
+                        current_sequence = partition_checkpoints.get(message.partition_id)
+                        if current_sequence is None or message.sequence_number > current_sequence:
+                            partition_checkpoints[message.partition_id] = message.sequence_number
                     self.stats["last_checkpoint"] = partition_checkpoints.copy()
 
                     logger.info(
                         f"✅ Batch processed successfully! Total batches: {self.stats['batches_processed']}, "
                         f"Total messages: {self.stats['messages_received']}"
                     )
+                    return True
                 else:
                     logger.error("❌ Message processor returned failure")
                     logfire.error(
-                        "Message processor returned failure", batch_size=len(batch.messages)
+                        "Message processor returned failure", batch_size=len(messages)
                     )
                     span.set_attribute("processor_failure", True)
+                    return False
 
             except Exception as e:
                 logger.error(f"❌ Error processing batch: {e}", exc_info=True)
                 logfire.error(
-                    "Batch processing error", error=str(e), batch_size=len(batch.messages)
+                    "Batch processing error", error=str(e), batch_size=len(messages)
                 )
                 span.set_attribute("error", str(e))
+                return False
 
     def get_stats(self) -> dict[str, Any]:
         """Get consumer statistics."""

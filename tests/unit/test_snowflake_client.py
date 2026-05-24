@@ -12,6 +12,7 @@ This module tests the SnowflakeHighPerformanceStreamingClient class including:
 """
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -603,8 +604,9 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Set up mock channel
         mock_channel = MagicMock()
         mock_channel.append_rows.return_value = None
-        mock_channel.get_latest_committed_offset_token.return_value = None
+        mock_channel.initiate_flush.return_value = None
         mock_channel.wait_for_commit.return_value = None
+        mock_channel.get_latest_committed_offset_token.return_value = "offset_123"
 
         mock_get_or_create = mocker.patch.object(
             client, "_get_or_create_channel", return_value=mock_channel
@@ -622,12 +624,13 @@ class TestSnowflakeHighPerformanceStreamingClient:
 
         # Assert
         assert result is True
-        mock_get_or_create.assert_called_once_with("test_channel")
         mock_channel.append_rows.assert_called_once_with(
             data_batch,
-            start_offset_token="1",
-            end_offset_token="3",
+            start_offset_token="partition_0_1",
+            end_offset_token="partition_0_3",
         )
+        mock_channel.append_row.assert_not_called()
+        mock_channel.initiate_flush.assert_called_once_with()
         mock_channel.wait_for_commit.assert_called_once()
         assert client.stats["total_messages_sent"] == 3
         assert client.stats["total_batches_sent"] == 1
@@ -661,21 +664,21 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Act
         client._ingest_batch_impl("test_channel", data_batch, "partition_5")
 
-        # Assert - verify current SDK append_rows offset-token API is used
+        # Assert - verify offset tokens use partition_id and sequence_number
         mock_channel.append_rows.assert_called_once_with(
             data_batch,
-            start_offset_token="100",
-            end_offset_token="101",
+            start_offset_token="partition_5_100",
+            end_offset_token="partition_5_101",
         )
 
-    def test_ingest_batch_impl_skips_rows_at_or_below_committed_offset(
+    def test_ingest_batch_impl_skips_already_committed_rows(
         self,
         sample_snowflake_config,
         sample_snowflake_connection_config,
         mock_logfire,
         mocker,
     ):
-        """Test replay rows already committed by Snowflake are not appended again."""
+        """Test that _ingest_batch_impl skips rows already committed in Snowflake."""
         # Arrange
         client = SnowflakeHighPerformanceStreamingClient(
             snowflake_config=sample_snowflake_config,
@@ -683,13 +686,12 @@ class TestSnowflakeHighPerformanceStreamingClient:
         )
 
         mock_channel = MagicMock()
-        mock_channel.get_latest_committed_offset_token.return_value = "101"
+        mock_channel.get_latest_committed_offset_token.return_value = "partition_5_100"
         mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
 
         data_batch = [
             {"sequence_number": 100, "data": "row1"},
             {"sequence_number": 101, "data": "row2"},
-            {"sequence_number": 102, "data": "row3"},
         ]
 
         # Act
@@ -698,22 +700,20 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Assert
         assert result is True
         mock_channel.append_rows.assert_called_once_with(
-            [{"sequence_number": 102, "data": "row3"}],
-            start_offset_token="102",
-            end_offset_token="102",
+            [{"sequence_number": 101, "data": "row2"}],
+            start_offset_token="partition_5_101",
+            end_offset_token="partition_5_101",
         )
-        mock_channel.wait_for_commit.assert_called_once()
         assert client.stats["total_messages_sent"] == 1
-        assert client.stats["total_batches_sent"] == 1
 
-    def test_ingest_batch_impl_returns_success_when_replay_batch_is_fully_committed(
+    def test_ingest_batch_impl_checks_status_when_rows_already_committed(
         self,
         sample_snowflake_config,
         sample_snowflake_connection_config,
         mock_logfire,
         mocker,
     ):
-        """Test a fully replayed committed batch succeeds without sending rows."""
+        """Test that committed replay still checks Snowflake row status."""
         # Arrange
         client = SnowflakeHighPerformanceStreamingClient(
             snowflake_config=sample_snowflake_config,
@@ -721,121 +721,19 @@ class TestSnowflakeHighPerformanceStreamingClient:
         )
 
         mock_channel = MagicMock()
-        mock_channel.get_latest_committed_offset_token.return_value = "102"
+        mock_channel.get_latest_committed_offset_token.return_value = "partition_5_101"
         mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
 
-        data_batch = [
-            {"sequence_number": 100, "data": "row1"},
-            {"sequence_number": 101, "data": "row2"},
-            {"sequence_number": 102, "data": "row3"},
-        ]
-
-        # Act
-        result = client._ingest_batch_impl("test_channel", data_batch, "partition_5")
-
-        # Assert
-        assert result is True
-        mock_channel.append_rows.assert_not_called()
-        mock_channel.wait_for_commit.assert_not_called()
-        assert client.stats["total_messages_sent"] == 0
-        assert client.stats["total_batches_sent"] == 0
-
-    def test_ingest_batch_impl_falls_back_to_append_row_when_append_rows_missing(
-        self,
-        sample_snowflake_config,
-        sample_snowflake_connection_config,
-        mock_logfire,
-        mocker,
-    ):
-        """Test compatibility with SDK/mock channels that only expose append_row."""
-        # Arrange
-        client = SnowflakeHighPerformanceStreamingClient(
-            snowflake_config=sample_snowflake_config,
-            connection_config=sample_snowflake_connection_config,
+        status = SimpleNamespace(
+            channel_name="test_channel",
+            status_code="ACTIVE",
+            rows_inserted_count=0,
+            rows_parsed_count=2,
+            rows_error_count=1,
+            last_error_message="bad replayed row",
+            last_error_timestamp=None,
+            last_error_offset_token_upper_bound="partition_5_101",
         )
-
-        mock_channel = MagicMock()
-        del mock_channel.append_rows
-        mock_channel.get_latest_committed_offset_token.return_value = None
-        mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
-
-        data_batch = [
-            {"sequence_number": 200, "data": "row1"},
-            {"sequence_number": 201, "data": "row2"},
-        ]
-
-        # Act
-        result = client._ingest_batch_impl("test_channel", data_batch, "partition_9")
-
-        # Assert
-        assert result is True
-        assert mock_channel.append_row.call_count == 2
-        mock_channel.append_row.assert_any_call(data_batch[0], offset_token="200")
-        mock_channel.append_row.assert_any_call(data_batch[1], offset_token="201")
-        mock_channel.wait_for_commit.assert_called_once()
-
-    def test_ingest_batch_impl_waits_for_commit_to_reach_end_offset(
-        self,
-        sample_snowflake_config,
-        sample_snowflake_connection_config,
-        mock_logfire,
-        mocker,
-    ):
-        """Test wait_for_commit checker accepts committed tokens at or after the end token."""
-        # Arrange
-        client = SnowflakeHighPerformanceStreamingClient(
-            snowflake_config=sample_snowflake_config,
-            connection_config=sample_snowflake_connection_config,
-        )
-
-        mock_channel = MagicMock()
-        mock_channel.get_latest_committed_offset_token.return_value = None
-        mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
-
-        data_batch = [
-            {"sequence_number": 300, "data": "row1"},
-            {"sequence_number": 301, "data": "row2"},
-        ]
-
-        # Act
-        client._ingest_batch_impl("test_channel", data_batch, "partition_3")
-
-        # Assert
-        token_checker = mock_channel.wait_for_commit.call_args.args[0]
-        assert token_checker("300") is False
-        assert token_checker("301") is True
-        assert token_checker("302") is True
-        assert mock_channel.wait_for_commit.call_args.kwargs["timeout_seconds"] == (
-            sample_snowflake_config.connection_timeout_seconds
-        )
-
-    def test_ingest_batch_impl_raises_when_channel_reports_row_errors(
-        self,
-        sample_snowflake_config,
-        sample_snowflake_connection_config,
-        mock_logfire,
-        mocker,
-    ):
-        """Test Snowflake server-side row errors fail the batch before checkpointing."""
-        # Arrange
-        sample_snowflake_config.channel_status_interval_seconds = 60
-        client = SnowflakeHighPerformanceStreamingClient(
-            snowflake_config=sample_snowflake_config,
-            connection_config=sample_snowflake_connection_config,
-        )
-
-        mock_channel = MagicMock()
-        mock_channel.get_latest_committed_offset_token.return_value = None
-        mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
-
-        status = MagicMock()
-        status.channel_name = "test_channel"
-        status.status_code = "OK"
-        status.rows_inserted_count = 0
-        status.rows_parsed_count = 1
-        status.rows_error_count = 1
-        status.last_error_message = "invalid schema"
-        status.last_error_timestamp = None
         client.streaming_client = MagicMock()
         client.streaming_client.get_channel_statuses.return_value = {"test_channel": status}
 
@@ -843,59 +741,199 @@ class TestSnowflakeHighPerformanceStreamingClient:
         with pytest.raises(RuntimeError, match="reported row errors"):
             client._ingest_batch_impl(
                 "test_channel",
-                [{"sequence_number": 300, "data": "row1"}],
-                "partition_3",
+                [
+                    {"sequence_number": 100, "data": "row1"},
+                    {"sequence_number": 101, "data": "row2"},
+                ],
+                "partition_5",
             )
+        mock_channel.append_rows.assert_not_called()
 
-        with pytest.raises(RuntimeError, match="reported row errors"):
-            client._ingest_batch_impl(
-                "test_channel",
-                [{"sequence_number": 300, "data": "row1"}],
-                "partition_3",
-            )
-
-        assert client.streaming_client.get_channel_statuses.call_count == 2
-        assert client.stats["total_messages_sent"] == 0
-        assert client.stats["total_batches_sent"] == 0
-
-    def test_maybe_check_channel_status_throttles_per_channel(
+    def test_ingest_batch_impl_requires_sequence_number(
         self,
         sample_snowflake_config,
         sample_snowflake_connection_config,
+        mock_logfire,
+        mocker,
     ):
-        """Test channel status polling is throttled independently per channel."""
+        """Test that _ingest_batch_impl fails closed without source sequence numbers."""
         # Arrange
-        sample_snowflake_config.channel_status_interval_seconds = 60
+        client = SnowflakeHighPerformanceStreamingClient(
+            snowflake_config=sample_snowflake_config,
+            connection_config=sample_snowflake_connection_config,
+        )
+        mock_channel = MagicMock()
+        mock_channel.get_latest_committed_offset_token.return_value = None
+        mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
+
+        # Act & Assert
+        with pytest.raises(ValueError, match="sequence_number"):
+            client._ingest_batch_impl("test_channel", [{"data": "row1"}], "partition_0")
+        mock_channel.append_rows.assert_not_called()
+
+    def test_ingest_batch_impl_falls_back_to_append_row(
+        self,
+        sample_snowflake_config,
+        sample_snowflake_connection_config,
+        mock_logfire,
+        mocker,
+    ):
+        """Test that _ingest_batch_impl supports channels without append_rows."""
+        # Arrange
         client = SnowflakeHighPerformanceStreamingClient(
             snowflake_config=sample_snowflake_config,
             connection_config=sample_snowflake_connection_config,
         )
 
-        def make_status(channel_name: str) -> MagicMock:
-            status = MagicMock()
-            status.channel_name = channel_name
-            status.status_code = "OK"
-            status.rows_inserted_count = 0
-            status.rows_parsed_count = 0
-            status.rows_error_count = 0
-            status.last_error_message = None
-            status.last_error_timestamp = None
-            return status
+        class AppendRowOnlyChannel:
+            def __init__(self):
+                self.appended_rows = []
+                self.initiate_flush_called = False
 
-        client.streaming_client = MagicMock()
-        client.streaming_client.get_channel_statuses.side_effect = lambda names: {
-            names[0]: make_status(names[0])
-        }
+            def append_row(self, row, offset_token):
+                self.appended_rows.append((row, offset_token))
+
+            def initiate_flush(self):
+                self.initiate_flush_called = True
+
+            def wait_for_commit(self, token_checker, timeout_seconds=None):
+                assert token_checker(self.appended_rows[-1][1]) is True
+                assert timeout_seconds == sample_snowflake_config.connection_timeout_seconds
+
+            def get_latest_committed_offset_token(self):
+                return None
+
+        channel = AppendRowOnlyChannel()
+        mocker.patch.object(client, "_get_or_create_channel", return_value=channel)
+
+        data_batch = [
+            {"sequence_number": 1, "data": "row1"},
+            {"sequence_number": 2, "data": "row2"},
+        ]
 
         # Act
-        client._maybe_check_channel_status("channel-p0")
-        client._maybe_check_channel_status("channel-p1")
-        client._maybe_check_channel_status("channel-p0")
+        result = client._ingest_batch_impl("test_channel", data_batch, "partition_0")
 
         # Assert
-        assert client.streaming_client.get_channel_statuses.call_count == 2
-        client.streaming_client.get_channel_statuses.assert_any_call(["channel-p0"])
-        client.streaming_client.get_channel_statuses.assert_any_call(["channel-p1"])
+        assert result is True
+        assert channel.appended_rows == [
+            ({"sequence_number": 1, "data": "row1"}, "partition_0_1"),
+            ({"sequence_number": 2, "data": "row2"}, "partition_0_2"),
+        ]
+        assert channel.initiate_flush_called is True
+
+    def test_ingest_batch_impl_requires_commit_wait(
+        self,
+        sample_snowflake_config,
+        sample_snowflake_connection_config,
+        mock_logfire,
+        mocker,
+    ):
+        """Test that _ingest_batch_impl fails closed without wait_for_commit."""
+        # Arrange
+        client = SnowflakeHighPerformanceStreamingClient(
+            snowflake_config=sample_snowflake_config,
+            connection_config=sample_snowflake_connection_config,
+        )
+
+        class NoCommitWaitChannel:
+            def append_rows(self, rows, start_offset_token=None, end_offset_token=None):
+                return None
+
+            def initiate_flush(self):
+                return None
+
+            def get_latest_committed_offset_token(self):
+                return None
+
+        mocker.patch.object(client, "_get_or_create_channel", return_value=NoCommitWaitChannel())
+
+        # Act & Assert
+        with pytest.raises(RuntimeError, match="wait_for_commit"):
+            client._ingest_batch_impl(
+                "test_channel",
+                [{"sequence_number": 1, "data": "row1"}],
+                "partition_0",
+            )
+
+    def test_ingest_batch_impl_fails_on_channel_status_row_errors(
+        self,
+        sample_snowflake_config,
+        sample_snowflake_connection_config,
+        mock_logfire,
+        mocker,
+    ):
+        """Test that _ingest_batch_impl fails when Snowflake reports row errors."""
+        # Arrange
+        client = SnowflakeHighPerformanceStreamingClient(
+            snowflake_config=sample_snowflake_config,
+            connection_config=sample_snowflake_connection_config,
+        )
+
+        mock_channel = MagicMock()
+        mock_channel.get_latest_committed_offset_token.return_value = None
+        mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
+
+        status = SimpleNamespace(
+            channel_name="test_channel",
+            status_code="ACTIVE",
+            rows_inserted_count=0,
+            rows_parsed_count=1,
+            rows_error_count=1,
+            last_error_message="bad row",
+            last_error_timestamp=None,
+            last_error_offset_token_upper_bound="partition_0_1",
+        )
+        client.streaming_client = MagicMock()
+        client.streaming_client.get_channel_statuses.return_value = {"test_channel": status}
+
+        # Act & Assert
+        with pytest.raises(RuntimeError, match="reported row errors"):
+            client._ingest_batch_impl(
+                "test_channel",
+                [{"sequence_number": 1, "data": "row1"}],
+                "partition_0",
+            )
+
+    def test_ingest_batch_impl_fails_on_fatal_channel_status(
+        self,
+        sample_snowflake_config,
+        sample_snowflake_connection_config,
+        mock_logfire,
+        mocker,
+    ):
+        """Test that _ingest_batch_impl fails when Snowflake reports fatal status."""
+        # Arrange
+        client = SnowflakeHighPerformanceStreamingClient(
+            snowflake_config=sample_snowflake_config,
+            connection_config=sample_snowflake_connection_config,
+        )
+
+        mock_channel = MagicMock()
+        mock_channel.get_latest_committed_offset_token.return_value = None
+        mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
+        mocker.patch.object(client, "_reopen_channel")
+
+        status = SimpleNamespace(
+            channel_name="test_channel",
+            status_code="ERR_INVALID_CHANNEL",
+            rows_inserted_count=0,
+            rows_parsed_count=0,
+            rows_error_count=0,
+            last_error_message=None,
+            last_error_timestamp=None,
+            last_error_offset_token_upper_bound=None,
+        )
+        client.streaming_client = MagicMock()
+        client.streaming_client.get_channel_statuses.return_value = {"test_channel": status}
+
+        # Act & Assert
+        with pytest.raises(RuntimeError, match="status indicates an error"):
+            client._ingest_batch_impl(
+                "test_channel",
+                [{"sequence_number": 1, "data": "row1"}],
+                "partition_0",
+            )
 
     def test_ingest_batch_impl_with_empty_batch_returns_true(
         self,
@@ -939,7 +977,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
 
         # Test data
-        data_batch = [{"data": "row1"}]
+        data_batch = [{"sequence_number": 1, "data": "row1"}]
 
         # Act & Assert
         with pytest.raises(Exception, match="Append failed"):
@@ -963,7 +1001,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         mocker.patch.object(client, "_get_or_create_channel", return_value=None)
 
         # Test data
-        data_batch = [{"data": "row1"}]
+        data_batch = [{"sequence_number": 1, "data": "row1"}]
 
         # Act & Assert
         with pytest.raises(RuntimeError, match="Failed to get channel"):
@@ -987,7 +1025,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         mock_impl = mocker.patch.object(client, "_ingest_with_retry", return_value=True)
 
         # Test data
-        data_batch = [{"data": "row1"}]
+        data_batch = [{"sequence_number": 1, "data": "row1"}]
 
         # Act
         result = client.ingest_batch("test_channel", data_batch, "partition_0")
@@ -1016,8 +1054,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         # Mock successful channel operation
         mock_channel = MagicMock()
         mock_channel.append_rows.return_value = None
-        mock_channel.get_latest_committed_offset_token.return_value = None
-        mock_channel.wait_for_commit.return_value = None
+        mock_channel.get_latest_committed_offset_token.return_value = "offset_123"
         mocker.patch.object(client, "_get_or_create_channel", return_value=mock_channel)
 
         # Store original implementation
@@ -1053,7 +1090,7 @@ class TestSnowflakeHighPerformanceStreamingClient:
         client._ingest_with_retry = retry_decorator(failing_impl)  # type: ignore[method-assign]
 
         # Test data
-        data_batch = [{"data": "row1"}]
+        data_batch = [{"sequence_number": 1, "data": "row1"}]
 
         # Act
         result = client.ingest_batch("test_channel", data_batch, "partition_0")

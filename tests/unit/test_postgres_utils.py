@@ -63,7 +63,10 @@ def test_get_partition_checkpoints_returns_dict(monkeypatch):
         config=MagicMock(),
     )
 
-    assert result == {"0": 123, "1": 456}
+    assert result == {
+        "0": {"offset": "123", "sequence_number": 123},
+        "1": {"offset": "456", "sequence_number": 456},
+    }
 
 
 def test_insert_partition_checkpoint_executes(monkeypatch):

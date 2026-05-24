@@ -3,6 +3,8 @@
 import contextlib
 import json
 import logging
+import time
+import uuid
 from typing import Any
 
 import psycopg
@@ -17,6 +19,17 @@ _connection_cache: dict[str, psycopg.Connection] = {}
 _azure_credential: DefaultAzureCredential | None = None
 
 _AZURE_TOKEN_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
+
+
+def _checkpoint_value(waterlevel: Any, metadata: Any) -> dict[str, Any]:
+    decoded_metadata = metadata if isinstance(metadata, dict) else {}
+    sequence_number = decoded_metadata.get("sequence_number", waterlevel)
+    offset = decoded_metadata.get("offset_string", decoded_metadata.get("offset", waterlevel))
+    return {"offset": str(offset), "sequence_number": int(sequence_number)}
+
+
+def _ownership_table_name(control_table: str) -> str:
+    return f"{control_table}_ownership"
 
 
 def _get_cache_key(config: PostgresConnectionConfig, database: str) -> str:
@@ -256,7 +269,7 @@ def get_partition_checkpoints(
         cursor.execute(
             sql.SQL(
                 """
-                SELECT DISTINCT ON (partition_id) partition_id, waterlevel
+                SELECT DISTINCT ON (partition_id) partition_id, waterlevel, metadata
                 FROM {}.{}
                 WHERE eventhub_namespace = %s
                   AND eventhub = %s
@@ -284,7 +297,10 @@ def get_partition_checkpoints(
         logger.info("No partition checkpoints found for %s/%s", eventhub_namespace, eventhub)
         return None
 
-    partition_checkpoints = {row[0]: row[1] for row in results}
+    partition_checkpoints = {
+        row[0]: _checkpoint_value(row[1], row[2] if len(row) > 2 else None)
+        for row in results
+    }
     logger.info(
         "Retrieved partition checkpoints: %s for %s/%s",
         partition_checkpoints,
@@ -292,3 +308,198 @@ def get_partition_checkpoints(
         eventhub,
     )
     return partition_checkpoints
+
+
+def _ensure_postgres_ownership_table(cursor: Any, schema_name: str, table_name: str) -> None:
+    cursor.execute(
+        sql.SQL(
+            """
+            CREATE TABLE IF NOT EXISTS {}.{} (
+                fully_qualified_namespace TEXT NOT NULL,
+                eventhub_name TEXT NOT NULL,
+                consumer_group TEXT NOT NULL,
+                target_db TEXT NOT NULL,
+                target_schema TEXT NOT NULL,
+                target_table TEXT NOT NULL,
+                partition_id TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                etag TEXT NOT NULL,
+                last_modified_time DOUBLE PRECISION NOT NULL,
+                ts_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (
+                    fully_qualified_namespace,
+                    eventhub_name,
+                    consumer_group,
+                    target_db,
+                    target_schema,
+                    target_table,
+                    partition_id
+                )
+            )
+            """
+        ).format(sql.Identifier(schema_name), sql.Identifier(table_name))
+    )
+
+
+def list_partition_ownership(
+    fully_qualified_namespace: str,
+    eventhub_name: str,
+    consumer_group: str,
+    target_db: str,
+    target_schema: str,
+    target_table: str,
+    config: PostgresConnectionConfig | None = None,
+    control_db: str | None = None,
+    control_schema: str | None = None,
+    control_table: str | None = None,
+) -> list[dict[str, Any]]:
+    if config is None:
+        config = PostgresConnectionConfig()
+
+    actual_control_db = control_db or target_db
+    actual_control_schema = control_schema or target_schema
+    ownership_table = _ownership_table_name(control_table or "INGESTION_STATUS")
+
+    conn = get_connection(config, actual_control_db, use_cache=True)
+    with conn.cursor() as cursor:
+        _ensure_postgres_ownership_table(cursor, actual_control_schema, ownership_table)
+        cursor.execute(
+            sql.SQL(
+                """
+                SELECT partition_id, owner_id, etag, last_modified_time
+                FROM {}.{}
+                WHERE fully_qualified_namespace = %s
+                  AND eventhub_name = %s
+                  AND consumer_group = %s
+                  AND target_db = %s
+                  AND target_schema = %s
+                  AND target_table = %s
+                """
+            ).format(
+                sql.Identifier(actual_control_schema),
+                sql.Identifier(ownership_table),
+            ),
+            (
+                fully_qualified_namespace,
+                eventhub_name,
+                consumer_group,
+                target_db,
+                target_schema,
+                target_table,
+            ),
+        )
+        rows = cursor.fetchall()
+
+    return [
+        {
+            "fully_qualified_namespace": fully_qualified_namespace,
+            "eventhub_name": eventhub_name,
+            "consumer_group": consumer_group,
+            "partition_id": row[0],
+            "owner_id": row[1],
+            "etag": row[2],
+            "last_modified_time": float(row[3]),
+        }
+        for row in rows
+    ]
+
+
+def claim_partition_ownership(
+    ownership_list: list[dict[str, Any]],
+    target_db: str,
+    target_schema: str,
+    target_table: str,
+    config: PostgresConnectionConfig | None = None,
+    control_db: str | None = None,
+    control_schema: str | None = None,
+    control_table: str | None = None,
+) -> list[dict[str, Any]]:
+    if not ownership_list:
+        return []
+
+    if config is None:
+        config = PostgresConnectionConfig()
+
+    actual_control_db = control_db or target_db
+    actual_control_schema = control_schema or target_schema
+    ownership_table = _ownership_table_name(control_table or "INGESTION_STATUS")
+
+    conn = get_connection(config, actual_control_db, use_cache=True)
+    claimed: list[dict[str, Any]] = []
+    with conn.cursor() as cursor:
+        _ensure_postgres_ownership_table(cursor, actual_control_schema, ownership_table)
+        for ownership in ownership_list:
+            now = time.time()
+            new_etag = uuid.uuid4().hex
+            if ownership.get("etag"):
+                cursor.execute(
+                    sql.SQL(
+                        """
+                        UPDATE {}.{}
+                        SET owner_id = %s,
+                            etag = %s,
+                            last_modified_time = %s,
+                            ts_modified = CURRENT_TIMESTAMP
+                        WHERE fully_qualified_namespace = %s
+                          AND eventhub_name = %s
+                          AND consumer_group = %s
+                          AND target_db = %s
+                          AND target_schema = %s
+                          AND target_table = %s
+                          AND partition_id = %s
+                          AND etag = %s
+                        RETURNING partition_id
+                        """
+                    ).format(
+                        sql.Identifier(actual_control_schema),
+                        sql.Identifier(ownership_table),
+                    ),
+                    (
+                        ownership["owner_id"],
+                        new_etag,
+                        now,
+                        ownership["fully_qualified_namespace"],
+                        ownership["eventhub_name"],
+                        ownership["consumer_group"],
+                        target_db,
+                        target_schema,
+                        target_table,
+                        ownership["partition_id"],
+                        ownership["etag"],
+                    ),
+                )
+            else:
+                cursor.execute(
+                    sql.SQL(
+                        """
+                        INSERT INTO {}.{} (
+                            fully_qualified_namespace, eventhub_name, consumer_group,
+                            target_db, target_schema, target_table, partition_id,
+                            owner_id, etag, last_modified_time, ts_modified
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT DO NOTHING
+                        RETURNING partition_id
+                        """
+                    ).format(
+                        sql.Identifier(actual_control_schema),
+                        sql.Identifier(ownership_table),
+                    ),
+                    (
+                        ownership["fully_qualified_namespace"],
+                        ownership["eventhub_name"],
+                        ownership["consumer_group"],
+                        target_db,
+                        target_schema,
+                        target_table,
+                        ownership["partition_id"],
+                        ownership["owner_id"],
+                        new_etag,
+                        now,
+                    ),
+                )
+
+            if cursor.fetchone():
+                claimed.append({**ownership, "etag": new_etag, "last_modified_time": now})
+
+    return claimed

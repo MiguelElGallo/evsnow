@@ -150,23 +150,25 @@ class TestEndToEndPipeline:
 
         # Assert: Verify Snowflake ingestion
         assert success is True
-        assert len(ingested_batches) == 3
+        expected_partitions = {message.partition_id for message in sample_eventhub_messages}
+        assert {batch["partition"] for batch in ingested_batches} == expected_partitions
+        assert len(ingested_batches) == len(expected_partitions)
 
-        assert [batch["partition"] for batch in ingested_batches] == ["0", "1", "2"]
-        assert [batch["channel"] for batch in ingested_batches] == [
-            f"{mapping.channel_name}-p0",
-            f"{mapping.channel_name}-p1",
-            f"{mapping.channel_name}-p2",
-        ]
+        total_ingested_messages = sum(len(batch["data"]) for batch in ingested_batches)
+        assert total_ingested_messages == len(sample_eventhub_messages)
 
         # Verify data format
-        data_items = [data_item for batch in ingested_batches for data_item in batch["data"]]
-        assert len(data_items) == len(sample_eventhub_messages)
-        for data_item in data_items:
-            assert "event_body" in data_item
-            assert "partition_id" in data_item
-            assert "sequence_number" in data_item
-            assert "ingestion_timestamp" in data_item
+        for batch in ingested_batches:
+            assert "channel" in batch
+            assert "data" in batch
+            assert "partition" in batch
+            assert batch["channel"].endswith(f"-p-{batch['partition']}")
+            assert all(item["partition_id"] == batch["partition"] for item in batch["data"])
+            for data_item in batch["data"]:
+                assert "event_body" in data_item
+                assert "partition_id" in data_item
+                assert "sequence_number" in data_item
+                assert "ingestion_timestamp" in data_item
 
     async def test_pipeline_stats_tracked_correctly(
         self,
@@ -615,14 +617,14 @@ class TestErrorRecovery:
             message.partition_id = "0"
 
         # Manually retry the ingestion
+        single_partition_messages = [
+            message for message in sample_eventhub_messages if message.partition_id == "0"
+        ]
         success = False
         for _ in range(3):
-            try:
-                success = mapping._process_messages(sample_eventhub_messages)
-                if success:
-                    break
-            except ConnectionError:
-                continue
+            success = mapping._process_messages(single_partition_messages)
+            if success:
+                break
 
         # Cleanup
         mapping.snowflake_client.stop()

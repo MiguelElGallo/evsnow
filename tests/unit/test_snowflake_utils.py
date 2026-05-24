@@ -863,3 +863,51 @@ class TestCheckpointOperations:
             )
 
         mock_snowflake_cursor.close.assert_called_once()
+
+
+class TestSnowflakeOwnershipUtilities:
+    """Tests for Snowflake ownership helper SQL."""
+
+    def test_ensure_ownership_table_uses_hybrid_table_primary_key(self, mock_snowflake_cursor):
+        """Test ownership table creation uses enforced Hybrid Table constraints."""
+        mock_snowflake_cursor.fetchall.side_effect = [[], []]
+
+        snowflake_utils._ensure_snowflake_ownership_table(
+            mock_snowflake_cursor,
+            "CONTROL.PUBLIC.INGESTION_STATUS_OWNERSHIP",
+        )
+
+        create_sql = mock_snowflake_cursor.execute.call_args_list[-1].args[0]
+        assert "CREATE HYBRID TABLE IF NOT EXISTS" in create_sql
+        assert "PRIMARY KEY" in create_sql
+
+    def test_ensure_ownership_table_rejects_existing_standard_table(self, mock_snowflake_cursor):
+        """Test existing non-hybrid ownership tables fail closed."""
+        mock_snowflake_cursor.fetchall.side_effect = [[], [("INGESTION_STATUS_OWNERSHIP",)]]
+
+        with pytest.raises(RuntimeError, match="not a Hybrid Table"):
+            snowflake_utils._ensure_snowflake_ownership_table(
+                mock_snowflake_cursor,
+                "CONTROL.PUBLIC.INGESTION_STATUS_OWNERSHIP",
+            )
+
+    def test_claim_ownership_validates_warehouse_identifier(self, snowflake_config):
+        """Test ownership claim validates config-driven warehouse identifiers."""
+        bad_config = snowflake_config.model_copy(update={"warehouse": "BAD;DROP"})
+
+        with pytest.raises(ValueError, match="Invalid Snowflake identifier"):
+            snowflake_utils.claim_partition_ownership(
+                ownership_list=[
+                    {
+                        "fully_qualified_namespace": "test.servicebus.windows.net",
+                        "eventhub_name": "test-hub",
+                        "consumer_group": "test-group",
+                        "partition_id": "0",
+                        "owner_id": "owner-1",
+                    }
+                ],
+                target_db="TEST_DB",
+                target_schema="TEST_SCHEMA",
+                target_table="TEST_TABLE",
+                config=bad_config,
+            )

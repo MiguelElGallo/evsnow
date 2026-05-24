@@ -5,8 +5,8 @@ Provides a CheckpointStore compatible with Azure EventHub SDK backed by
 Snowflake or Postgres control tables.
 """
 
+import asyncio
 import logging
-import time
 from collections.abc import Iterable
 from typing import Any, Protocol
 
@@ -16,6 +16,7 @@ from azure.eventhub.aio import CheckpointStore
 from utils.config import PostgresConnectionConfig, SnowflakeConnectionConfig
 
 logger = logging.getLogger(__name__)
+CheckpointValue = int | dict[str, Any]
 
 __all__ = [
     "DatabaseCheckpointStore",
@@ -29,13 +30,25 @@ __all__ = [
 class CheckpointManagerProtocol(Protocol):
     """Protocol for checkpoint managers used by the Azure SDK store."""
 
-    async def get_last_checkpoint(self) -> dict[str, int] | None: ...
+    async def get_last_checkpoint(self) -> dict[str, CheckpointValue] | None: ...
 
     async def save_checkpoint(
         self,
         partition_checkpoints: dict[str, int],
         partition_metadata: dict[str, dict[str, Any]] | None = None,
     ) -> bool: ...
+
+    async def list_ownership(
+        self,
+        fully_qualified_namespace: str,
+        eventhub_name: str,
+        consumer_group: str,
+    ) -> list[dict[str, Any]]: ...
+
+    async def claim_ownership(
+        self,
+        ownership_list: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]: ...
 
     def close(self) -> None: ...
 
@@ -67,13 +80,19 @@ class SnowflakeCheckpointManager:
         self.snowflake_config = snowflake_config
         self.session = session
         self._external_session = session is not None
+        self._io_lock = asyncio.Lock()
 
-    async def get_last_checkpoint(self) -> dict[str, int] | None:
+    async def _run_backend(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        async with self._io_lock:
+            return await asyncio.to_thread(func, *args, **kwargs)
+
+    async def get_last_checkpoint(self) -> dict[str, CheckpointValue] | None:
         """Get last checkpoint per partition from Snowflake."""
         try:
             from utils.snowflake import get_partition_checkpoints
 
-            result: dict[str, int] | None = get_partition_checkpoints(
+            result: dict[str, CheckpointValue] | None = await self._run_backend(
+                get_partition_checkpoints,
                 eventhub_namespace=self.eventhub_namespace,
                 eventhub=self.eventhub_name,
                 target_db=self.target_db,
@@ -94,7 +113,7 @@ class SnowflakeCheckpointManager:
 
         except Exception as e:
             logger.error("Failed to get last checkpoint: %s", e, exc_info=True)
-            return None
+            raise
 
     async def save_checkpoint(
         self,
@@ -129,7 +148,8 @@ class SnowflakeCheckpointManager:
                         self.control_table,
                     )
 
-                    insert_partition_checkpoint(
+                    await self._run_backend(
+                        insert_partition_checkpoint,
                         eventhub_namespace=self.eventhub_namespace,
                         eventhub=self.eventhub_name,
                         target_db=self.target_db,
@@ -174,6 +194,46 @@ class SnowflakeCheckpointManager:
                 )
                 return False
 
+    async def list_ownership(
+        self,
+        fully_qualified_namespace: str,
+        eventhub_name: str,
+        consumer_group: str,
+    ) -> list[dict[str, Any]]:
+        from utils.snowflake import list_partition_ownership
+
+        return await self._run_backend(
+            list_partition_ownership,
+            fully_qualified_namespace=fully_qualified_namespace,
+            eventhub_name=eventhub_name,
+            consumer_group=consumer_group,
+            target_db=self.target_db,
+            target_schema=self.target_schema,
+            target_table=self.target_table,
+            config=self.snowflake_config,
+            control_db=self.control_db,
+            control_schema=self.control_schema,
+            control_table=self.control_table,
+        )
+
+    async def claim_ownership(
+        self,
+        ownership_list: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        from utils.snowflake import claim_partition_ownership
+
+        return await self._run_backend(
+            claim_partition_ownership,
+            ownership_list=list(ownership_list),
+            target_db=self.target_db,
+            target_schema=self.target_schema,
+            target_table=self.target_table,
+            config=self.snowflake_config,
+            control_db=self.control_db,
+            control_schema=self.control_schema,
+            control_table=self.control_table,
+        )
+
     def close(self):
         """Close owned Snowflake session resources."""
         if self.session and not self._external_session:
@@ -204,13 +264,19 @@ class PostgresCheckpointManager:
         self.control_schema = control_schema
         self.control_table = control_table
         self.postgres_config = postgres_config
+        self._io_lock = asyncio.Lock()
 
-    async def get_last_checkpoint(self) -> dict[str, int] | None:
+    async def _run_backend(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        async with self._io_lock:
+            return await asyncio.to_thread(func, *args, **kwargs)
+
+    async def get_last_checkpoint(self) -> dict[str, CheckpointValue] | None:
         """Get last checkpoint per partition from Postgres."""
         try:
             from utils.postgres import get_partition_checkpoints
 
-            result: dict[str, int] | None = get_partition_checkpoints(
+            result: dict[str, CheckpointValue] | None = await self._run_backend(
+                get_partition_checkpoints,
                 eventhub_namespace=self.eventhub_namespace,
                 eventhub=self.eventhub_name,
                 target_db=self.target_db,
@@ -266,7 +332,8 @@ class PostgresCheckpointManager:
                         self.control_table,
                     )
 
-                    insert_partition_checkpoint(
+                    await self._run_backend(
+                        insert_partition_checkpoint,
                         eventhub_namespace=self.eventhub_namespace,
                         eventhub=self.eventhub_name,
                         target_db=self.target_db,
@@ -311,6 +378,46 @@ class PostgresCheckpointManager:
                 )
                 raise
 
+    async def list_ownership(
+        self,
+        fully_qualified_namespace: str,
+        eventhub_name: str,
+        consumer_group: str,
+    ) -> list[dict[str, Any]]:
+        from utils.postgres import list_partition_ownership
+
+        return await self._run_backend(
+            list_partition_ownership,
+            fully_qualified_namespace=fully_qualified_namespace,
+            eventhub_name=eventhub_name,
+            consumer_group=consumer_group,
+            target_db=self.target_db,
+            target_schema=self.target_schema,
+            target_table=self.target_table,
+            config=self.postgres_config,
+            control_db=self.control_db,
+            control_schema=self.control_schema,
+            control_table=self.control_table,
+        )
+
+    async def claim_ownership(
+        self,
+        ownership_list: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        from utils.postgres import claim_partition_ownership
+
+        return await self._run_backend(
+            claim_partition_ownership,
+            ownership_list=list(ownership_list),
+            target_db=self.target_db,
+            target_schema=self.target_schema,
+            target_table=self.target_table,
+            config=self.postgres_config,
+            control_db=self.control_db,
+            control_schema=self.control_schema,
+            control_table=self.control_table,
+        )
+
     def close(self):
         """Close cached Postgres connections."""
         try:
@@ -327,7 +434,6 @@ class DatabaseCheckpointStore(CheckpointStore):
     def __init__(self, checkpoint_manager: CheckpointManagerProtocol, backend_label: str):
         self.checkpoint_manager = checkpoint_manager
         self.backend_label = backend_label
-        self._ownership_cache: dict[str, dict[str, Any]] = {}
         self._checkpoint_cache: dict[str, dict[str, Any]] = {}
 
     async def list_ownership(
@@ -337,27 +443,18 @@ class DatabaseCheckpointStore(CheckpointStore):
         consumer_group: str,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Return cached ownership records."""
-        return list(self._ownership_cache.values())
+        """Return durable ownership records from the configured backend."""
+        return await self.checkpoint_manager.list_ownership(
+            fully_qualified_namespace,
+            eventhub_name,
+            consumer_group,
+        )
 
     async def claim_ownership(
         self, ownership_list: Iterable[dict[str, Any]], **kwargs: Any
     ) -> list[dict[str, Any]]:
-        """Claim ownership for partitions and cache the claims."""
-        claimed = []
-        for ownership in ownership_list:
-            partition_id = ownership["partition_id"]
-            self._ownership_cache[partition_id] = {
-                "fully_qualified_namespace": ownership["fully_qualified_namespace"],
-                "eventhub_name": ownership["eventhub_name"],
-                "consumer_group": ownership["consumer_group"],
-                "partition_id": partition_id,
-                "owner_id": ownership["owner_id"],
-                "last_modified_time": time.time(),
-                "etag": str(time.time()),
-            }
-            claimed.append(self._ownership_cache[partition_id])
-
+        """Claim partition ownership through durable backend compare-and-set."""
+        claimed = await self.checkpoint_manager.claim_ownership(ownership_list)
         logger.debug("Claimed ownership for %s partitions", len(claimed))
         return claimed
 
@@ -376,25 +473,11 @@ class DatabaseCheckpointStore(CheckpointStore):
 
         self._checkpoint_cache[partition_id] = checkpoint
 
-        try:
-            offset_int = int(offset)
-            logger.info(
-                "✅ Converted offset to int: partition=%s, offset_int=%s", partition_id, offset_int
-            )
-        except (ValueError, TypeError) as e:
-            logger.error(
-                "❌ Invalid offset format: offset=%r, type=%s, error=%s, falling back to sequence_number",
-                offset,
-                type(offset).__name__,
-                e,
-            )
-            offset_int = sequence_number
-
-        partition_checkpoints = {partition_id: offset_int}
+        partition_checkpoints = {partition_id: sequence_number}
         partition_metadata = {
             partition_id: {
                 "sequence_number": sequence_number,
-                "offset_string": offset,
+                "offset_string": str(offset),
                 "fully_qualified_namespace": checkpoint.get("fully_qualified_namespace"),
                 "eventhub_name": checkpoint.get("eventhub_name"),
                 "consumer_group": checkpoint.get("consumer_group"),
@@ -404,7 +487,7 @@ class DatabaseCheckpointStore(CheckpointStore):
         logger.info(
             "💾 Calling save_checkpoint: partition=%s, waterlevel=%s, metadata.sequence_number=%s",
             partition_id,
-            offset_int,
+            sequence_number,
             sequence_number,
         )
 
@@ -420,7 +503,7 @@ class DatabaseCheckpointStore(CheckpointStore):
                 sequence_number,
             )
         else:
-            logger.warning("Failed to update checkpoint for partition %s", partition_id)
+            raise RuntimeError(f"Failed to update checkpoint for partition {partition_id}")
 
     async def list_checkpoints(
         self,
@@ -436,14 +519,23 @@ class DatabaseCheckpointStore(CheckpointStore):
             return []
 
         checkpoints = []
-        for partition_id, offset_value in checkpoints_data.items():
+        for partition_id, checkpoint_value in checkpoints_data.items():
+            if isinstance(checkpoint_value, dict):
+                offset_value = checkpoint_value.get("offset") or checkpoint_value.get(
+                    "offset_string"
+                )
+                sequence_number = checkpoint_value.get("sequence_number")
+            else:
+                offset_value = checkpoint_value
+                sequence_number = checkpoint_value
+
             checkpoint = {
                 "fully_qualified_namespace": fully_qualified_namespace,
                 "eventhub_name": eventhub_name,
                 "consumer_group": consumer_group,
                 "partition_id": partition_id,
                 "offset": str(offset_value),
-                "sequence_number": offset_value,
+                "sequence_number": int(sequence_number),
             }
             self._checkpoint_cache[partition_id] = checkpoint
             checkpoints.append(checkpoint)
