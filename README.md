@@ -22,7 +22,7 @@ See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
 
 - Python 3.13+ and `uv` installed
 - Snowflake account/role with permission to create/use the target database, schema, and pipe
-- Azure Event Hub namespace with read access (consumer group) and either `az login` or a connection string
+- Azure Event Hub namespace with read access (consumer group) and one supported auth path: local Azure CLI login, service-principal environment variables, managed identity, or an explicit per-hub connection string
 - Ability to run OpenSSL to generate RSA keys for Snowflake key-pair auth
 - Snowflake CLI `snow` (or Snowflake UI) to test key-pair auth and query Snowflake
 
@@ -107,6 +107,10 @@ Postgres control table notes:
 - When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
 - When `CONTROL_PG_AUTH_MODE=azure_token`, the app uses `DefaultAzureCredential` and passes the access token as the password; `CONTROL_PG_PASSWORD` is ignored. Ensure the Azure AD principal exists on the server and has access to the database/schema/table.
 
+Snowflake control table notes:
+- `CONTROL_OWNERSHIP_MODE=durable` is the production mode. With `CONTROL_TABLE_BACKEND=snowflake`, durable Event Hubs partition ownership requires a Snowflake Hybrid Table because standard-table primary and unique constraints are not enforced.
+- `CONTROL_OWNERSHIP_MODE=local_single_consumer_smoke` is only for a local single-consumer smoke test when Hybrid Tables are unavailable. It keeps partition ownership in memory while persisting checkpoints to a standard Snowflake table, so it does not validate multi-consumer ownership or failover.
+
 ### Snowflake authentication
 
 Generate RSA key pair for authentication:
@@ -137,10 +141,24 @@ of the private key to a temporary file.
 
 ### Azure authentication
 
-For Event Hub consumption, EvSnow uses `EVENTHUBNAME_{N}_CONNECTION_STRING` when it is set. Otherwise it uses the Azure CLI identity from `az login`; that identity needs `Azure Event Hubs Data Receiver` on the Event Hub or namespace.
+The pipeline uses `DefaultAzureCredential` by default, which supports local Azure CLI
+login, service-principal environment variables, and managed identity in Azure-hosted
+runtimes. Make sure you're logged in for local development:
 
 ```bash
 az login
+```
+
+For a user-assigned managed identity, set the client ID on each Event Hub config:
+
+```bash
+EVENTHUBNAME_1_MANAGED_IDENTITY_CLIENT_ID="00000000-0000-0000-0000-000000000000"
+```
+
+To force Azure CLI-only auth for local testing, opt in explicitly:
+
+```bash
+EVENTHUBNAME_1_CREDENTIAL_MODE=azure_cli
 ```
 
 Or provide a least-privilege Listen connection string in `.env`:
@@ -149,7 +167,9 @@ Or provide a least-privilege Listen connection string in `.env`:
 EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=EvSnowListen;SharedAccessKey=<listen-key>"
 ```
 
-`AZURE_EVENTHUB_CONNECTION_STRING` is used by `tools/eventhub_sender`, not by the main pipeline receiver.
+Reference:
+- [DefaultAzureCredential for Python](https://learn.microsoft.com/python/api/azure-identity/azure.identity.aio.defaultazurecredential)
+- [EventHubConsumerClient options](https://learn.microsoft.com/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient)
 
 ## Use
 
@@ -208,15 +228,11 @@ EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
 # Skips messages already in Event Hub
 EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=@latest
 
-# Option 3: Event Hub offset 0
-# This is a concrete offset, not a synonym for earliest. Prefer -1 for
-# beginning-of-stream behavior unless you intentionally want offset 0.
-EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
 ```
 
 **How It Works:**
 
-1. **First run (no checkpoints):** Uses `STARTING_POSITION_ON_NO_CHECKPOINT` (`-1` = beginning; `@latest` = only new messages; `0` = offset zero).
+1. **First run (no checkpoints):** Uses `STARTING_POSITION_ON_NO_CHECKPOINT` (`-1` = all existing messages; `@latest` = only new messages).
 2. **Subsequent runs (checkpoints exist):** Always resumes from the last saved checkpoint; the setting is ignored.
 3. **After truncating checkpoints:** Same as first run again; uses the configured starting position.
 
@@ -227,7 +243,6 @@ EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=0
 **Recommendation:** 
 - Use `-1` (default) for production to prevent message loss
 - Use `@latest` for development/testing when you only want new messages
-- Avoid `0` unless you specifically need to start from Event Hub offset zero
 
 ## Optional features
 
@@ -298,6 +313,7 @@ See [`.env.example`](./.env.example) for all available configuration options wit
 
 ## Docs
 
+- [Python Pipeline Hardening Plan](./docs/python-pipeline-hardening-plan.md) - Migration findings, milestones, and remaining hardening work
 - [Step by Step Guide](./SNOWFLAKE_COMPLETE_SETUP.md) - Setup guide for Snowflake
 - [Snowflake Quickstart](./SNOWFLAKE_QUICKSTART.md) - Compact setup and validation checklist
 

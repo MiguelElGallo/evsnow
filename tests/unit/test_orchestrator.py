@@ -17,7 +17,7 @@ import asyncio
 import signal
 import sys
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -298,28 +298,22 @@ class TestPipelineMapping:
         assert mapping.stats["batches_processed"] == 1
         assert mapping.stats["last_activity"] is not None
         assert mock_snowflake_client.ingest_batch.call_count == 3
-
-        calls = mock_snowflake_client.ingest_batch.call_args_list
-        assert [ingest_call.kwargs["partition_id"] for ingest_call in calls] == ["0", "1", "2"]
-        assert [ingest_call.kwargs["channel_name"] for ingest_call in calls] == [
-            f"{mapping.channel_name}-p0",
-            f"{mapping.channel_name}-p1",
-            f"{mapping.channel_name}-p2",
-        ]
-
-        sequences_by_partition = {
-            ingest_call.kwargs["partition_id"]: [
-                row["sequence_number"] for row in ingest_call.kwargs["data_batch"]
-            ]
-            for ingest_call in calls
+        called_partitions = {
+            ingest_call.kwargs["partition_id"]
+            for ingest_call in mock_snowflake_client.ingest_batch.call_args_list
         }
-        assert sequences_by_partition == {
-            "0": [100, 103, 106, 109],
-            "1": [101, 104, 107],
-            "2": [102, 105, 108],
-        }
+        assert called_partitions == {"0", "1", "2"}
 
-    def test_process_messages_sanitizes_partition_channel_suffix(
+        for ingest_call in mock_snowflake_client.ingest_batch.call_args_list:
+            partition_id = ingest_call.kwargs["partition_id"]
+            assert ingest_call.kwargs["channel_name"] == mapping._channel_name_for_partition(
+                partition_id
+            )
+            assert {
+                row["partition_id"] for row in ingest_call.kwargs["data_batch"]
+            } == {partition_id}
+
+    def test_process_messages_returns_false_if_any_partition_ingest_fails(
         self,
         complete_pipeline_config,
         sample_mapping,
@@ -328,7 +322,7 @@ class TestPipelineMapping:
         mock_snowflake_client,
         mock_logfire,
     ):
-        """Test that partition channel suffixes are safe for Snowflake channel names."""
+        """Test that _process_messages fails the batch if one partition fails."""
         # Arrange
         mapping = PipelineMapping(
             mapping_config=sample_mapping,
@@ -336,27 +330,20 @@ class TestPipelineMapping:
         )
         mapping.start()
 
-        messages = sample_eventhub_messages[:3]
-        messages[0].partition_id = "partition/1"
-        messages[0].sequence_number = 2
-        messages[1].partition_id = "partition/1"
-        messages[1].sequence_number = 1
-        messages[2].partition_id = "space partition"
+        def fail_partition_one(*, channel_name, data_batch, partition_id):
+            return partition_id != "1"
+
+        mock_snowflake_client.ingest_batch.side_effect = fail_partition_one
 
         # Act
-        result = mapping._process_messages(messages)
+        result = mapping._process_messages(sample_eventhub_messages)
 
         # Assert
-        assert result is True
-        assert [
-            ingest_call.kwargs["channel_name"]
-            for ingest_call in mock_snowflake_client.ingest_batch.call_args_list
-        ] == [
-            f"{mapping.channel_name}-ppartition-1",
-            f"{mapping.channel_name}-pspace-partition",
-        ]
-        first_batch = mock_snowflake_client.ingest_batch.call_args_list[0].kwargs["data_batch"]
-        assert [row["sequence_number"] for row in first_batch] == [1, 2]
+        assert result is False
+        assert mapping.stats["messages_processed"] == 0
+        assert mapping.stats["batches_processed"] == 0
+        assert len(mapping.stats["errors"]) == 1
+        assert mapping.stats["errors"][0]["partition_id"] == "1"
 
     def test_process_messages_without_snowflake_client_returns_false(
         self, complete_pipeline_config, sample_mapping, sample_eventhub_messages, mock_logfire

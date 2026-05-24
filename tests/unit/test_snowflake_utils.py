@@ -13,19 +13,18 @@ All tests use mocks and do not connect to real Snowflake instances.
 
 import json
 import re
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, call
 from typing import Any
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 
-from utils.config import SnowflakeConnectionConfig
 import utils.snowflake as snowflake_utils
-
+from utils.config import SnowflakeConnectionConfig
 
 # ============================================================================
 # Test Fixtures
@@ -571,6 +570,27 @@ class TestControlTable:
         mock_snowflake_connection.close.assert_called_once()
 
     @patch("utils.snowflake.get_connection")
+    def test_create_control_table_can_create_standard_table(
+        self, mock_get_connection, mock_snowflake_connection, snowflake_config
+    ):
+        """Test standard control table creation for single-consumer smoke tests."""
+        mock_cursor = mock_snowflake_connection.cursor.return_value
+        mock_get_connection.return_value = mock_snowflake_connection
+
+        result = snowflake_utils.create_control_table(
+            target_db="CONTROL_DB",
+            target_schema="PUBLIC",
+            target_table="INGESTION_STATUS",
+            config=snowflake_config,
+            use_hybrid_table=False,
+        )
+
+        assert result is True
+        execute_calls = [call[0][0] for call in mock_cursor.execute.call_args_list]
+        assert any("CREATE TABLE IF NOT EXISTS" in call for call in execute_calls)
+        assert not any("CREATE HYBRID TABLE IF NOT EXISTS" in call for call in execute_calls)
+
+    @patch("utils.snowflake.get_connection")
     def test_create_control_table_validates_identifiers(
         self, mock_get_connection, mock_snowflake_connection, snowflake_config
     ):
@@ -863,3 +883,51 @@ class TestCheckpointOperations:
             )
 
         mock_snowflake_cursor.close.assert_called_once()
+
+
+class TestSnowflakeOwnershipUtilities:
+    """Tests for Snowflake ownership helper SQL."""
+
+    def test_ensure_ownership_table_uses_hybrid_table_primary_key(self, mock_snowflake_cursor):
+        """Test ownership table creation uses enforced Hybrid Table constraints."""
+        mock_snowflake_cursor.fetchall.side_effect = [[], []]
+
+        snowflake_utils._ensure_snowflake_ownership_table(
+            mock_snowflake_cursor,
+            "CONTROL.PUBLIC.INGESTION_STATUS_OWNERSHIP",
+        )
+
+        create_sql = mock_snowflake_cursor.execute.call_args_list[-1].args[0]
+        assert "CREATE HYBRID TABLE IF NOT EXISTS" in create_sql
+        assert "PRIMARY KEY" in create_sql
+
+    def test_ensure_ownership_table_rejects_existing_standard_table(self, mock_snowflake_cursor):
+        """Test existing non-hybrid ownership tables fail closed."""
+        mock_snowflake_cursor.fetchall.side_effect = [[], [("INGESTION_STATUS_OWNERSHIP",)]]
+
+        with pytest.raises(RuntimeError, match="not a Hybrid Table"):
+            snowflake_utils._ensure_snowflake_ownership_table(
+                mock_snowflake_cursor,
+                "CONTROL.PUBLIC.INGESTION_STATUS_OWNERSHIP",
+            )
+
+    def test_claim_ownership_validates_warehouse_identifier(self, snowflake_config):
+        """Test ownership claim validates config-driven warehouse identifiers."""
+        bad_config = snowflake_config.model_copy(update={"warehouse": "BAD;DROP"})
+
+        with pytest.raises(ValueError, match="Invalid Snowflake identifier"):
+            snowflake_utils.claim_partition_ownership(
+                ownership_list=[
+                    {
+                        "fully_qualified_namespace": "test.servicebus.windows.net",
+                        "eventhub_name": "test-hub",
+                        "consumer_group": "test-group",
+                        "partition_id": "0",
+                        "owner_id": "owner-1",
+                    }
+                ],
+                target_db="TEST_DB",
+                target_schema="TEST_SCHEMA",
+                target_table="TEST_TABLE",
+                config=bad_config,
+            )

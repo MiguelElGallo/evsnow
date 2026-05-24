@@ -17,7 +17,6 @@ import logging
 import os
 import re
 import signal
-from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -91,6 +90,13 @@ class PipelineMapping:
             "errors": [],
         }
 
+    def _channel_name_for_partition(self, partition_id: str) -> str:
+        # Snowflake offset tokens are tracked per channel, so each Event Hub
+        # partition needs a stable channel namespace for replay-safe checkpointing.
+        partition_segment = re.sub(r"[^A-Za-z0-9_-]", "-", str(partition_id).strip())
+        partition_segment = re.sub(r"-{2,}", "-", partition_segment).strip("-_")
+        return f"{self.channel_name}-p-{partition_segment or 'unknown'}"
+
     def start(self) -> None:
         """Start the mapping components."""
         if self.running:
@@ -134,6 +140,7 @@ class PipelineMapping:
                 control_table=self.pipeline_config.target_table,
                 control_table_backend=self.pipeline_config.control_table_backend,
                 control_postgres_config=self.pipeline_config.control_postgres,
+                control_ownership_mode=self.pipeline_config.control_ownership_mode,
                 capture_messages=bool(getattr(self.pipeline_config, "capture_messages", False)),
                 capture_messages_dir=str(
                     getattr(self.pipeline_config, "capture_messages_dir", "messages")
@@ -228,82 +235,67 @@ class PipelineMapping:
                 return False
 
             try:
-                messages_by_partition: defaultdict[str, list[EventHubMessage]] = defaultdict(list)
-                for message in messages:
-                    messages_by_partition[str(message.partition_id)].append(message)
+                if not messages:
+                    logger.debug("No messages to process")
+                    span.set_attribute("success", True)
+                    return True
 
-                span.set_attribute("base_channel_name", self.channel_name)
+                messages_by_partition: dict[str, list[EventHubMessage]] = {}
+                for message in messages:
+                    messages_by_partition.setdefault(message.partition_id, []).append(message)
+
                 span.set_attribute("partition_count", len(messages_by_partition))
 
-                success = True
-                failed_partition_id: str | None = None
-                failed_partition_count = 0
-                for partition_id in sorted(messages_by_partition):
-                    partition_messages = sorted(
-                        messages_by_partition[partition_id],
-                        key=lambda msg: msg.sequence_number,
-                    )
+                for partition_id, partition_messages in messages_by_partition.items():
                     logger.debug(
-                        "Converting %d messages from partition %s to dict format...",
+                        "Converting %s messages from partition %s to dict format...",
                         len(partition_messages),
                         partition_id,
                     )
                     data_batch = [msg.to_dict() for msg in partition_messages]
-
-                    # Log first message as sample
                     if data_batch:
                         logger.debug(f"Sample message: {str(data_batch[0])[:200]}...")
 
-                    channel_name = _partition_channel_name(self.channel_name, partition_id)
-
+                    channel_name = self._channel_name_for_partition(partition_id)
                     logger.debug(
-                        "Sending partition batch of %d messages to Snowflake "
-                        "(channel: %s, partition: %s)...",
+                        "Sending %s messages to Snowflake (channel: %s, partition: %s)...",
                         len(data_batch),
                         channel_name,
                         partition_id,
                     )
 
-                    partition_success = self.snowflake_client.ingest_batch(
+                    success = self.snowflake_client.ingest_batch(
                         channel_name=channel_name,
                         data_batch=data_batch,
                         partition_id=partition_id,
                     )
 
-                    if not partition_success:
-                        success = False
-                        failed_partition_id = partition_id
-                        failed_partition_count = len(partition_messages)
+                    if not success:
                         logger.error(
-                            "❌ Failed to ingest %d messages from partition %s",
+                            "❌ Failed to ingest %s messages from partition %s",
                             len(partition_messages),
                             partition_id,
                         )
-                        break
+                        self.stats["errors"].append(
+                            {
+                                "timestamp": datetime.now(UTC),
+                                "message_count": len(partition_messages),
+                                "partition_id": partition_id,
+                            }
+                        )
+                        span.set_attribute("success", False)
+                        return False
 
-                if success:
-                    self.stats["messages_processed"] += len(messages)
-                    self.stats["batches_processed"] += 1
-                    self.stats["last_activity"] = datetime.now(UTC)
-                    logger.info(
-                        f"✅ Processed batch: {len(messages)} messages. "
-                        f"Total: {self.stats['messages_processed']}"
-                    )
-                    span.set_attribute("success", True)
-                    span.set_attribute("total_messages_processed", self.stats["messages_processed"])
-                    return True
-                else:
-                    logger.error(f"❌ Failed to ingest {len(messages)} messages")
-                    error_entry: dict[str, Any] = {
-                        "timestamp": datetime.now(UTC),
-                        "message_count": len(messages),
-                    }
-                    if failed_partition_id is not None:
-                        error_entry["partition_id"] = failed_partition_id
-                        error_entry["partition_message_count"] = failed_partition_count
-                    self.stats["errors"].append(error_entry)
-                    span.set_attribute("success", False)
-                    return False
+                self.stats["messages_processed"] += len(messages)
+                self.stats["batches_processed"] += 1
+                self.stats["last_activity"] = datetime.now(UTC)
+                logger.info(
+                    f"✅ Processed batch: {len(messages)} messages. "
+                    f"Total: {self.stats['messages_processed']}"
+                )
+                span.set_attribute("success", True)
+                span.set_attribute("total_messages_processed", self.stats["messages_processed"])
+                return True
 
             except Exception as e:
                 logger.error(f"❌ Error processing messages: {e}", exc_info=True)

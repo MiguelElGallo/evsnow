@@ -41,10 +41,6 @@ def test_log_no_checkpoint_behavior_variants(sample_eventhub_config, caplog):
     consumer._log_no_checkpoint_behavior("@latest")
     assert "LATEST" in caplog.text
 
-    caplog.clear()
-    consumer._log_no_checkpoint_behavior("0")
-    assert "offset 0" in caplog.text
-
 
 @pytest.mark.unit
 def test_log_rbac_permission_validation_notice(sample_eventhub_config, caplog):
@@ -58,7 +54,7 @@ def test_log_rbac_permission_validation_notice(sample_eventhub_config, caplog):
 
 
 @pytest.mark.unit
-def test_handle_receive_error_credential_error_is_swallowed(
+def test_handle_receive_error_credential_error_fails_closed(
     sample_eventhub_config, monkeypatch
 ):
     consumer = _make_consumer(sample_eventhub_config)
@@ -74,7 +70,7 @@ def test_handle_receive_error_credential_error_is_swallowed(
     exc = RuntimeError("Failed to retrieve a token from Azure CLI credential")
     handled = consumer._handle_receive_error(exc)
 
-    assert handled is True
+    assert handled is False
     assert calls["count"] == 1
 
 

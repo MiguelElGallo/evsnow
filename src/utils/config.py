@@ -138,6 +138,14 @@ class EvSnowConfig(BaseSettings):
         validation_alias="USE_HYBRID_TABLE",
         description="Use Hybrid Table for control table (requires paid Snowflake account)",
     )
+    control_ownership_mode: Literal["durable", "local_single_consumer_smoke"] = Field(
+        default="durable",
+        validation_alias="CONTROL_OWNERSHIP_MODE",
+        description=(
+            "Partition ownership mode. durable uses the configured control backend; "
+            "local_single_consumer_smoke keeps ownership in memory and persists only checkpoints."
+        ),
+    )
     control_table_backend: Literal["snowflake", "postgres"] = Field(
         default="snowflake",
         validation_alias="CONTROL_TABLE_BACKEND",
@@ -198,14 +206,51 @@ class EvSnowConfig(BaseSettings):
 
         # Parse Event Hub configurations
         event_hub_pattern = re.compile(r"^EVENTHUBNAME_(\d+)$")
-        event_hub_consumer_pattern = re.compile(r"^EVENTHUBNAME_(\d+)_CONSUMER_GROUP$")
-        event_hub_connection_pattern = re.compile(r"^EVENTHUBNAME_(\d+)_CONNECTION_STRING$")
-        event_hub_starting_position_pattern = re.compile(
-            r"^EVENTHUBNAME_(\d+)_STARTING_POSITION_ON_NO_CHECKPOINT$"
-        )
+        event_hub_option_pattern = re.compile(r"^EVENTHUBNAME_(\d+)_(.+)$")
+        event_hub_option_fields = {
+            "CONSUMER_GROUP": "consumer_group",
+            "CONNECTION_STRING": "connection_string",
+            "MAX_BATCH_SIZE": "max_batch_size",
+            "MAX_WAIT_TIME": "max_wait_time",
+            "PREFETCH_COUNT": "prefetch_count",
+            "RETRY_TOTAL": "retry_total",
+            "RETRY_BACKOFF_FACTOR": "retry_backoff_factor",
+            "RETRY_BACKOFF_MAX": "retry_backoff_max",
+            "RETRY_MODE": "retry_mode",
+            "LOAD_BALANCING_INTERVAL": "load_balancing_interval",
+            "PARTITION_OWNERSHIP_EXPIRATION_INTERVAL": "partition_ownership_expiration_interval",
+            "LOAD_BALANCING_STRATEGY": "load_balancing_strategy",
+            "TRACK_LAST_ENQUEUED_EVENT_PROPERTIES": "track_last_enqueued_event_properties",
+            "CREDENTIAL_MODE": "credential_mode",
+            "MANAGED_IDENTITY_CLIENT_ID": "managed_identity_client_id",
+            "STARTING_POSITION_ON_NO_CHECKPOINT": "starting_position_on_no_checkpoint",
+        }
+        event_hub_global_env = {
+            "EVENTHUB_CREDENTIAL_MODE": "credential_mode",
+            "EVENTHUB_MANAGED_IDENTITY_CLIENT_ID": "managed_identity_client_id",
+            "EVENTHUB_MAX_WAIT_TIME": "max_wait_time",
+            "EVENTHUB_PREFETCH_COUNT": "prefetch_count",
+            "EVENTHUB_RETRY_TOTAL": "retry_total",
+            "EVENTHUB_RETRY_BACKOFF_FACTOR": "retry_backoff_factor",
+            "EVENTHUB_RETRY_BACKOFF_MAX": "retry_backoff_max",
+            "EVENTHUB_RETRY_MODE": "retry_mode",
+            "EVENTHUB_LOAD_BALANCING_INTERVAL": "load_balancing_interval",
+            "EVENTHUB_PARTITION_OWNERSHIP_EXPIRATION_INTERVAL": (
+                "partition_ownership_expiration_interval"
+            ),
+            "EVENTHUB_LOAD_BALANCING_STRATEGY": "load_balancing_strategy",
+            "EVENTHUB_TRACK_LAST_ENQUEUED_EVENT_PROPERTIES": (
+                "track_last_enqueued_event_properties"
+            ),
+        }
 
         # First collect all Event Hub numbers and their consumer groups
-        event_hub_data: dict[str, dict[str, str]] = {}
+        event_hub_data: dict[str, dict[str, Any]] = {}
+        event_hub_defaults = {
+            field_name: env_vars[env_name]
+            for env_name, field_name in event_hub_global_env.items()
+            if env_vars.get(env_name) is not None
+        }
 
         for key, value in env_vars.items():
             match = event_hub_pattern.match(key)
@@ -215,26 +260,16 @@ class EvSnowConfig(BaseSettings):
                     event_hub_data[hub_num] = {}
                 event_hub_data[hub_num]["name"] = value
 
-            match = event_hub_consumer_pattern.match(key)
+            match = event_hub_option_pattern.match(key)
             if match:
                 hub_num = match.group(1)
+                option_name = match.group(2)
+                field_name = event_hub_option_fields.get(option_name)
+                if field_name is None:
+                    continue
                 if hub_num not in event_hub_data:
                     event_hub_data[hub_num] = {}
-                event_hub_data[hub_num]["consumer_group"] = value
-
-            match = event_hub_connection_pattern.match(key)
-            if match:
-                hub_num = match.group(1)
-                if hub_num not in event_hub_data:
-                    event_hub_data[hub_num] = {}
-                event_hub_data[hub_num]["connection_string"] = value
-
-            match = event_hub_starting_position_pattern.match(key)
-            if match:
-                hub_num = match.group(1)
-                if hub_num not in event_hub_data:
-                    event_hub_data[hub_num] = {}
-                event_hub_data[hub_num]["starting_position_on_no_checkpoint"] = value
+                event_hub_data[hub_num][field_name] = value
 
         # Create EventHubConfig instances with consumer groups
         for hub_num, data in event_hub_data.items():
@@ -243,14 +278,13 @@ class EvSnowConfig(BaseSettings):
                     raise ValueError(
                         f"EVENTHUBNAME_{hub_num}_CONSUMER_GROUP is required for EVENTHUBNAME_{hub_num}"
                     )
-                self.event_hubs[f"EVENTHUBNAME_{hub_num}"] = EventHubConfig(
-                    name=data["name"],
-                    namespace=self.eventhub_namespace,
-                    consumer_group=data["consumer_group"],
-                    connection_string=data.get("connection_string"),
-                    starting_position_on_no_checkpoint=data.get(
-                        "starting_position_on_no_checkpoint", "-1"
-                    ),
+                event_hub_kwargs = {
+                    **event_hub_defaults,
+                    **data,
+                    "namespace": self.eventhub_namespace,
+                }
+                self.event_hubs[f"EVENTHUBNAME_{hub_num}"] = EventHubConfig.model_validate(
+                    event_hub_kwargs
                 )
 
         # Parse Snowflake configurations
@@ -338,9 +372,25 @@ class EvSnowConfig(BaseSettings):
             return v.strip().lower()
         return v
 
+    @field_validator("control_ownership_mode", mode="before")
+    @classmethod
+    def normalize_control_ownership_mode(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
     @model_validator(mode="after")
     def validate_mappings_exist(self):
         """Validate that all mappings reference existing configurations."""
+        if (
+            self.control_ownership_mode == "local_single_consumer_smoke"
+            and self.control_table_backend != "snowflake"
+        ):
+            raise ValueError(
+                "CONTROL_OWNERSHIP_MODE=local_single_consumer_smoke is only valid with "
+                "CONTROL_TABLE_BACKEND=snowflake"
+            )
+
         for mapping in self.mappings:
             if mapping.event_hub_key not in self.event_hubs:
                 raise ValueError(

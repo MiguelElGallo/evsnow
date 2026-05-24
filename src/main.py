@@ -158,14 +158,16 @@ def check_credentials() -> None:
         console.print(f"   [dim]{e!s}[/dim]\n")
 
     # Managed Identity
+    has_msi = False
     try:
         _msi_cred = ManagedIdentityCredential()
+        has_msi = True
         console.print("✅ [yellow bold]Managed Identity[/yellow bold] - Available")
         console.print(
             "   [dim]Available for services that use DefaultAzureCredential, such as Postgres azure_token auth.[/dim]"
         )
         console.print(
-            "   [yellow]Event Hub consumption does not use Managed Identity in the current runtime path.[/yellow]\n"
+            "   [yellow]Event Hub consumption may use Managed Identity when credential_mode=default.[/yellow]\n"
         )
     except Exception:
         console.print("❌ [dim]Managed Identity - Not available[/dim]")
@@ -182,14 +184,28 @@ def check_credentials() -> None:
 
     # Show conclusion
     console.print("\n[bold yellow]⚠️  CONCLUSION:[/bold yellow]")
-    console.print(
-        "[green]• Event Hub receiver uses AZURE CLI credentials unless EVENTHUBNAME_{N}_CONNECTION_STRING is set[/green]"
-    )
-    console.print("[green]• Ensure your CLI user has required RBAC roles[/green]")
-    console.print("\n[bold]Next Steps:[/bold]")
-    console.print("1. Go to Azure Portal → EventHub Namespace")
-    console.print("2. Access Control (IAM) → Role Assignments")
-    console.print("3. Verify your user has 'Azure Event Hubs Data Receiver' role")
+    if has_msi:
+        console.print(
+            "[yellow]• Event Hub receiver may use MANAGED IDENTITY through DefaultAzureCredential[/yellow]"
+        )
+        console.print(
+            "[yellow]• Verify both managed identity and Azure CLI RBAC if configs differ[/yellow]"
+        )
+        console.print("\n[bold]Next Steps:[/bold]")
+        console.print("1. Identify the Managed Identity resource in Azure Portal")
+        console.print("2. Go to EventHub Namespace → Access Control (IAM)")
+        console.print("3. Verify Managed Identity has 'Azure Event Hubs Data Receiver' role")
+        console.print("\n[bold]To force using Azure CLI credentials instead:[/bold]")
+        console.print("[dim]Set EVENTHUBNAME_{N}_CREDENTIAL_MODE=azure_cli[/dim]")
+    else:
+        console.print(
+            "[green]• System will use AZURE CLI credentials for EventHub authentication[/green]"
+        )
+        console.print("[green]• Ensure your CLI user has required RBAC roles[/green]")
+        console.print("\n[bold]Next Steps:[/bold]")
+        console.print("1. Go to Azure Portal → EventHub Namespace")
+        console.print("2. Access Control (IAM) → Role Assignments")
+        console.print("3. Verify your user has 'Azure Event Hubs Data Receiver' role")
 
 
 @app.command()
@@ -529,6 +545,10 @@ def _show_detailed_config(config: EvSnowConfig) -> None:
             table.add_row("Max Batch Size", str(eh_config.max_batch_size))
             table.add_row("Max Wait Time", f"{eh_config.max_wait_time}s")
             table.add_row("Prefetch Count", str(eh_config.prefetch_count))
+            table.add_row("Credential Mode", str(eh_config.credential_mode))
+            table.add_row("Retry Total", str(eh_config.retry_total))
+            table.add_row("Retry Mode", str(eh_config.retry_mode))
+            table.add_row("Load Balancing", str(eh_config.load_balancing_strategy))
 
             console.print(table)
 

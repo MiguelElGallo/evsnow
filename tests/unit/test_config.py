@@ -512,9 +512,82 @@ class TestEventHubConfig:
         assert config.max_batch_size == 1000
         assert config.max_wait_time == 60
         assert config.prefetch_count == 300
+        assert config.retry_total == 3
+        assert config.retry_backoff_factor == 0.8
+        assert config.retry_backoff_max == 120
+        assert config.retry_mode == "exponential"
+        assert config.load_balancing_interval == 30
+        assert config.partition_ownership_expiration_interval is None
+        assert config.load_balancing_strategy == "greedy"
+        assert config.track_last_enqueued_event_properties is False
+        assert config.credential_mode == "default"
+        assert config.managed_identity_client_id is None
         assert config.checkpoint_interval_seconds == 300
         assert config.max_message_batch_size == 1000
         assert config.batch_timeout_seconds == 300
+
+    def test_eventhub_sdk_settings_validate_positive_numbers(self):
+        """Test invalid Azure SDK numeric settings are rejected early."""
+        with pytest.raises(ValidationError) as exc_info:
+            EventHubConfig(
+                name="test-hub",
+                namespace="test.servicebus.windows.net",
+                consumer_group="$Default",
+                retry_total=0,
+            )
+
+        assert "greater than 0" in str(exc_info.value)
+
+    def test_eventhub_max_wait_time_allows_zero(self):
+        """Test Azure's documented wait-until-event mode is allowed."""
+        config = EventHubConfig(
+            name="test-hub",
+            namespace="test.servicebus.windows.net",
+            consumer_group="$Default",
+            max_wait_time=0,
+        )
+
+        assert config.max_wait_time == 0
+
+    def test_eventhub_max_wait_time_rejects_negative_values(self):
+        """Test negative receive wait timeout is rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            EventHubConfig(
+                name="test-hub",
+                namespace="test.servicebus.windows.net",
+                consumer_group="$Default",
+                max_wait_time=-1,
+            )
+
+        assert "greater than or equal to 0" in str(exc_info.value)
+
+    def test_eventhub_ownership_expiration_must_cover_load_balancing_interval(self):
+        """Test ownership expiration cannot be shorter than Azure's safe renewal window."""
+        with pytest.raises(ValidationError) as exc_info:
+            EventHubConfig(
+                name="test-hub",
+                namespace="test.servicebus.windows.net",
+                consumer_group="$Default",
+                load_balancing_interval=30,
+                partition_ownership_expiration_interval=60,
+            )
+
+        assert "6 * load_balancing_interval" in str(exc_info.value)
+
+    def test_eventhub_literal_settings_normalize_case(self):
+        """Test enum-like Event Hub settings accept env-style uppercase values."""
+        config = EventHubConfig(
+            name="test-hub",
+            namespace="test.servicebus.windows.net",
+            consumer_group="$Default",
+            credential_mode="AZURE_CLI",
+            retry_mode="FIXED",
+            load_balancing_strategy="BALANCED",
+        )
+
+        assert config.credential_mode == "azure_cli"
+        assert config.retry_mode == "fixed"
+        assert config.load_balancing_strategy == "balanced"
 
     def test_validate_starting_position_invalid(self):
         """Test that invalid starting positions are rejected."""
@@ -527,6 +600,28 @@ class TestEventHubConfig:
             )
 
         assert "Invalid starting_position" in str(exc_info.value)
+
+    def test_validate_starting_position_rejects_offset_zero(self):
+        """Test offset '0' is rejected because '-1' is the safe beginning option."""
+        with pytest.raises(ValidationError) as exc_info:
+            EventHubConfig(
+                name="test-hub",
+                namespace="test.servicebus.windows.net",
+                consumer_group="$Default",
+                starting_position_on_no_checkpoint="0",
+            )
+
+        assert "Invalid starting_position" in str(exc_info.value)
+
+    def test_use_connection_string_default(self):
+        """Test that use_connection_string defaults to False."""
+        config = EventHubConfig(
+            name="test-hub",
+            namespace="test.servicebus.windows.net",
+            consumer_group="$Default",
+        )
+
+        assert config.use_connection_string is False
 
     def test_connection_string_optional(self):
         """Test that connection string is optional."""
@@ -979,6 +1074,27 @@ class TestEvSnowConfig:
         assert config.target_schema == "public"
         assert config.target_table == "ingestion_status"
 
+    def test_local_single_consumer_ownership_mode_opt_in(self, monkeypatch):
+        """Test explicit Snowflake checkpoint smoke ownership mode opt-in."""
+        monkeypatch.setenv("CONTROL_OWNERSHIP_MODE", "local_single_consumer_smoke")
+
+        config = EvSnowConfig(eventhub_namespace="test.servicebus.windows.net")
+
+        assert config.control_ownership_mode == "local_single_consumer_smoke"
+
+    def test_local_single_consumer_ownership_mode_requires_snowflake_backend(self, monkeypatch):
+        """Test diagnostic ownership mode is limited to Snowflake checkpoint smoke tests."""
+        monkeypatch.setenv("CONTROL_PG_HOST", "localhost")
+        monkeypatch.setenv("CONTROL_PG_USER", "pguser")
+        monkeypatch.setenv("CONTROL_PG_PASSWORD", "pgpass")
+
+        with pytest.raises(ValueError, match="local_single_consumer_smoke"):
+            EvSnowConfig(
+                eventhub_namespace="test.servicebus.windows.net",
+                control_table_backend="postgres",
+                control_ownership_mode="local_single_consumer_smoke",
+            )
+
 
 class TestLoadConfig:
     """Tests for load_config function."""
@@ -1043,3 +1159,63 @@ class TestLoadConfig:
 
         assert config.environment == "development"
         assert config.region == "default"
+
+    def test_load_config_parses_eventhub_sdk_options_from_env(self, monkeypatch):
+        """Test dynamic Event Hub SDK options are parsed into EventHubConfig."""
+        monkeypatch.setenv("EVENTHUB_NAMESPACE", "test.servicebus.windows.net")
+        monkeypatch.setenv("EVENTHUBNAME_1", "hub1")
+        monkeypatch.setenv("EVENTHUBNAME_1_CONSUMER_GROUP", "group1")
+        monkeypatch.setenv("EVENTHUBNAME_1_MAX_WAIT_TIME", "15")
+        monkeypatch.setenv("EVENTHUBNAME_1_PREFETCH_COUNT", "75")
+        monkeypatch.setenv("EVENTHUBNAME_1_RETRY_TOTAL", "7")
+        monkeypatch.setenv("EVENTHUBNAME_1_RETRY_BACKOFF_FACTOR", "1.5")
+        monkeypatch.setenv("EVENTHUBNAME_1_RETRY_BACKOFF_MAX", "30")
+        monkeypatch.setenv("EVENTHUBNAME_1_RETRY_MODE", "fixed")
+        monkeypatch.setenv("EVENTHUBNAME_1_LOAD_BALANCING_INTERVAL", "12")
+        monkeypatch.setenv("EVENTHUBNAME_1_PARTITION_OWNERSHIP_EXPIRATION_INTERVAL", "90")
+        monkeypatch.setenv("EVENTHUBNAME_1_LOAD_BALANCING_STRATEGY", "balanced")
+        monkeypatch.setenv("EVENTHUBNAME_1_TRACK_LAST_ENQUEUED_EVENT_PROPERTIES", "true")
+        monkeypatch.setenv("EVENTHUBNAME_1_CREDENTIAL_MODE", "azure_cli")
+        monkeypatch.setenv("EVENTHUBNAME_1_MANAGED_IDENTITY_CLIENT_ID", "client-id")
+        monkeypatch.setenv("EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT", "@latest")
+
+        config = load_config()
+        hub = config.event_hubs["EVENTHUBNAME_1"]
+
+        assert hub.max_wait_time == 15
+        assert hub.prefetch_count == 75
+        assert hub.retry_total == 7
+        assert hub.retry_backoff_factor == 1.5
+        assert hub.retry_backoff_max == 30
+        assert hub.retry_mode == "fixed"
+        assert hub.load_balancing_interval == 12
+        assert hub.partition_ownership_expiration_interval == 90
+        assert hub.load_balancing_strategy == "balanced"
+        assert hub.track_last_enqueued_event_properties is True
+        assert hub.credential_mode == "azure_cli"
+        assert hub.managed_identity_client_id == "client-id"
+        assert hub.starting_position_on_no_checkpoint == "@latest"
+
+    def test_load_config_applies_global_eventhub_defaults(self, monkeypatch):
+        """Test global Event Hub defaults apply unless a hub overrides them."""
+        monkeypatch.setenv("EVENTHUB_NAMESPACE", "test.servicebus.windows.net")
+        monkeypatch.setenv("EVENTHUB_CREDENTIAL_MODE", "azure_cli")
+        monkeypatch.setenv("EVENTHUB_MAX_WAIT_TIME", "10")
+        monkeypatch.setenv("EVENTHUB_PREFETCH_COUNT", "60")
+        monkeypatch.setenv("EVENTHUB_RETRY_TOTAL", "5")
+        monkeypatch.setenv("EVENTHUBNAME_1", "hub1")
+        monkeypatch.setenv("EVENTHUBNAME_1_CONSUMER_GROUP", "group1")
+        monkeypatch.setenv("EVENTHUBNAME_2", "hub2")
+        monkeypatch.setenv("EVENTHUBNAME_2_CONSUMER_GROUP", "group2")
+        monkeypatch.setenv("EVENTHUBNAME_2_RETRY_TOTAL", "9")
+
+        config = load_config()
+
+        assert config.event_hubs["EVENTHUBNAME_1"].credential_mode == "azure_cli"
+        assert config.event_hubs["EVENTHUBNAME_1"].max_wait_time == 10
+        assert config.event_hubs["EVENTHUBNAME_1"].prefetch_count == 60
+        assert config.event_hubs["EVENTHUBNAME_1"].retry_total == 5
+        assert config.event_hubs["EVENTHUBNAME_2"].credential_mode == "azure_cli"
+        assert config.event_hubs["EVENTHUBNAME_2"].max_wait_time == 10
+        assert config.event_hubs["EVENTHUBNAME_2"].prefetch_count == 60
+        assert config.event_hubs["EVENTHUBNAME_2"].retry_total == 9

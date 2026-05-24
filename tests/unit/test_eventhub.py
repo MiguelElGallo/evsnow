@@ -15,9 +15,8 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, UTC, timedelta
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -28,11 +27,11 @@ from consumers.eventhub import (
     MessageBatch,
     PostgresCheckpointManager,
     PostgresCheckpointStore,
+    SingleConsumerSnowflakeCheckpointStore,
     SnowflakeCheckpointManager,
     SnowflakeCheckpointStore,
     _convert_bytes_to_str,
 )
-
 
 # ============================================================================
 # Tests for BytesEncoder
@@ -419,9 +418,8 @@ class TestSnowflakeCheckpointManager:
             snowflake_config=sample_snowflake_connection_config,
         )
 
-        result = await manager.get_last_checkpoint()
-
-        assert result is None  # Should return None on error
+        with pytest.raises(Exception, match="DB error"):
+            await manager.get_last_checkpoint()
 
     @pytest.mark.asyncio
     async def test_save_checkpoint_to_snowflake(
@@ -656,28 +654,45 @@ class TestSnowflakeCheckpointStore:
 
     @pytest.mark.asyncio
     async def test_list_ownership_returns_cached_records(self):
-        """Test listing ownership records returns cache."""
+        """Test listing ownership records delegates to durable backend."""
         mock_manager = MagicMock()
+        mock_manager.list_ownership = AsyncMock(
+            return_value=[
+                {
+                    "partition_id": "0",
+                    "owner_id": "test-owner",
+                    "fully_qualified_namespace": "test.servicebus.windows.net",
+                    "eventhub_name": "test-hub",
+                    "consumer_group": "test-group",
+                }
+            ]
+        )
         store = SnowflakeCheckpointStore(mock_manager)
-
-        # Add some ownership to cache
-        store._ownership_cache["0"] = {
-            "partition_id": "0",
-            "owner_id": "test-owner",
-            "fully_qualified_namespace": "test.servicebus.windows.net",
-            "eventhub_name": "test-hub",
-            "consumer_group": "test-group",
-        }
 
         result = await store.list_ownership("test.servicebus.windows.net", "test-hub", "test-group")
 
         assert len(result) == 1
         assert result[0]["partition_id"] == "0"
+        mock_manager.list_ownership.assert_awaited_once_with(
+            "test.servicebus.windows.net",
+            "test-hub",
+            "test-group",
+        )
 
     @pytest.mark.asyncio
     async def test_claim_ownership_for_partitions(self):
         """Test claiming ownership for partitions."""
         mock_manager = MagicMock()
+        mock_manager.claim_ownership = AsyncMock(
+            side_effect=lambda ownership_list: [
+                {
+                    **ownership,
+                    "etag": f"etag-{ownership['partition_id']}",
+                    "last_modified_time": 123.0,
+                }
+                for ownership in ownership_list
+            ]
+        )
         store = SnowflakeCheckpointStore(mock_manager)
 
         ownership_list = [
@@ -702,6 +717,52 @@ class TestSnowflakeCheckpointStore:
         assert len(claimed) == 2
         assert all("etag" in c for c in claimed)
         assert all("last_modified_time" in c for c in claimed)
+        mock_manager.claim_ownership.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_single_consumer_store_keeps_ownership_local(self):
+        """Test local ownership mode avoids Snowflake durable ownership calls."""
+        mock_manager = MagicMock()
+        store = SingleConsumerSnowflakeCheckpointStore(mock_manager)
+        ownership = {
+            "fully_qualified_namespace": "test.servicebus.windows.net",
+            "eventhub_name": "test-hub",
+            "consumer_group": "test-group",
+            "partition_id": "0",
+            "owner_id": "owner-1",
+        }
+
+        claimed = await store.claim_ownership([ownership])
+        listed = await store.list_ownership(
+            "test.servicebus.windows.net",
+            "test-hub",
+            "test-group",
+        )
+
+        assert len(claimed) == 1
+        assert claimed[0]["partition_id"] == "0"
+        assert "etag" in claimed[0]
+        assert listed == claimed
+        mock_manager.claim_ownership.assert_not_called()
+        mock_manager.list_ownership.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_single_consumer_store_rejects_stale_etag(self):
+        """Test local ownership honors the SDK etag compare-and-set shape."""
+        store = SingleConsumerSnowflakeCheckpointStore(MagicMock())
+        ownership = {
+            "fully_qualified_namespace": "test.servicebus.windows.net",
+            "eventhub_name": "test-hub",
+            "consumer_group": "test-group",
+            "partition_id": "0",
+            "owner_id": "owner-1",
+        }
+
+        claimed = await store.claim_ownership([ownership])
+        stale_claim = {**ownership, "owner_id": "owner-2", "etag": "stale"}
+
+        assert claimed
+        assert await store.claim_ownership([stale_claim]) == []
 
     @pytest.mark.asyncio
     async def test_update_checkpoint_via_sdk(self, mocker):
@@ -725,12 +786,13 @@ class TestSnowflakeCheckpointStore:
         # Should call manager's save_checkpoint
         mock_manager.save_checkpoint.assert_called_once()
         call_args = mock_manager.save_checkpoint.call_args
-        # Check that offset was converted to int
-        assert call_args[0][0] == {"0": 12345}
+        # Check that sequence number is stored separately from opaque Event Hub offset
+        assert call_args[0][0] == {"0": 100}
+        assert call_args[0][1]["0"]["offset_string"] == "12345"
 
     @pytest.mark.asyncio
     async def test_update_checkpoint_handles_invalid_offset(self, mocker):
-        """Test that invalid offset falls back to sequence number."""
+        """Test that opaque offsets are preserved in checkpoint metadata."""
         mock_manager = MagicMock()
         mock_manager.save_checkpoint = AsyncMock(return_value=True)
 
@@ -747,10 +809,30 @@ class TestSnowflakeCheckpointStore:
 
         await store.update_checkpoint(checkpoint)
 
-        # Should use sequence_number as fallback
         mock_manager.save_checkpoint.assert_called_once()
         call_args = mock_manager.save_checkpoint.call_args
-        assert call_args[0][0] == {"0": 100}  # Should use sequence_number
+        assert call_args[0][0] == {"0": 100}
+        assert call_args[0][1]["0"]["offset_string"] == "invalid"
+
+    @pytest.mark.asyncio
+    async def test_update_checkpoint_raises_when_manager_returns_false(self):
+        """Test that failed checkpoint persistence fails the SDK checkpoint call."""
+        mock_manager = MagicMock()
+        mock_manager.save_checkpoint = AsyncMock(return_value=False)
+
+        store = SnowflakeCheckpointStore(mock_manager)
+
+        checkpoint = {
+            "fully_qualified_namespace": "test.servicebus.windows.net",
+            "eventhub_name": "test-hub",
+            "consumer_group": "test-group",
+            "partition_id": "0",
+            "offset": "12345",
+            "sequence_number": 100,
+        }
+
+        with pytest.raises(RuntimeError, match="Failed to update checkpoint"):
+            await store.update_checkpoint(checkpoint)
 
     @pytest.mark.asyncio
     async def test_list_checkpoints_from_snowflake(self):
@@ -769,6 +851,31 @@ class TestSnowflakeCheckpointStore:
         assert all("partition_id" in c for c in result)
         # Offsets should be strings
         assert all(isinstance(c["offset"], str) for c in result)
+
+    @pytest.mark.asyncio
+    async def test_list_checkpoints_uses_persisted_offset_and_sequence_metadata(self):
+        """Test loading checkpoints preserves offset and sequence as separate values."""
+        mock_manager = MagicMock()
+        mock_manager.get_last_checkpoint = AsyncMock(
+            return_value={"0": {"offset": "abc-123", "sequence_number": 42}}
+        )
+
+        store = SnowflakeCheckpointStore(mock_manager)
+
+        result = await store.list_checkpoints(
+            "test.servicebus.windows.net", "test-hub", "test-group"
+        )
+
+        assert result == [
+            {
+                "fully_qualified_namespace": "test.servicebus.windows.net",
+                "eventhub_name": "test-hub",
+                "consumer_group": "test-group",
+                "partition_id": "0",
+                "offset": "abc-123",
+                "sequence_number": 42,
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_list_checkpoints_returns_empty_when_none(self):
@@ -844,9 +951,96 @@ class TestEventHubAsyncConsumer:
         assert consumer.target_table == "TEST_TABLE"
         assert consumer.batch_size == 100
         assert consumer.batch_timeout_seconds == 60
+
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_active_batch_processing(self, sample_eventhub_config):
+        """Test shutdown waits before downstream clients are closed."""
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+        consumer.running = True
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        consumer.client = mock_client
+        consumer.checkpoint_manager = MagicMock()
+
+        await consumer._processing_lock.acquire()
+        stop_task = asyncio.create_task(consumer.stop())
+        await asyncio.sleep(0)
+
+        mock_client.close.assert_not_called()
+
+        consumer._processing_lock.release()
+        await stop_task
+
+        mock_client.close.assert_awaited_once()
         assert consumer.running is False
         assert consumer.client is None
         assert consumer.checkpoint_manager is None
+
+    @pytest.mark.asyncio
+    async def test_stop_waits_for_active_on_event_before_final_drain(
+        self, sample_eventhub_config
+    ):
+        """Test shutdown waits for already-dispatched callbacks before final batch drain."""
+        processed_sequences = []
+
+        def mock_processor(messages):
+            processed_sequences.extend(message.sequence_number for message in messages)
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+            batch_size=10,
+        )
+        consumer.running = True
+        consumer.current_batch = MessageBatch(max_size=10, max_wait_seconds=60)
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        consumer.client = mock_client
+        consumer.checkpoint_manager = MagicMock()
+
+        context = MagicMock()
+        context.partition_id = "0"
+        context.update_checkpoint = AsyncMock()
+
+        event = MagicMock()
+        event.body_as_str.return_value = '{"test": "data"}'
+        event.enqueued_time = datetime.now(UTC)
+        event.properties = {}
+        event.system_properties = {}
+        event.sequence_number = 100
+        event.offset = "12345"
+
+        await consumer._batch_lock.acquire()
+        event_task = asyncio.create_task(consumer._on_event(context, event))
+        await asyncio.sleep(0)
+
+        stop_task = asyncio.create_task(consumer.stop())
+        await asyncio.sleep(0)
+
+        mock_client.close.assert_not_called()
+        context.update_checkpoint.assert_not_called()
+
+        consumer._batch_lock.release()
+        await asyncio.gather(event_task, stop_task)
+
+        assert processed_sequences == [100]
+        context.update_checkpoint.assert_awaited_once_with(event)
+        mock_client.close.assert_awaited_once()
+        assert consumer.client is None
 
     @pytest.mark.asyncio
     async def test_start_initializes_checkpoint_manager(
@@ -881,6 +1075,37 @@ class TestEventHubAsyncConsumer:
             pass
 
         assert consumer.checkpoint_manager is not None
+
+    @pytest.mark.asyncio
+    async def test_start_accepts_metadata_shaped_checkpoints(
+        self,
+        mocker,
+        sample_eventhub_config,
+        mock_eventhub_client,
+        mock_azure_credential,
+        mock_logfire,
+    ):
+        """Test start logging handles offset/sequence checkpoint metadata."""
+        checkpoints = {"0": {"offset": "abc-123", "sequence_number": 42}}
+        mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=checkpoints)
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        try:
+            await consumer.start()
+        except asyncio.CancelledError:
+            pass
+
+        assert consumer.stats["last_checkpoint"] == checkpoints
 
     @pytest.mark.asyncio
     async def test_start_initializes_postgres_checkpoint_manager(
@@ -962,6 +1187,20 @@ class TestEventHubAsyncConsumer:
 
         # Should use from_connection_string
         mock_from_conn.assert_called_once()
+        client_kwargs = mock_from_conn.call_args.kwargs
+        assert client_kwargs["retry_total"] == 3
+        assert client_kwargs["retry_backoff_factor"] == 0.8
+        assert client_kwargs["retry_backoff_max"] == 120
+        assert client_kwargs["retry_mode"] == "exponential"
+        assert client_kwargs["load_balancing_interval"] == 30
+        assert client_kwargs["load_balancing_strategy"] == "greedy"
+        assert "checkpoint_store" in client_kwargs
+
+        receive_kwargs = mock_client.receive.await_args.kwargs
+        assert receive_kwargs["max_wait_time"] == 60
+        assert receive_kwargs["prefetch"] == 50
+        assert receive_kwargs["track_last_enqueued_event_properties"] is False
+        assert receive_kwargs["on_error"] == consumer._on_receive_error
 
     @pytest.mark.asyncio
     async def test_start_creates_eventhub_client_with_credential(
@@ -976,8 +1215,10 @@ class TestEventHubAsyncConsumer:
         )
         mock_cred.close = AsyncMock()
 
-        # AzureCliCredential is imported inside start(), so patch where it's imported from
-        mocker.patch("azure.identity.aio.AzureCliCredential", return_value=mock_cred)
+        # DefaultAzureCredential is imported inside the helper, so patch the SDK import site.
+        mock_default_credential = mocker.patch(
+            "azure.identity.aio.DefaultAzureCredential", return_value=mock_cred
+        )
 
         mock_client = AsyncMock()
         mock_client.receive = AsyncMock(side_effect=asyncio.CancelledError())
@@ -1006,6 +1247,97 @@ class TestEventHubAsyncConsumer:
 
         # Should create client with credential
         mock_client_class.assert_called_once()
+        mock_default_credential.assert_called_once_with()
+        client_kwargs = mock_client_class.call_args.kwargs
+        assert client_kwargs["credential"] is mock_cred
+        assert client_kwargs["retry_total"] == sample_eventhub_config.retry_total
+        assert client_kwargs["load_balancing_strategy"] == (
+            sample_eventhub_config.load_balancing_strategy
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_passes_managed_identity_client_id_to_default_credential(
+        self, mocker, sample_eventhub_config, mock_logfire
+    ):
+        """Test user-assigned managed identity client ID is passed to DefaultAzureCredential."""
+        mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
+        config = sample_eventhub_config.model_copy(
+            update={"managed_identity_client_id": "managed-client-id"}
+        )
+
+        mock_cred = AsyncMock()
+        mock_cred.get_token = AsyncMock(
+            return_value=MagicMock(token="test-token", expires_on=time.time() + 3600)
+        )
+        mock_cred.close = AsyncMock()
+        mock_default_credential = mocker.patch(
+            "azure.identity.aio.DefaultAzureCredential", return_value=mock_cred
+        )
+
+        mock_client = AsyncMock()
+        mock_client.receive = AsyncMock(side_effect=asyncio.CancelledError())
+        mock_client.close = AsyncMock()
+        mocker.patch("consumers.eventhub.EventHubConsumerClient", return_value=mock_client)
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        try:
+            await consumer.start()
+        except asyncio.CancelledError:
+            pass
+
+        mock_default_credential.assert_called_once_with(
+            managed_identity_client_id="managed-client-id"
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_uses_azure_cli_credential_when_configured(
+        self, mocker, sample_eventhub_config, mock_logfire
+    ):
+        """Test AzureCliCredential is only used for explicit local-development opt-in."""
+        mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
+        config = sample_eventhub_config.model_copy(update={"credential_mode": "azure_cli"})
+
+        mock_cred = AsyncMock()
+        mock_cred.get_token = AsyncMock(
+            return_value=MagicMock(token="test-token", expires_on=time.time() + 3600)
+        )
+        mock_cred.close = AsyncMock()
+        mock_cli_credential = mocker.patch(
+            "azure.identity.aio.AzureCliCredential", return_value=mock_cred
+        )
+
+        mock_client = AsyncMock()
+        mock_client.receive = AsyncMock(side_effect=asyncio.CancelledError())
+        mock_client.close = AsyncMock()
+        mocker.patch("consumers.eventhub.EventHubConsumerClient", return_value=mock_client)
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        try:
+            await consumer.start()
+        except asyncio.CancelledError:
+            pass
+
+        mock_cli_credential.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_process_messages_in_batches(
@@ -1116,10 +1448,391 @@ class TestEventHubAsyncConsumer:
         batch.add_message(message)
 
         consumer.running = True
-        await consumer._process_batch(batch)
+        result = await consumer._process_batch(batch)
 
         # Checkpoint should be updated
+        assert result is True
         mock_context.update_checkpoint.assert_called_once_with(mock_event)
+
+    @pytest.mark.asyncio
+    async def test_process_batch_returns_false_and_does_not_checkpoint_on_processor_failure(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test that failed processing does not checkpoint the batch."""
+
+        def mock_processor(messages):
+            return False
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        mock_context = MagicMock()
+        mock_context.partition_id = "0"
+        mock_context.update_checkpoint = AsyncMock()
+
+        mock_event = MagicMock()
+        mock_event.body_as_str.return_value = '{"test": "data"}'
+        mock_event.enqueued_time = datetime.now(UTC)
+        mock_event.properties = {}
+        mock_event.system_properties = {}
+        mock_event.sequence_number = 100
+        mock_event.offset = "12345"
+
+        message = EventHubMessage(event_data=mock_event, partition_id="0", sequence_number=100)
+        message.partition_context = mock_context
+        batch = MessageBatch(max_size=10, max_wait_seconds=60)
+        batch.add_message(message)
+
+        result = await consumer._process_batch(batch)
+
+        assert result is False
+        mock_context.update_checkpoint.assert_not_called()
+        assert consumer.stats["batches_processed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_on_event_keeps_batch_after_processing_failure(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test that a failed ready batch is not cleared by _on_event."""
+
+        def mock_processor(messages):
+            return False
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+            batch_size=1,
+        )
+        consumer.running = True
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        consumer.client = mock_client
+        consumer.current_batch = MessageBatch(max_size=1, max_wait_seconds=60)
+        failed_batch = consumer.current_batch
+
+        mock_context = MagicMock()
+        mock_context.partition_id = "0"
+        mock_context.update_checkpoint = AsyncMock()
+
+        mock_event = MagicMock()
+        mock_event.body_as_str.return_value = '{"test": "data"}'
+        mock_event.enqueued_time = datetime.now(UTC)
+        mock_event.properties = {}
+        mock_event.system_properties = {}
+        mock_event.sequence_number = 100
+        mock_event.offset = "12345"
+
+        await consumer._on_event(mock_context, mock_event)
+
+        assert consumer.current_batch is failed_batch
+        assert len(consumer.current_batch.messages) == 1
+        assert consumer.running is False
+        assert consumer.client is None
+        mock_client.close.assert_called_once()
+        mock_context.update_checkpoint.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_event_detaches_batch_before_awaiting_processor(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test that messages appended during processing are handled in a later batch."""
+        first_processor_started = asyncio.Event()
+        release_first_processor = asyncio.Event()
+        processed_sequences: list[list[int]] = []
+
+        async def mock_processor(messages):
+            processed_sequences.append([message.sequence_number for message in messages])
+            if len(processed_sequences) == 1:
+                first_processor_started.set()
+                await release_first_processor.wait()
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+            batch_size=1,
+        )
+        consumer.running = True
+        consumer.current_batch = MessageBatch(max_size=1, max_wait_seconds=60)
+
+        context = MagicMock()
+        context.partition_id = "0"
+        context.update_checkpoint = AsyncMock()
+
+        first_event = MagicMock()
+        first_event.body_as_str.return_value = '{"id": 1}'
+        first_event.enqueued_time = datetime.now(UTC)
+        first_event.properties = {}
+        first_event.system_properties = {}
+        first_event.sequence_number = 100
+        first_event.offset = "1000"
+
+        second_event = MagicMock()
+        second_event.body_as_str.return_value = '{"id": 2}'
+        second_event.enqueued_time = datetime.now(UTC)
+        second_event.properties = {}
+        second_event.system_properties = {}
+        second_event.sequence_number = 101
+        second_event.offset = "1001"
+
+        first_task = asyncio.create_task(consumer._on_event(context, first_event))
+        await first_processor_started.wait()
+        second_task = asyncio.create_task(consumer._on_event(context, second_event))
+        await asyncio.sleep(0)
+
+        release_first_processor.set()
+        await asyncio.gather(first_task, second_task)
+
+        assert processed_sequences == [[100], [101]]
+        assert context.update_checkpoint.call_args_list[0].args == (first_event,)
+        assert context.update_checkpoint.call_args_list[1].args == (second_event,)
+        assert consumer.stats["batches_processed"] == 2
+
+    @pytest.mark.asyncio
+    async def test_failed_batch_restore_preserves_detach_order(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test that queued detached batches are restored after the first failed batch."""
+        first_processor_started = asyncio.Event()
+        release_first_processor = asyncio.Event()
+        processed_sequences: list[list[int]] = []
+
+        async def mock_processor(messages):
+            processed_sequences.append([message.sequence_number for message in messages])
+            first_processor_started.set()
+            await release_first_processor.wait()
+            return False
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+            batch_size=1,
+        )
+        consumer.running = True
+        consumer.client = AsyncMock()
+        consumer.client.close = AsyncMock()
+        consumer.current_batch = MessageBatch(max_size=1, max_wait_seconds=60)
+
+        context = MagicMock()
+        context.partition_id = "0"
+        context.update_checkpoint = AsyncMock()
+
+        first_event = MagicMock()
+        first_event.body_as_str.return_value = '{"id": 1}'
+        first_event.enqueued_time = datetime.now(UTC)
+        first_event.properties = {}
+        first_event.system_properties = {}
+        first_event.sequence_number = 100
+        first_event.offset = "1000"
+
+        second_event = MagicMock()
+        second_event.body_as_str.return_value = '{"id": 2}'
+        second_event.enqueued_time = datetime.now(UTC)
+        second_event.properties = {}
+        second_event.system_properties = {}
+        second_event.sequence_number = 101
+        second_event.offset = "1001"
+
+        first_task = asyncio.create_task(consumer._on_event(context, first_event))
+        await first_processor_started.wait()
+        second_task = asyncio.create_task(consumer._on_event(context, second_event))
+        await asyncio.sleep(0)
+
+        release_first_processor.set()
+        await asyncio.gather(first_task, second_task)
+
+        assert processed_sequences == [[100]]
+        assert [message.sequence_number for message in consumer.current_batch.messages] == [
+            100,
+            101,
+        ]
+        assert consumer.current_batch.last_sequence_by_partition == {"0": 101}
+        assert consumer.running is False
+        context.update_checkpoint.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_batch_restore_keeps_detached_batches_before_current_partial(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test restore order is detached backlog first, then newer partial batch."""
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        batches = []
+        for sequence_number in (100, 101, 102):
+            mock_event = MagicMock()
+            mock_event.body_as_str.return_value = f'{{"id": {sequence_number}}}'
+            mock_event.enqueued_time = datetime.now(UTC)
+            mock_event.properties = {}
+            mock_event.system_properties = {}
+            mock_event.sequence_number = sequence_number
+            mock_event.offset = str(sequence_number)
+
+            message = EventHubMessage(
+                event_data=mock_event,
+                partition_id="0",
+                sequence_number=sequence_number,
+            )
+            batch = MessageBatch(max_size=10, max_wait_seconds=60)
+            batch.add_message(message)
+            batches.append(batch)
+
+        batch_a, batch_b, batch_c = batches
+        consumer._detached_batches = [batch_a, batch_b]
+        consumer.current_batch = batch_c
+
+        await consumer._restore_failed_batch(batch_a)
+        await consumer._restore_failed_batch(batch_b)
+
+        assert [message.sequence_number for message in consumer.current_batch.messages] == [
+            100,
+            101,
+            102,
+        ]
+        assert consumer.current_batch.last_sequence_by_partition == {"0": 102}
+
+    @pytest.mark.asyncio
+    async def test_run_message_processor_awaits_async_callable_instance(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test async callable processors are awaited before success is returned."""
+        processor_completed = False
+
+        class AsyncCallableProcessor:
+            async def __call__(self, messages):
+                nonlocal processor_completed
+                await asyncio.sleep(0)
+                processor_completed = True
+                return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=AsyncCallableProcessor(),
+        )
+
+        result = await consumer._run_message_processor([])
+
+        assert result is True
+        assert processor_completed is True
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_update_failure_marks_batch_failed(
+        self,
+        mocker,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test that exhausted checkpoint retries fail the batch."""
+
+        def mock_processor(messages):
+            return True
+
+        mocker.patch("asyncio.sleep", new=AsyncMock())
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        mock_context = MagicMock()
+        mock_context.partition_id = "0"
+        mock_context.update_checkpoint = AsyncMock(side_effect=Exception("checkpoint down"))
+
+        mock_event = MagicMock()
+        mock_event.body_as_str.return_value = '{"test": "data"}'
+        mock_event.enqueued_time = datetime.now(UTC)
+        mock_event.properties = {}
+        mock_event.system_properties = {}
+        mock_event.sequence_number = 100
+        mock_event.offset = "12345"
+
+        message = EventHubMessage(event_data=mock_event, partition_id="0", sequence_number=100)
+        message.partition_context = mock_context
+        batch = MessageBatch(max_size=10, max_wait_seconds=60)
+        batch.add_message(message)
+
+        result = await consumer._process_batch(batch)
+
+        assert result is False
+        assert mock_context.update_checkpoint.call_count == 3
+        assert consumer.stats["batches_processed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_process_batch_returns_false_without_partition_context(
+        self,
+        sample_eventhub_config,
+        mock_logfire,
+    ):
+        """Test that missing partition context fails the batch before stats advance."""
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        mock_event = MagicMock()
+        mock_event.body_as_str.return_value = '{"test": "data"}'
+        mock_event.enqueued_time = datetime.now(UTC)
+        mock_event.properties = {}
+        mock_event.system_properties = {}
+        mock_event.sequence_number = 100
+        mock_event.offset = "12345"
+
+        message = EventHubMessage(event_data=mock_event, partition_id="0", sequence_number=100)
+        batch = MessageBatch(max_size=10, max_wait_seconds=60)
+        batch.add_message(message)
+
+        result = await consumer._process_batch(batch)
+
+        assert result is False
+        assert consumer.stats["batches_processed"] == 0
 
     @pytest.mark.asyncio
     async def test_stop_consumer_and_cleanup_resources(
@@ -1215,7 +1928,7 @@ class TestEventHubAsyncConsumer:
         # Mock credential to raise error
         mock_cred = AsyncMock()
         mock_cred.get_token = AsyncMock(side_effect=Exception("Connection failed"))
-        mocker.patch("azure.identity.aio.AzureCliCredential", return_value=mock_cred)
+        mocker.patch("azure.identity.aio.DefaultAzureCredential", return_value=mock_cred)
 
         def mock_processor(messages):
             return True
@@ -1234,6 +1947,117 @@ class TestEventHubAsyncConsumer:
 
         # Consumer should not be running
         assert consumer.running is False
+
+    @pytest.mark.asyncio
+    async def test_on_receive_error_raises(self, sample_eventhub_config):
+        """Test receive callback errors stop the SDK receive loop."""
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+        consumer.client = mock_client
+        consumer.running = True
+        context = MagicMock()
+        context.partition_id = "0"
+        error = RuntimeError("partition failure")
+
+        await consumer._on_receive_error(context, error)
+
+        assert consumer.running is False
+        assert consumer._receive_error is error
+        assert consumer._receive_error_close_task is not None
+        await consumer._receive_error_close_task
+        mock_client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_start_raises_receive_error_even_when_sdk_swallows_on_error(
+        self, mocker, sample_eventhub_config, mock_logfire
+    ):
+        """Test stored on_error exceptions preserve the fail-closed receive contract."""
+        mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
+
+        mock_cred = AsyncMock()
+        mock_cred.get_token = AsyncMock(
+            return_value=MagicMock(token="test-token", expires_on=time.time() + 3600)
+        )
+        mock_cred.close = AsyncMock()
+        mocker.patch("azure.identity.aio.DefaultAzureCredential", return_value=mock_cred)
+
+        error = RuntimeError("load balancing failed")
+        mock_client = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        async def receive_side_effect(**kwargs):
+            await kwargs["on_error"](None, error)
+
+        mock_client.receive = AsyncMock(side_effect=receive_side_effect)
+        mocker.patch("consumers.eventhub.EventHubConsumerClient", return_value=mock_client)
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        with pytest.raises(RuntimeError, match="load balancing failed"):
+            await consumer.start()
+
+        assert consumer.running is False
+        mock_client.close.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_start_fails_closed_on_receive_credential_error(
+        self, mocker, sample_eventhub_config, mock_logfire
+    ):
+        """Test credential-looking receive errors stop and clean up the consumer."""
+        mocker.patch("utils.snowflake.get_partition_checkpoints", return_value=None)
+
+        mock_cred = AsyncMock()
+        mock_cred.get_token = AsyncMock(
+            return_value=MagicMock(token="test-token", expires_on=time.time() + 3600)
+        )
+        mock_cred.close = AsyncMock()
+        mocker.patch("azure.identity.aio.DefaultAzureCredential", return_value=mock_cred)
+
+        mock_client = AsyncMock()
+        mock_client.receive = AsyncMock(
+            side_effect=RuntimeError("DefaultAzureCredential failed")
+        )
+        mock_client.close = AsyncMock()
+        mocker.patch("consumers.eventhub.EventHubConsumerClient", return_value=mock_client)
+
+        def mock_processor(messages):
+            return True
+
+        consumer = EventHubAsyncConsumer(
+            eventhub_config=sample_eventhub_config,
+            target_db="TEST_DB",
+            target_schema="TEST_SCHEMA",
+            target_table="TEST_TABLE",
+            message_processor=mock_processor,
+        )
+
+        with pytest.raises(RuntimeError, match="DefaultAzureCredential failed"):
+            await consumer.start()
+
+        assert consumer.running is False
+        assert consumer.client is None
+        mock_client.close.assert_awaited()
+        mock_cred.close.assert_awaited()
 
     def test_get_stats_returns_statistics(self, sample_eventhub_config):
         """Test that get_stats returns consumer statistics."""
