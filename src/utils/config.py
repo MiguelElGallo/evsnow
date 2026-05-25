@@ -13,10 +13,19 @@ Best Practices Incorporated:
 import os
 import re
 import socket
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+from .config_file import (
+    default_config_file_if_present,
+    load_toml_config,
+    toml_config_to_env,
+    toml_config_to_kwargs,
+)
 
 # Public config models live in smaller modules under `utils.config_models`.
 # This module keeps the stable public import surface: `from utils.config import ...`.
@@ -28,6 +37,45 @@ from .config_models import (
     SmartRetryConfig,
     SnowflakeConfig,
     SnowflakeConnectionConfig,
+)
+
+TOP_LEVEL_ENV_FIELDS = {
+    "ENVIRONMENT": "environment",
+    "REGION": "region",
+    "EVSNOW_CLIENT_ID": "client_id",
+    "TARGET_DB": "target_db",
+    "TARGET_SCHEMA": "target_schema",
+    "TARGET_TABLE": "target_table",
+    "CONTROL_TABLE_BACKEND": "control_table_backend",
+    "CONTROL_OWNERSHIP_MODE": "control_ownership_mode",
+    "USE_HYBRID_TABLE": "use_hybrid_table",
+    "MAX_CONCURRENT_CHANNELS": "max_concurrent_channels",
+    "INGESTION_TIMEOUT_SECONDS": "ingestion_timeout_seconds",
+    "MAX_CONCURRENT_MAPPINGS": "max_concurrent_mappings",
+    "HEALTH_CHECK_INTERVAL_SECONDS": "health_check_interval_seconds",
+    "MAX_PIPELINE_RESTART_ATTEMPTS": "max_pipeline_restart_attempts",
+    "PIPELINE_RESTART_DELAY_SECONDS": "pipeline_restart_delay_seconds",
+    "ENABLE_DETAILED_LOGGING": "enable_detailed_logging",
+    "LOG_MESSAGE_SAMPLES": "log_message_samples",
+    "METRICS_COLLECTION_ENABLED": "metrics_collection_enabled",
+}
+
+SNOWFLAKE_CONNECTION_FIELDS = {
+    "account",
+    "user",
+    "private_key_file",
+    "private_key_password",
+    "warehouse",
+    "database",
+    "schema_name",
+    "role",
+    "pipe_name",
+}
+
+SNOWFLAKE_TARGET_SETTING_PATTERN = re.compile(
+    r"^SNOWFLAKE_(\d+)_(DATABASE|SCHEMA|TABLE|BATCH|MAX_RETRY_ATTEMPTS|"
+    r"RETRY_DELAY_SECONDS|CONNECTION_TIMEOUT_SECONDS|"
+    r"CHANNEL_STATUS_INTERVAL_SECONDS|CLIENT_REFRESH_INTERVAL_SECONDS)$"
 )
 
 
@@ -163,46 +211,88 @@ class EvSnowConfig(BaseSettings):
 
     def __init__(self, **kwargs):
         """Initialize configuration with dynamic parsing of environment variables."""
+        source_env = kwargs.pop("_source_env", None)
         super().__init__(**kwargs)
-        # Try to load Snowflake connection configuration
-        # This is optional - if not all required fields are present, skip it
-        # Only try to load from environment if not already provided
+        self._source_env = dict(source_env) if source_env is not None else dict(os.environ)
+        if any(key.startswith("LOGFIRE_") for key in self._source_env):
+            self.logfire = LogfireConfig(**_prefixed_model_kwargs(self._source_env, "LOGFIRE_"))
+        self._parse_dynamic_config(self._source_env)
+        self._configure_snowflake_connection()
+        self._configure_control_backend()
+
+    def _configure_snowflake_connection(self) -> None:
+        """Build Snowflake auth/session config, deriving DB/schema from TOML when needed."""
+        env_snowflake = _prefixed_model_kwargs(
+            self._source_env,
+            "SNOWFLAKE_",
+            allowed_fields=SNOWFLAKE_CONNECTION_FIELDS,
+        )
         if self.snowflake_connection is None:
             try:
-                # Check if any Snowflake connection vars are set
-                if any(
-                    key.startswith("SNOWFLAKE_")
-                    and key
-                    in [
-                        "SNOWFLAKE_ACCOUNT",
-                        "SNOWFLAKE_USER",
-                        "SNOWFLAKE_PRIVATE_KEY_FILE",
-                        "SNOWFLAKE_WAREHOUSE",
-                        "SNOWFLAKE_DATABASE",
-                        "SNOWFLAKE_SCHEMA",
-                    ]
-                    for key in os.environ
-                ):
-                    self.snowflake_connection = SnowflakeConnectionConfig()
+                if env_snowflake:
+                    connection_kwargs = self._with_derived_snowflake_context(env_snowflake)
+                    self.snowflake_connection = SnowflakeConnectionConfig(**connection_kwargs)
                 else:
                     self.snowflake_connection = None
             except Exception:
                 # Snowflake connection is optional, may not be configured
                 self.snowflake_connection = None
-        self._parse_dynamic_config()
-        self._configure_control_backend()
+        elif env_snowflake:
+            merged_snowflake = self.snowflake_connection.model_dump()
+            merged_snowflake.update(env_snowflake)
+            merged_snowflake = self._with_derived_snowflake_context(merged_snowflake)
+            self.snowflake_connection = SnowflakeConnectionConfig(**merged_snowflake)
+
+    def _with_derived_snowflake_context(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if kwargs.get("database") and kwargs.get("schema_name"):
+            return kwargs
+
+        derived = self._derive_snowflake_connection_context()
+        if derived is None:
+            return kwargs
+
+        database, schema_name = derived
+        kwargs = dict(kwargs)
+        kwargs.setdefault("database", database)
+        kwargs.setdefault("schema_name", schema_name)
+        return kwargs
+
+    def _derive_snowflake_connection_context(self) -> tuple[str, str] | None:
+        mapped_targets = []
+        if self.mappings:
+            for mapping in self.mappings:
+                target = self.snowflake_configs.get(mapping.snowflake_key)
+                if target is not None:
+                    mapped_targets.append(target)
+        else:
+            mapped_targets = list(self.snowflake_configs.values())
+
+        unique_contexts = {
+            (target.database, target.schema_name)
+            for target in mapped_targets
+            if target.database and target.schema_name
+        }
+        if len(unique_contexts) == 1:
+            return next(iter(unique_contexts))
+        return None
 
     def _configure_control_backend(self) -> None:
         if self.control_table_backend == "postgres":
             if self.control_postgres is None:
-                self.control_postgres = PostgresConnectionConfig()
+                self.control_postgres = PostgresConnectionConfig(
+                    **_prefixed_model_kwargs(self._source_env, "CONTROL_PG_")
+                )
+            elif any(key.startswith("CONTROL_PG_") for key in self._source_env):
+                merged_postgres = self.control_postgres.model_dump()
+                merged_postgres.update(_prefixed_model_kwargs(self._source_env, "CONTROL_PG_"))
+                self.control_postgres = PostgresConnectionConfig(**merged_postgres)
             self.target_db = self._normalize_postgres_identifier(self.target_db)
             self.target_schema = self._normalize_postgres_identifier(self.target_schema)
             self.target_table = self._normalize_postgres_identifier(self.target_table)
 
-    def _parse_dynamic_config(self):
+    def _parse_dynamic_config(self, env_vars: Mapping[str, str] | None = None):
         """Parse dynamic Event Hub and Snowflake configurations from environment variables."""
-        env_vars = dict(os.environ)
+        env_vars = dict(env_vars or os.environ)
 
         # Parse Event Hub configurations
         event_hub_pattern = re.compile(r"^EVENTHUBNAME_(\d+)$")
@@ -224,8 +314,13 @@ class EvSnowConfig(BaseSettings):
             "CREDENTIAL_MODE": "credential_mode",
             "MANAGED_IDENTITY_CLIENT_ID": "managed_identity_client_id",
             "STARTING_POSITION_ON_NO_CHECKPOINT": "starting_position_on_no_checkpoint",
+            "USE_CONNECTION_STRING": "use_connection_string",
+            "CHECKPOINT_INTERVAL_SECONDS": "checkpoint_interval_seconds",
+            "MAX_MESSAGE_BATCH_SIZE": "max_message_batch_size",
+            "BATCH_TIMEOUT_SECONDS": "batch_timeout_seconds",
         }
         event_hub_global_env = {
+            "AZURE_EVENTHUB_CONNECTION_STRING": "connection_string",
             "EVENTHUB_CREDENTIAL_MODE": "credential_mode",
             "EVENTHUB_MANAGED_IDENTITY_CLIENT_ID": "managed_identity_client_id",
             "EVENTHUB_MAX_WAIT_TIME": "max_wait_time",
@@ -242,6 +337,9 @@ class EvSnowConfig(BaseSettings):
             "EVENTHUB_TRACK_LAST_ENQUEUED_EVENT_PROPERTIES": (
                 "track_last_enqueued_event_properties"
             ),
+            "EVENTHUB_CHECKPOINT_INTERVAL_SECONDS": "checkpoint_interval_seconds",
+            "EVENTHUB_MAX_MESSAGE_BATCH_SIZE": "max_message_batch_size",
+            "EVENTHUB_BATCH_TIMEOUT_SECONDS": "batch_timeout_seconds",
         }
 
         # First collect all Event Hub numbers and their consumer groups
@@ -283,31 +381,36 @@ class EvSnowConfig(BaseSettings):
                     **data,
                     "namespace": self.eventhub_namespace,
                 }
-                self.event_hubs[f"EVENTHUBNAME_{hub_num}"] = EventHubConfig.model_validate(
-                    event_hub_kwargs
+                hub_key = f"EVENTHUBNAME_{hub_num}"
+                self.event_hubs[hub_key] = EventHubConfig(
+                    **event_hub_kwargs,
                 )
 
         # Parse Snowflake configurations
         snowflake_keys: dict[str, dict[str, str]] = {}
         for key, value in env_vars.items():
-            if key.startswith("SNOWFLAKE_") and "_" in key:
-                parts = key.split("_", 2)
-                if len(parts) >= 3:
-                    sf_num = parts[1]
-                    setting = parts[2]
-
-                    if sf_num not in snowflake_keys:
-                        snowflake_keys[sf_num] = {}
-                    snowflake_keys[sf_num][setting.lower()] = value
+            match = SNOWFLAKE_TARGET_SETTING_PATTERN.match(key)
+            if match:
+                sf_num = match.group(1)
+                setting = match.group(2).lower()
+                if sf_num not in snowflake_keys:
+                    snowflake_keys[sf_num] = {}
+                snowflake_keys[sf_num][setting] = value
 
         # Create Snowflake configurations
         for sf_num, settings in snowflake_keys.items():
             if all(key in settings for key in ["database", "schema", "table"]):
-                self.snowflake_configs[f"SNOWFLAKE_{sf_num}"] = SnowflakeConfig(
+                sf_key = f"SNOWFLAKE_{sf_num}"
+                self.snowflake_configs[sf_key] = SnowflakeConfig(
                     database=settings["database"],
                     schema_name=settings["schema"],
                     table_name=settings["table"],
                     batch_size=int(settings.get("batch", "1000")),
+                    max_retry_attempts=int(settings.get("max_retry_attempts", "3")),
+                    retry_delay_seconds=int(settings.get("retry_delay_seconds", "5")),
+                    connection_timeout_seconds=int(
+                        settings.get("connection_timeout_seconds", "30")
+                    ),
                     channel_status_interval_seconds=int(
                         settings.get("channel_status_interval_seconds", "60")
                     ),
@@ -336,11 +439,16 @@ class EvSnowConfig(BaseSettings):
                 snowflake_nums.add(num)
 
         # Create mappings for matching numbers
+        existing_pairs = {(m.event_hub_key, m.snowflake_key) for m in self.mappings}
         for num in event_hub_nums:
             if num in snowflake_nums:
                 eh_key = f"EVENTHUBNAME_{num}"
                 sf_key = f"SNOWFLAKE_{num}"
-                if eh_key in self.event_hubs and sf_key in self.snowflake_configs:
+                if (
+                    eh_key in self.event_hubs
+                    and sf_key in self.snowflake_configs
+                    and (eh_key, sf_key) not in existing_pairs
+                ):
                     self.mappings.append(
                         EventHubSnowflakeMapping(
                             event_hub_key=eh_key,
@@ -348,6 +456,7 @@ class EvSnowConfig(BaseSettings):
                             channel_name_pattern="{event_hub}-{env}-{region}-{client_id}",
                         )
                     )
+                    existing_pairs.add((eh_key, sf_key))
 
     @field_validator("eventhub_namespace")
     @classmethod
@@ -494,12 +603,13 @@ class EvSnowConfig(BaseSettings):
         return results
 
 
-def load_config(env_file: str | None = None) -> EvSnowConfig:
+def load_config(env_file: str | None = None, config_file: str | None = None) -> EvSnowConfig:
     """
     Load configuration from environment file.
 
     Args:
         env_file: Optional path to .env file. Defaults to .env in current directory.
+        config_file: Optional path to structured TOML config.
 
     Returns:
         Configured EvSnowConfig instance.
@@ -508,7 +618,14 @@ def load_config(env_file: str | None = None) -> EvSnowConfig:
         ValidationError: If configuration is invalid.
         FileNotFoundError: If specified env file doesn't exist.
     """
-    from pathlib import Path
+    resolved_config_file = Path(config_file) if config_file else default_config_file_if_present()
+
+    toml_env: dict[str, str] = {}
+    config_kwargs: dict[str, Any] = {}
+    if resolved_config_file is not None:
+        file_config = load_toml_config(resolved_config_file)
+        toml_env = toml_config_to_env(file_config)
+        config_kwargs = toml_config_to_kwargs(file_config)
 
     if env_file:
         env_path = Path(env_file)
@@ -525,16 +642,43 @@ def load_config(env_file: str | None = None) -> EvSnowConfig:
                 "python-dotenv is required for loading .env files. Install it with: pip install python-dotenv"
             ) from e
 
-    # Get the eventhub_namespace from environment
-    eventhub_namespace = os.getenv("EVENTHUB_NAMESPACE")
+    effective_env = {**toml_env, **dict(os.environ)}
+
+    # Get the eventhub_namespace from merged configuration sources.
+    eventhub_namespace = effective_env.get("EVENTHUB_NAMESPACE")
     if not eventhub_namespace:
         raise ValueError("EVENTHUB_NAMESPACE environment variable is required")
 
-    return EvSnowConfig(
-        eventhub_namespace=eventhub_namespace,
-        environment=os.getenv("ENVIRONMENT", "development"),
-        region=os.getenv("REGION", "default"),
+    config_kwargs.update(
+        {
+            "eventhub_namespace": eventhub_namespace,
+            "_source_env": effective_env,
+        }
     )
+    for env_name, field_name in TOP_LEVEL_ENV_FIELDS.items():
+        if env_name in effective_env:
+            config_kwargs[field_name] = effective_env[env_name]
+
+    return EvSnowConfig(
+        **config_kwargs,
+    )
+
+
+def _prefixed_model_kwargs(
+    env_vars: Mapping[str, str],
+    prefix: str,
+    allowed_fields: set[str] | None = None,
+) -> dict[str, str]:
+    kwargs: dict[str, str] = {}
+    for key, value in env_vars.items():
+        if key.startswith(prefix):
+            field_name = key.removeprefix(prefix).lower()
+            if field_name == "schema":
+                field_name = "schema_name"
+            if allowed_fields is not None and field_name not in allowed_fields:
+                continue
+            kwargs[field_name] = value
+    return kwargs
 
 
 __all__ = [

@@ -708,7 +708,7 @@ def monitor(
 @app.command()
 def version() -> None:
     """Show version information."""
-    console.print("EvSnow v0.1.1")
+    console.print("EvSnow v0.2.0")
     console.print("EventHub to Snowflake streaming pipeline")
     console.print("\nComponents:")
     console.print("  • Azure EventHub async consumer with custom checkpointing")
