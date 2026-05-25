@@ -8,6 +8,7 @@ SETUP_GRANTS_SQL = REPO_ROOT / "setup_snowflake.sql"
 MESSAGES_CREATION_SQL = REPO_ROOT / "messages" / "creation.sql"
 QUICKSTART = REPO_ROOT / "docs" / "getting-started" / "snowflake-quickstart.md"
 COMPLETE_SETUP = REPO_ROOT / "docs" / "snowflake" / "complete-setup.md"
+PARAMETERS = REPO_ROOT / "docs" / "reference" / "parameters.md"
 
 
 def _normalized(path: Path) -> str:
@@ -70,3 +71,27 @@ def test_sample_message_creation_sql_uses_internal_storage():
     assert "BASE_LOCATION" not in sql
     assert "EXTERNAL_VOLUME = 'MY_EXT_VOLUME'" not in sql
     assert "VARCHAR(" not in sql
+
+
+def test_parameter_reference_covers_config_surfaces():
+    docs = _normalized(PARAMETERS)
+
+    required_terms = [
+        "EVENTHUB_NAMESPACE",
+        "EVENTHUBNAME_{N}_CONSUMER_GROUP",
+        "EVENTHUB_CREDENTIAL_MODE",
+        "EVENTHUBNAME_{N}_USE_CONNECTION_STRING",
+        "SNOWFLAKE_ACCOUNT",
+        "SNOWFLAKE_SCHEMA_NAME",
+        "SNOWFLAKE_{N}_SCHEMA",
+        "CONTROL_TABLE_BACKEND",
+        "CONTROL_PG_AUTH_MODE",
+        "LOGFIRE_LOG_LEVEL",
+        "SMART_RETRY_LLM_PROVIDER",
+        "VALIDATE-CONFIG",
+        "--SHOW-RBAC",
+        "--CAPTURE",
+    ]
+
+    for term in required_terms:
+        assert term in docs
