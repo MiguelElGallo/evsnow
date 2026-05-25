@@ -47,6 +47,10 @@ USE ROLE ACCOUNTADMIN;
 ALTER USER <your_username> SET RSA_PUBLIC_KEY='<public_key_value>';
 ```
 
+For non-interactive ingestion users, prefer a Snowflake `SERVICE` user.
+The quickstart bootstrap in [Snowflake quickstart](../getting-started/snowflake-quickstart.md)
+creates `STREAMEV` as a service user and assigns the public key.
+
 ## 4) Test authentication with Snowflake CLI
 
 ```bash
@@ -108,6 +112,7 @@ CREATE OR REPLACE TABLE CONTROL.PUBLIC.INGESTION_STATUS (
 Required permissions:
 
 ```sql
+GRANT CREATE SCHEMA ON DATABASE CONTROL TO ROLE <role>;
 GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE <role>;
 GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE <role>;
 ```
@@ -117,7 +122,8 @@ GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE <r
 - **Private key file not found**: Check `SNOWFLAKE_PRIVATE_KEY_FILE` path and permissions.
 - **Invalid/incorrect key password**: Re-run OpenSSL with the right passphrase.
 - **Authentication failed / JWT invalid**: Reassign the public key to the user; ensure usernames match case.
-- **Permissions**: User/role needs CREATE TABLE on control schema and DML on `INGESTION_STATUS`.
+- **Permissions**: User/role needs `CREATE SCHEMA` on the control database,
+  `CREATE TABLE` on the control schema, and DML on `INGESTION_STATUS`.
 
 ## Security best practices
 

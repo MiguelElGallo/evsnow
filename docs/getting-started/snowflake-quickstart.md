@@ -78,7 +78,8 @@ The script creates or verifies:
 | Ingestion database/schema | `INGESTION.PUBLIC` |
 | Control database/schema/table | `CONTROL.PUBLIC.INGESTION_STATUS` |
 
-It also grants the `STREAM` role the privileges needed by the runtime.
+It also grants the `STREAM` role the privileges needed by the runtime,
+including control-table setup and validation.
 
 ## Create The Target Table And Pipe
 
@@ -127,6 +128,7 @@ SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE;
 
 The pipe check must return `EVENTS_TABLE_PIPE`, and the grant checks must show
 the runtime role has table access plus `OPERATE` and `MONITOR` on the pipe.
+`DESC USER STREAMEV` should show `TYPE = SERVICE`.
 
 ## Configure EvSnow
 
@@ -171,4 +173,9 @@ This validates the resolved EvSnow configuration and control-table access. Keep
 the Snowflake object checks above as the proof that the Iceberg table, pipe, and
 pipe grants exist.
 
-After validation passes, continue with [First run](../tutorial/first-run.md).
+Treat any warning as a setup failure even if the command exits `0`. In
+particular, `Warning: Could not verify Snowflake control table` means the
+runtime role still lacks the control-table privileges needed by validation.
+
+After validation passes without warnings, continue with
+[First run](../tutorial/first-run.md).

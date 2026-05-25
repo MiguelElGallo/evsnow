@@ -1,5 +1,7 @@
 """Static guards for the default Snowflake-managed Iceberg setup."""
 
+import importlib.util
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -9,10 +11,21 @@ MESSAGES_CREATION_SQL = REPO_ROOT / "messages" / "creation.sql"
 QUICKSTART = REPO_ROOT / "docs" / "getting-started" / "snowflake-quickstart.md"
 COMPLETE_SETUP = REPO_ROOT / "docs" / "snowflake" / "complete-setup.md"
 PARAMETERS = REPO_ROOT / "docs" / "reference" / "parameters.md"
+QUICKSTART_HARNESS = REPO_ROOT / "tools" / "quickstart_harness.py"
 
 
 def _normalized(path: Path) -> str:
     return " ".join(path.read_text(encoding="utf-8").upper().split())
+
+
+def _load_quickstart_harness():
+    spec = importlib.util.spec_from_file_location("quickstart_harness", QUICKSTART_HARNESS)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_streaming_setup_uses_internal_snowflake_managed_iceberg():
@@ -55,10 +68,18 @@ def test_setup_grants_include_iceberg_and_pipe_creation():
     grants = _normalized(SETUP_GRANTS_SQL)
     docs = "\n".join(_normalized(path) for path in (QUICKSTART, COMPLETE_SETUP))
 
+    assert "TYPE = SERVICE" in grants
+    assert "ALTER USER STREAMEV SET TYPE = SERVICE" in grants
+    assert "GRANT CREATE SCHEMA ON DATABASE CONTROL TO ROLE STREAM" in grants
+    assert "GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM" in grants
     assert "GRANT CREATE ICEBERG TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM" in grants
     assert "GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM" in grants
+    assert "GRANT CREATE SCHEMA ON DATABASE CONTROL TO ROLE STREAM" in docs
+    assert "GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM" in docs
     assert "GRANT CREATE ICEBERG TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM" in docs
     assert "GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM" in docs
+    assert "TYPE = SERVICE" in docs
+    assert "WARNING: COULD NOT VERIFY SNOWFLAKE CONTROL TABLE" in docs
 
 
 def test_sample_message_creation_sql_uses_internal_storage():
@@ -95,3 +116,50 @@ def test_parameter_reference_covers_config_surfaces():
 
     for term in required_terms:
         assert term in docs
+
+
+def test_quickstart_harness_fails_on_validation_warnings():
+    harness = QUICKSTART_HARNESS.read_text(encoding="utf-8")
+
+    assert 'os.environ.get("EVSNOW_QUICKSTART_CONNECTION", "default")' in harness
+    assert "failure_patterns" in harness
+    assert "Warning: Could not verify Snowflake control table" in harness
+    assert "Insufficient privileges" in harness
+
+
+def test_quickstart_harness_resolves_cli_default_connection():
+    harness_module = _load_quickstart_harness()
+
+    selected = harness_module.Harness.resolve_connection_item(
+        [
+            {
+                "connection_name": "automa_bagwcin_os33166",
+                "is_default": True,
+                "parameters": {"account": "BAGWCIN-OS33166"},
+            }
+        ],
+        "default",
+    )
+
+    assert selected["connection_name"] == "automa_bagwcin_os33166"
+
+
+def test_quickstart_harness_marks_failure_patterns(tmp_path):
+    harness_module = _load_quickstart_harness()
+    harness = harness_module.Harness(connection="default", run_root=tmp_path, keep_going=True)
+    harness.run_dir.mkdir(parents=True)
+
+    result = harness.run(
+        "warning command",
+        [
+            sys.executable,
+            "-c",
+            "print('Warning: Could not verify Snowflake control table')",
+        ],
+        cwd=tmp_path,
+        failure_patterns=["Warning: Could not verify Snowflake control table"],
+    )
+
+    assert result.exit_code == 1
+    assert harness.failed is True
+    assert "Harness detected failure pattern" in result.stderr

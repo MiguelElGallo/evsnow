@@ -21,7 +21,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONNECTION = "automa_zfelfof_nfa14829"
+DEFAULT_CONNECTION = os.environ.get("EVSNOW_QUICKSTART_CONNECTION", "default")
 DEFAULT_RUN_ROOT = REPO_ROOT / ".quickstart-runs"
 
 
@@ -111,6 +111,7 @@ class Harness:
         stdin: str | None = None,
         display_command: str | None = None,
         env: dict[str, str] | None = None,
+        failure_patterns: list[str] | None = None,
         timeout: int = 180,
     ) -> CommandResult:
         cwd = cwd or self.workspace
@@ -126,22 +127,34 @@ class Harness:
             check=False,
         )
         ended_at = datetime.now(UTC).isoformat()
+        exit_code = completed.returncode
+        stdout = completed.stdout
+        stderr = completed.stderr
+        for pattern in failure_patterns or []:
+            if pattern in stdout or pattern in stderr:
+                exit_code = 1
+                stderr = (
+                    f"{stderr.rstrip()}\n"
+                    f"Harness detected failure pattern in command output: {pattern}\n"
+                ).lstrip()
+                break
+
         result = CommandResult(
             name=name,
             command=display_command or " ".join(command),
             cwd=str(cwd),
-            exit_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
             started_at=started_at,
             ended_at=ended_at,
         )
         self.record(result)
-        if completed.returncode != 0:
+        if exit_code != 0:
             self.failed = True
             if not self.keep_going:
                 self.write_summary()
-                raise SystemExit(completed.returncode)
+                raise SystemExit(exit_code)
         return result
 
     def note(self, name: str, message: str) -> None:
@@ -166,12 +179,30 @@ class Harness:
             display_command="snow connection list --format json",
         )
         connections = json.loads(result.stdout)
-        for item in connections:
-            if item.get("connection_name") == self.connection:
-                account = item.get("parameters", {}).get("account")
-                if account:
-                    return account
+        item = self.resolve_connection_item(connections, self.connection)
+        if item:
+            connection_name = item.get("connection_name")
+            if self.connection == "default" and connection_name:
+                self.connection = connection_name
+                self.note(
+                    "resolve default Snowflake connection",
+                    f"Using Snowflake CLI default connection: {connection_name}.",
+                )
+            account = item.get("parameters", {}).get("account")
+            if account:
+                return account
         raise SystemExit(f"Connection not found or missing account: {self.connection}")
+
+    @staticmethod
+    def resolve_connection_item(
+        connections: list[dict[str, Any]], connection: str
+    ) -> dict[str, Any] | None:
+        if connection == "default":
+            return next((item for item in connections if item.get("is_default")), None)
+        return next(
+            (item for item in connections if item.get("connection_name") == connection),
+            None,
+        )
 
     def render_sql(self, public_key: str) -> Path:
         rendered_dir = self.workspace / ".quickstart"
@@ -310,6 +341,12 @@ class Harness:
                 "printf 'n\\n' | uv run evsnow validate-config "
                 "--config-file config/evsnow.toml --env-file .env"
             ),
+            failure_patterns=[
+                "Warning: Could not verify Snowflake control table",
+                "Insufficient privileges",
+                "ERROR",
+                "✗",
+            ],
             timeout=240,
         )
         self.write_summary()

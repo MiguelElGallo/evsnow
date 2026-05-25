@@ -45,13 +45,19 @@ CREATE ICEBERG TABLE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE1
   ICEBERG_VERSION = 3;
 ```
 
-The runtime role needs table and pipe creation grants before the setup scripts
-create the ingestion objects:
+The runtime role needs control-table, target-table, and pipe creation grants
+before the setup scripts create the Snowflake objects:
 
 ```sql
+GRANT CREATE SCHEMA ON DATABASE CONTROL TO ROLE STREAM;
+GRANT CREATE TABLE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
 GRANT CREATE ICEBERG TABLE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 ```
+
+The control DDL grants are required because `evsnow validate-config` verifies
+the control table by running idempotent `CREATE SCHEMA IF NOT EXISTS` and
+`CREATE TABLE IF NOT EXISTS` statements as the runtime role.
 
 ## Runtime Configuration
 
@@ -97,7 +103,9 @@ uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
 
 The validation step checks the resolved configuration and can show RBAC
-requirements before the pipeline starts.
+requirements before the pipeline starts. Treat warnings as setup failures for
+the quickstart. `Warning: Could not verify Snowflake control table` means the
+runtime role cannot prove or create the control schema/table.
 
 ## Query Iceberg Data
 
@@ -135,7 +143,8 @@ SHOW GRANTS ON TABLE CONTROL.PUBLIC.INGESTION_STATUS;
 ```
 
 The table schema must match `setup_snowflake.sql`, and the runtime role needs
-`SELECT`, `INSERT`, and `UPDATE` privileges.
+`CREATE SCHEMA` on the control database, `CREATE TABLE` on the control schema,
+and `SELECT`, `INSERT`, and `UPDATE` privileges on the control table.
 
 ### Account Suspended
 
