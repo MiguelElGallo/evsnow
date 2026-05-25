@@ -8,6 +8,14 @@ Fresh Snowflake accounts should complete
 tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
 `INGESTION` database, target Iceberg table, and streaming pipe already exist.
 
+## Choose Your Starting Point
+
+- If the Snowflake objects do not exist yet, run
+  [Snowflake quickstart](../getting-started/snowflake-quickstart.md), then come
+  back here.
+- If the objects already exist, continue below and create only the runtime
+  files.
+
 ## Install
 
 ```bash
@@ -64,7 +72,14 @@ first smoke test. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are local mapping keys.
 
 ## Create `.env`
 
-Use the encrypted key created during Snowflake setup, then create `.env`:
+Use the encrypted key created during Snowflake setup. You can start from the
+local template:
+
+```bash
+cp .env.example .env
+```
+
+Then keep only the local credentials needed by the run:
 
 ```bash
 SNOWFLAKE_ACCOUNT=aaaaaa-bbbbbbb
@@ -72,15 +87,15 @@ SNOWFLAKE_USER=STREAMEV
 SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=your-password
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
 
 Do not put pipeline shape keys such as `EVENTHUB_NAMESPACE`, `TARGET_DB`, or
-`SNOWFLAKE_1_DATABASE` in `.env` for this path. Environment variables override
-TOML, so keeping shape in TOML makes the run easier to inspect.
+`SNOWFLAKE_1_DATABASE` in `.env` for this path. An explicit `--env-file`
+overrides TOML, so keeping shape in TOML makes the run easier to inspect.
+For one mapped Snowflake target, EvSnow derives the Snowflake session
+database/schema from the target in `config/evsnow.toml`.
 
 ## Validate
 
@@ -117,11 +132,13 @@ Open terminal 2 and send test messages:
 uv run python tools/eventhub_sender/main.py \
   --namespace eventhub1.servicebus.windows.net \
   --eventhub topic1 \
-  --count 10000 \
-  --batch-size 1000
+  --count 3 \
+  --batch-size 3
 ```
 
 Use the namespace and Event Hub name from `config/evsnow.toml`.
+Use [Event Hub sender](../tools/eventhub-sender.md) when you want a repeatable
+arrival check against Snowflake after the first pipeline starts cleanly.
 
 ## What Happened
 

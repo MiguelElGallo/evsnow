@@ -12,6 +12,9 @@ QUICKSTART = REPO_ROOT / "docs" / "getting-started" / "snowflake-quickstart.md"
 COMPLETE_SETUP = REPO_ROOT / "docs" / "snowflake" / "complete-setup.md"
 PARAMETERS = REPO_ROOT / "docs" / "reference" / "parameters.md"
 QUICKSTART_HARNESS = REPO_ROOT / "tools" / "quickstart_harness.py"
+ENV_EXAMPLE = REPO_ROOT / ".env.example"
+CONFIGURATION = REPO_ROOT / "docs" / "configuration.md"
+ZENSICAL = REPO_ROOT / "zensical.toml"
 
 
 def _normalized(path: Path) -> str:
@@ -116,6 +119,44 @@ def test_parameter_reference_covers_config_surfaces():
 
     for term in required_terms:
         assert term in docs
+
+
+def test_env_example_keeps_first_run_shape_in_toml():
+    active_keys = {
+        line.split("=", 1)[0]
+        for line in ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+    }
+
+    shape_keys = {
+        "EVENTHUB_NAMESPACE",
+        "EVENTHUBNAME_1",
+        "TARGET_DB",
+        "TARGET_SCHEMA",
+        "TARGET_TABLE",
+        "CONTROL_TABLE_BACKEND",
+        "CONTROL_OWNERSHIP_MODE",
+        "SNOWFLAKE_1_DATABASE",
+        "SNOWFLAKE_1_SCHEMA",
+        "SNOWFLAKE_1_TABLE",
+    }
+
+    assert active_keys.isdisjoint(shape_keys)
+
+
+def test_docs_explain_default_and_explicit_env_precedence():
+    docs = "\n".join(_normalized(path) for path in (CONFIGURATION, PARAMETERS))
+
+    assert "DEFAULT .ENV" in docs
+    assert "DOES NOT REPLACE VARIABLES ALREADY" in docs
+    assert "EXPLICIT --ENV-FILE" in docs
+    assert "OVERRIDE SEMANTICS" in docs
+
+
+def test_zensical_enables_code_copy_buttons():
+    config = ZENSICAL.read_text(encoding="utf-8")
+
+    assert '"content.code.copy"' in config
 
 
 def test_quickstart_harness_fails_on_validation_warnings():

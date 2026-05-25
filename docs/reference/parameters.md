@@ -9,12 +9,14 @@ credentials, tokens, passwords, and machine-specific paths.
 EvSnow loads values in this order:
 
 ```text
-model defaults < TOML < process environment < explicit --env-file < CLI runtime flags
+model defaults < TOML < default .env < process environment < explicit --env-file < CLI runtime flags
 ```
 
-The default `.env` file is loaded when the CLI starts. An explicit `--env-file`
-is loaded with override semantics, so it can replace values already present in
-the shell environment.
+The default `.env` file is loaded when the CLI starts, but it does not replace
+variables already present in the shell. An explicit `--env-file` is loaded with
+override semantics, so it can replace shell values and TOML-derived values for
+that command. Prefer keeping pipeline shape in TOML and using `.env` for
+secrets, local paths, and connection credentials.
 
 Find the right section:
 

@@ -20,8 +20,9 @@ Or use a connection string (env var supported):
 export AZURE_EVENTHUB_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
 uv run python tools/eventhub_sender/main.py --eventhub my-hub --count 20
 
-# If your .env already has EVENTHUB_NAMESPACE, EVENTHUBNAME_1, and AZURE_EVENTHUB_CONNECTION_STRING,
-# you can omit those flags and the CLI will pick them up automatically:
+# If you intentionally use an env-only configuration with EVENTHUB_NAMESPACE,
+# EVENTHUBNAME_1, and AZURE_EVENTHUB_CONNECTION_STRING, you can omit those
+# flags and the CLI will pick them up automatically:
 uv run python tools/eventhub_sender/main.py --count 20
 ```
 
@@ -52,8 +53,12 @@ Snowflake.
 ```bash
 RUN_ID="evsnow-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
 START_ID=$(date -u +%s)
+EVENTHUB_NAMESPACE="eventhub1.servicebus.windows.net"
+EVENTHUB_NAME="topic1"
 
 uv run python tools/eventhub_sender/main.py \
+  --namespace "$EVENTHUB_NAMESPACE" \
+  --eventhub "$EVENTHUB_NAME" \
   --count 3 \
   --start-id "$START_ID" \
   --batch-size 3 \
@@ -68,6 +73,10 @@ set -a
 source .env
 set +a
 
+TARGET_DATABASE=INGESTION
+TARGET_SCHEMA=PUBLIC
+TARGET_TABLE=EVENTS_TABLE1
+
 snow sql -x \
   --account "$SNOWFLAKE_ACCOUNT" \
   --user "$SNOWFLAKE_USER" \
@@ -75,16 +84,21 @@ snow sql -x \
   --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
   --role "$SNOWFLAKE_ROLE" \
   --warehouse "$SNOWFLAKE_WAREHOUSE" \
-  --database "$SNOWFLAKE_1_DATABASE" \
-  --schema "$SNOWFLAKE_1_SCHEMA" \
+  --database "$TARGET_DATABASE" \
+  --schema "$TARGET_SCHEMA" \
   --format JSON \
   -q "SELECT COUNT(*) AS rows_arrived,
              LISTAGG(TRY_PARSE_JSON(EVENT_BODY):sequence_id::STRING, ',')
                WITHIN GROUP (ORDER BY TRY_PARSE_JSON(EVENT_BODY):sequence_id::NUMBER)
              AS sequence_ids
-      FROM ${SNOWFLAKE_1_DATABASE}.${SNOWFLAKE_1_SCHEMA}.${SNOWFLAKE_1_TABLE}
+      FROM ${TARGET_DATABASE}.${TARGET_SCHEMA}.${TARGET_TABLE}
       WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID';"
 ```
 
 For a 3-message smoke test, `rows_arrived` should be `3` and the
 `sequence_ids` should be consecutive.
+
+Use the Event Hub and target values from `config/evsnow.toml`. If you
+intentionally run with env-only shape, you can set `EVENTHUB_NAMESPACE`,
+`EVENTHUB_NAME`, `TARGET_DATABASE`, `TARGET_SCHEMA`, and `TARGET_TABLE` from
+the matching env variables instead.
