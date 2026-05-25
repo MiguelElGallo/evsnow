@@ -115,6 +115,9 @@ Many editors can use that schema to autocomplete fields and flag invalid values.
 
 EvSnow uses the same Pydantic models at runtime, so editor feedback and CLI validation come from the same structure.
 
+Use [Parameter reference](reference/parameters.md) when you need the full list
+of supported TOML keys, `.env` variables, defaults, and allowed values.
+
 ## Multiple mappings
 
 TOML makes repeated mappings easier to read than a long `.env`.

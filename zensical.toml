@@ -25,6 +25,7 @@ nav = [
   ] },
   { "Reference" = [
     "configuration.md",
+    "reference/parameters.md",
     "snowflake/complete-setup.md"
   ] },
   { "Tools" = [
