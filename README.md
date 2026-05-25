@@ -14,9 +14,11 @@ Read the hosted docs at <https://miguelelgallo.github.io/evsnow/>.
 
 Use TOML for pipeline shape and `.env` for secrets or local credentials:
 
-Fresh Snowflake accounts should start with
-[Snowflake quickstart](docs/getting-started/snowflake-quickstart.md). If the
-Snowflake objects already exist, run:
+Fresh Event Hub namespaces should start with
+[Event Hub quickstart](docs/getting-started/event-hub-quickstart.md). Fresh
+Snowflake accounts should start with
+[Snowflake quickstart](docs/getting-started/snowflake-quickstart.md). If both
+already exist, run:
 
 ```bash
 git clone https://github.com/MiguelElGallo/evsnow.git
@@ -38,7 +40,7 @@ The full configuration surface is documented in
 ## Documentation Development
 
 ```bash
-uv sync --group docs
+uv sync --group docs --locked
 uv run zensical build --clean --strict
 uv run zensical serve
 ```

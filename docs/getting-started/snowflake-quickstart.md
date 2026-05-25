@@ -186,11 +186,12 @@ This validates the resolved EvSnow configuration and control-table access. Keep
 the Snowflake object checks above as the proof that the Iceberg table, pipe, and
 pipe grants exist.
 
-Treat any warning as a setup failure even if the command exits `0`. In
-particular, `Warning: Could not verify Snowflake control table` means the
-runtime role still lacks the control-table privileges needed by validation.
-The expected success marker is
-`Snowflake control table verified/created successfully` with no warnings.
+Do not rely only on the process exit code. Treat any validation error or warning
+as a setup failure even if the command exits `0`. In particular,
+`Warning: Could not verify Snowflake control table` means the runtime role still
+lacks the control-table privileges needed by validation. The expected success
+marker is `Snowflake control table verified/created successfully` with no
+warnings.
 
 After validation passes without warnings, continue with
 [First run](../tutorial/first-run.md).

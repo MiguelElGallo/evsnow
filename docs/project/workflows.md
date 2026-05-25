@@ -34,6 +34,7 @@ Runs the main quality and test pipeline.
 - Unit and integration tests
 - Coverage summary and PR coverage comment
 - Docker build job is present but disabled in the workflow
+- Published releases trigger the same checks; they do not publish Docker images
 
 Manual run:
 
@@ -48,12 +49,13 @@ GitHub Pages after changes land on `main`.
 
 - Dependency install: `uv sync --group docs --locked`
 - Build command: `uv run zensical build --clean --strict`
-- Artifact path: `site`
+- Artifact path: `site`, uploaded by the build job on pushes to `main`
 - Deploy target: GitHub Pages environment
 - Live site: `https://miguelelgallo.github.io/evsnow/`
 
 The deploy job only runs on pushes to `main`. Pull requests build the site but
-do not publish it.
+do not publish it. The deploy job publishes the artifact from the build job; it
+does not rebuild the documentation.
 
 Manual run:
 
@@ -63,6 +65,49 @@ gh workflow run docs.yml
 
 Manual runs build the docs only. Deployment happens after a push or merge to
 `main`, because the deploy job is gated to push events.
+
+### CodSpeed (`.github/workflows/codspeed.yml`)
+
+Runs benchmark tests through CodSpeed on pull requests, pushes to `main`, and
+manual dispatch.
+
+- Python version: `3.13`
+- Dependency install: `uv sync --all-groups`
+- Benchmark command: `uv run pytest tests/benchmarks/ --codspeed`
+- CodSpeed mode: simulation
+
+Treat CodSpeed failures as benchmark or instrumentation failures first. Normal
+unit and integration correctness is still covered by the Tests and CI/CD
+workflows.
+
+Manual run:
+
+```bash
+gh workflow run codspeed.yml
+```
+
+### End-To-End Quickstart Audit
+
+Use the quickstart harness when docs or setup SQL changes could affect a fresh
+Snowflake setup. The harness copies the repo to `.quickstart-runs/`, executes
+the quickstart commands, and writes every command plus stdout and stderr to
+`commands.jsonl`.
+
+```bash
+uv run python tools/quickstart_harness.py --connection default
+```
+
+Use a named Snowflake CLI setup connection when the default is not the account
+you want to audit:
+
+```bash
+uv run python tools/quickstart_harness.py --connection <setup-connection>
+```
+
+The acceptance gate is the generated summary reporting `passed`, plus a
+`validate EvSnow config` command with no validation errors or warning lines.
+The expected success marker is
+`Snowflake control table verified/created successfully`.
 
 ### Copilot Setup (`.github/workflows/copilot-setup-steps.yml`)
 
@@ -108,6 +153,21 @@ curl -fsSL "https://miguelelgallo.github.io/evsnow/reference/parameters/?v=<comm
 
 For other content-sensitive docs changes, search for one or two exact markers
 from the changed page in the live HTML before calling the publication complete.
+
+## Release Checks
+
+The release event runs CI/CD checks, but the workflow is not a publishing
+pipeline. Before creating a release, verify version values agree across
+`pyproject.toml`, `src/main.py`, `src/evsnow/__init__.py`, and version tests.
+
+After publishing a release:
+
+```bash
+gh release view <tag>
+gh run list --event release --limit 5
+```
+
+Report skipped Docker jobs separately from failed checks.
 
 ## Troubleshooting
 

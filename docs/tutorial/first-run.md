@@ -13,6 +13,9 @@ tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
 - If the Snowflake objects do not exist yet, run
   [Snowflake quickstart](../getting-started/snowflake-quickstart.md), then come
   back here.
+- If the Event Hub namespace or Event Hub does not exist yet, run
+  [Event Hub quickstart](../getting-started/event-hub-quickstart.md), then come
+  back here.
 - If the objects already exist, continue below and create only the runtime
   files.
 
@@ -105,7 +108,9 @@ uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
 
 The Azure identity needs `Azure Event Hubs Data Receiver`. If you use the
-included sender utility, it also needs `Azure Event Hubs Data Sender`.
+included sender utility, it also needs `Azure Event Hubs Data Sender`. Use
+[Event Hub quickstart](../getting-started/event-hub-quickstart.md) when the
+namespace, Event Hub, or local RBAC grants do not exist yet.
 
 ## Dry Run
 
@@ -129,16 +134,56 @@ When startup succeeds, logs show the Event Hub name, Snowflake target, and
 Open terminal 2 and send test messages:
 
 ```bash
+RUN_ID="evsnow-first-run-$(date -u +%Y%m%dT%H%M%SZ)"
+START_ID=$(date -u +%s)
+
 uv run python tools/eventhub_sender/main.py \
   --namespace eventhub1.servicebus.windows.net \
   --eventhub topic1 \
   --count 3 \
-  --batch-size 3
+  --start-id "$START_ID" \
+  --batch-size 3 \
+  --partition-key "$RUN_ID" \
+  --payload "{\"run_id\":\"$RUN_ID\",\"purpose\":\"first-run\"}"
 ```
 
 Use the namespace and Event Hub name from `config/evsnow.toml`.
-Use [Event Hub sender](../tools/eventhub-sender.md) when you want a repeatable
-arrival check against Snowflake after the first pipeline starts cleanly.
+
+Then prove those messages reached Snowflake:
+
+```bash
+set -a
+source .env
+set +a
+
+TARGET_DATABASE=INGESTION
+TARGET_SCHEMA=PUBLIC
+TARGET_TABLE=EVENTS_TABLE1
+
+snow sql -x \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --authenticator SNOWFLAKE_JWT \
+  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+  --role "$SNOWFLAKE_ROLE" \
+  --warehouse "$SNOWFLAKE_WAREHOUSE" \
+  --database "$TARGET_DATABASE" \
+  --schema "$TARGET_SCHEMA" \
+  --format JSON \
+  -q "SELECT COUNT(*) AS rows_arrived,
+             LISTAGG(TRY_PARSE_JSON(EVENT_BODY):sequence_id::STRING, ',')
+               WITHIN GROUP (ORDER BY TRY_PARSE_JSON(EVENT_BODY):sequence_id::NUMBER)
+             AS sequence_ids
+      FROM ${TARGET_DATABASE}.${TARGET_SCHEMA}.${TARGET_TABLE}
+      WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID';"
+```
+
+Snowpipe Streaming flush and consumer checkpoint timing are asynchronous. If
+the first query returns `rows_arrived = 0`, wait 15 seconds and rerun the same
+query while the pipeline is still running. The required proof is
+`rows_arrived = 3` and consecutive `sequence_ids`.
+Use [Event Hub sender](../tools/eventhub-sender.md) for the longer sender
+reference and repeatable arrival checks.
 
 ## What Happened
 
