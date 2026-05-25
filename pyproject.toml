@@ -1,6 +1,6 @@
 [project]
 name = "evsnow"
-version = "0.2.0"
+version = "0.2.1"
 description = "EvSnow - Azure EventHub to Snowflake streaming pipeline"
 readme = "README.md"
 authors = [
