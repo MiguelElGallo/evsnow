@@ -104,7 +104,7 @@ pytest tests/unit/test_orchestrator.py -v
 # Test PipelineMapping only
 pytest tests/unit/test_orchestrator.py::TestPipelineMapping -v
 
-# Test PipelineOrchestrator only  
+# Test PipelineOrchestrator only
 pytest tests/unit/test_orchestrator.py::TestPipelineOrchestrator -v
 
 # Test run_pipeline() only

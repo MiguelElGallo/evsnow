@@ -103,7 +103,7 @@ def setup(
     user: str = typer.Option(
         None,
         "--user",
-        "-u", 
+        "-u",
         help="Snowflake username",
         prompt="Enter your Snowflake username",
     ),
@@ -122,7 +122,7 @@ def setup(
 ) -> None:
     """
     Start the interactive Snowflake setup wizard.
-    
+
     This command will:
     1. Generate SQL to create a PAT for your user
     2. Ask you to run the SQL and provide the token
@@ -140,40 +140,40 @@ async def _run_setup(
     """Main setup orchestration."""
     from .sql_templates import generate_pat_sql
     from .agent import run_setup_agent
-    
+
     console.print(Panel.fit(
         "[bold blue]Snowflake Setup Wizard[/bold blue]\n"
         "This wizard will help you set up your complete Snowflake infrastructure.",
         title="🏔️ EvSnow Setup"
     ))
-    
+
     # Step 1: Generate and display PAT SQL
     pat_sql = generate_pat_sql(user, token_name, days_to_expiry)
-    
+
     console.print("\n[bold yellow]Step 1: Create Programmatic Access Token (PAT)[/bold yellow]")
     console.print("\nRun the following SQL in your Snowflake worksheet as ACCOUNTADMIN:\n")
-    
+
     syntax = Syntax(pat_sql, "sql", theme="monokai", line_numbers=True)
     console.print(Panel(syntax, title="SQL to Run", border_style="green"))
-    
+
     console.print("\n[bold]After running the SQL, copy the 'token_secret' value from the output.[/bold]")
     console.print("[dim]The token appears ONLY ONCE - save it immediately![/dim]\n")
-    
+
     # Step 2: Get the PAT from user
     pat_token = Prompt.ask(
         "[bold cyan]Paste the token_secret here[/bold cyan]",
         password=True,  # Hide input for security
     )
-    
+
     if not pat_token or len(pat_token) < 10:
         console.print("[bold red]Error: Invalid token provided. Please run the setup again.[/bold red]")
         raise typer.Exit(1)
-    
+
     console.print("\n[bold green]✓ Token received![/bold green]")
-    
+
     # Step 3: Start the Copilot agent
     console.print("\n[bold yellow]Step 2: Starting AI Agent for automated setup...[/bold yellow]\n")
-    
+
     await run_setup_agent(
         account=account,
         user=user,
@@ -186,7 +186,7 @@ def validate() -> None:
     """Validate the current Snowflake setup."""
     console.print("[bold]Validating Snowflake setup...[/bold]")
     # TODO: Implement validation
-    
+
 
 if __name__ == "__main__":
     app()
@@ -207,12 +207,12 @@ def generate_pat_sql(
 ) -> str:
     """
     Generate SQL to create a PAT for the specified user.
-    
+
     Args:
         user: Snowflake username
         token_name: Name for the PAT
         days_to_expiry: Token validity period
-        
+
     Returns:
         SQL statement to execute as ACCOUNTADMIN
     """
@@ -264,13 +264,13 @@ def get_setup_guide_content() -> str:
 def get_agent_system_prompt(account: str, user: str) -> str:
     """
     Generate the system prompt for the setup agent.
-    
+
     The agent will:
     1. Use Snow CLI to create and test a connection
     2. Follow SNOWFLAKE_COMPLETE_SETUP.md to set up everything
     """
     setup_guide = get_setup_guide_content()
-    
+
     return f"""\
 You are an expert Snowflake setup assistant. Your task is to help the user set up their complete Snowflake infrastructure for the EvSnow project.
 
@@ -381,7 +381,7 @@ async def run_setup_agent(
 ) -> None:
     """
     Run the Copilot agent to complete Snowflake setup.
-    
+
     Args:
         account: Snowflake account identifier
         user: Snowflake username
@@ -391,17 +391,17 @@ async def run_setup_agent(
     token_file = Path(tempfile.mktemp(suffix=".token"))
     token_file.write_text(pat_token)
     token_file.chmod(0o600)  # Secure permissions
-    
+
     try:
         # Create Copilot client
         client = CopilotClient()
         await client.start()
-        
+
         console.print("[dim]Agent started. Processing setup...[/dim]\n")
-        
+
         # Get system prompt with setup guide
         system_prompt = get_agent_system_prompt(account, user)
-        
+
         # Create session with the agent
         session = await client.create_session({
             "model": "gpt-4.1",  # Or claude-sonnet-4.5
@@ -412,10 +412,10 @@ async def run_setup_agent(
             },
             "on_user_input_request": handle_user_input,
         })
-        
+
         # Set up event handlers for streaming output
         done = asyncio.Event()
-        
+
         def on_event(event):
             if event.type.value == "assistant.message_delta":
                 # Stream the response as it comes
@@ -431,9 +431,9 @@ async def run_setup_agent(
                 console.print("[dim]  ✓ Complete[/dim]")
             elif event.type.value == "session.idle":
                 done.set()
-        
+
         session.on(on_event)
-        
+
         # Send initial prompt to start the setup
         initial_prompt = f"""\
 Start the Snowflake setup process.
@@ -449,22 +449,22 @@ Account: {account}
 User: {user}
 Token file: {token_file}
 """
-        
+
         await session.send({"prompt": initial_prompt})
-        
+
         # Wait for completion
         await done.wait()
-        
+
         # Cleanup
         await session.destroy()
         await client.stop()
-        
+
         console.print(Panel.fit(
             "[bold green]✓ Setup process completed![/bold green]\n\n"
             "Review the output above for any manual steps needed.",
             title="🎉 Complete"
         ))
-        
+
     finally:
         # Clean up token file
         if token_file.exists():
@@ -474,23 +474,23 @@ Token file: {token_file}
 async def handle_user_input(request, invocation):
     """
     Handle requests from the agent that need user input.
-    
+
     This is called when the agent uses the ask_user tool.
     """
     question = request.get("question", "")
     choices = request.get("choices", [])
     allow_freeform = request.get("allowFreeform", True)
-    
+
     console.print(f"\n[bold cyan]Agent asks:[/bold cyan] {question}")
-    
+
     if choices:
         console.print("[dim]Options:[/dim]")
         for i, choice in enumerate(choices, 1):
             console.print(f"  {i}. {choice}")
-    
+
     from rich.prompt import Prompt
     answer = Prompt.ask("[bold cyan]Your answer[/bold cyan]")
-    
+
     return {
         "answer": answer,
         "wasFreeform": allow_freeform,
@@ -517,16 +517,16 @@ async def handle_user_input(request, invocation):
 4. User pastes the token_secret from SQL output
    ↓
 5. Copilot Agent starts with tasks:
-   
+
    a) CREATE SNOW CLI CONNECTION
       - Save PAT to temp file
       - Run: snow connection add --authenticator PROGRAMMATIC_ACCESS_TOKEN
       - Run: snow connection test
       - Troubleshoot if needed (without asking user)
-   
+
    b) ONCE CONNECTION WORKS
       - Confirm default Snowflake-managed internal Iceberg storage
-   
+
    c) EXECUTE FULL SETUP (following SNOWFLAKE_COMPLETE_SETUP.md)
       - Create STREAM role
       - Create STREAMEV user
@@ -537,7 +537,7 @@ async def handle_user_input(request, invocation):
       - Create Iceberg table EVENTS_TABLE1
       - Create Pipe EVENTS_TABLE_PIPE
       - Set up all grants
-   
+
    d) OUTPUT SUMMARY
       - What was created
       - .env file content

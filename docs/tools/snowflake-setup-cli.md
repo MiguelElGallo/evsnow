@@ -8,7 +8,9 @@ for runtime ingestion or query access.
 
 ## Overview
 
-This CLI tool guides you through complete Snowflake infrastructure setup using an AI-powered agent (GitHub Copilot SDK). It automates the entire process described in `SNOWFLAKE_COMPLETE_SETUP.md`.
+This CLI tool guides you through complete Snowflake infrastructure setup using
+an AI-powered agent (GitHub Copilot SDK). It automates the process described in
+[Complete Snowflake setup](../snowflake/complete-setup.md).
 
 ## Prerequisites
 
@@ -78,7 +80,7 @@ The Copilot agent then:
 1. **Creates Snow CLI connection** using PAT authentication
 2. **Tests the connection** and troubleshoots any issues
 3. **Uses Snowflake-managed internal Iceberg storage by default**
-4. **Executes full setup** following `SNOWFLAKE_COMPLETE_SETUP.md`:
+4. **Executes full setup** following [Complete Snowflake setup](../snowflake/complete-setup.md):
    - Creates STREAM role and STREAMEV user
    - Generates RSA keys
    - Creates INGESTION and CONTROL databases
@@ -140,5 +142,5 @@ copilot auth login
 
 ## Related Files
 
-- [SNOWFLAKE_COMPLETE_SETUP.md](../snowflake/complete-setup.md) - Full setup guide
+- [Complete Snowflake setup](../snowflake/complete-setup.md) - Full setup guide
 - [`.env.example`](https://github.com/MiguelElGallo/evsnow/blob/main/.env.example) - Environment variable template

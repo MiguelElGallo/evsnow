@@ -17,12 +17,15 @@ nav = [
     "tutorial/first-run.md"
   ] },
   { "Setup" = [
-    "configuration.md",
     "getting-started/snowflake-quickstart.md",
     "snowflake/key-pair-auth.md"
   ] },
   { "How-to Guides" = [
     "how-to/query-iceberg-with-duckdb.md"
+  ] },
+  { "Reference" = [
+    "configuration.md",
+    "snowflake/complete-setup.md"
   ] },
   { "Tools" = [
     "tools/eventhub-sender.md"
@@ -40,7 +43,6 @@ nav = [
   { "Archive" = [
     "python-pipeline-hardening-plan.md",
     "archive/control-table-postgres-plan.md",
-    "snowflake/complete-setup.md",
     "archive/snowflake-setup-cli-plan.md",
     "tools/snowflake-setup-cli.md",
     "development/unit/orchestrator-tests.md",

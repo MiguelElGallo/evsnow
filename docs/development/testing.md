@@ -111,7 +111,7 @@ def test_with_mocks(mocker):
     # Mock Snowflake
     mock_conn = mocker.MagicMock()
     mocker.patch("utils.snowflake.get_connection", return_value=mock_conn)
-    
+
     # Your test code
     pass
 ```

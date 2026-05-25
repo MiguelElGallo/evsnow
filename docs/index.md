@@ -38,6 +38,7 @@ runs can resume from saved checkpoints.
 - New local run: [First run](tutorial/first-run.md)
 - Snowflake objects and grants: [Snowflake quickstart](getting-started/snowflake-quickstart.md)
 - Full configuration reference: [Configuration](configuration.md)
+- Full Snowflake setup reference: [Complete Snowflake setup](snowflake/complete-setup.md)
 - Key-pair authentication: [Snowflake key-pair auth](snowflake/key-pair-auth.md)
 - Query Iceberg tables from DuckDB: [DuckDB Iceberg guide](how-to/query-iceberg-with-duckdb.md)
 - Test and contributor workflow: [Testing](development/testing.md)
@@ -64,6 +65,7 @@ The docs are organized like a FastAPI-style guide:
 - Tutorial pages show the smallest complete path first.
 - Setup pages explain required configuration and Snowflake objects.
 - How-to pages solve focused operational tasks.
+- Reference pages collect full configuration and object details.
 - Development pages cover tests, workflows, and contributor notes.
 - Archive pages preserve implementation plans and historical hardening notes.
 

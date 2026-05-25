@@ -169,7 +169,7 @@ async def test_new_feature_with_valid_input_succeeds(
 ):
     """
     Test that new feature succeeds with valid input.
-    
+
     Verifies:
     - Feature initializes correctly
     - Processing completes successfully
@@ -177,10 +177,10 @@ async def test_new_feature_with_valid_input_succeeds(
     """
     # Arrange
     # ... setup test data and mocks
-    
+
     # Act
     # ... execute the feature
-    
+
     # Assert
     # ... verify expected behavior
 ```

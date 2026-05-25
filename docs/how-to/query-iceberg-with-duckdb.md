@@ -1,20 +1,17 @@
-# 🦆 Querying Snowflake Iceberg Tables with DuckDB
+# Query Snowflake Iceberg Tables With DuckDB
 
-This guide shows you how to query your Snowflake Iceberg table directly using DuckDB and its Iceberg extension.
+Use this guide to inspect a Snowflake-managed Iceberg table from DuckDB through
+Snowflake's Iceberg REST catalog.
 
----
+## Prerequisites
 
-## 📋 Prerequisites
+- Snowflake account with the EvSnow Iceberg table created
+- Least-privilege Snowflake role with read access to the target table
+- DuckDB installed locally
+- Azure CLI authentication only if you query customer-managed external-volume
+  Iceberg tables through direct storage credentials
 
-- ✅ Snowflake account with the Iceberg table created
-- ✅ Snowflake-managed Iceberg table created
-- ✅ DuckDB installed locally
-- ✅ Azure CLI authenticated only if you use the optional Azure storage secret for customer-managed external-volume tables
-- ✅ A valid PAT created in Snowflake (see Step 1)
-
----
-
-## 🔐 Step 1: Create a Programmatic Access Token in Snowflake
+## Create A Programmatic Access Token
 
 Run this SQL in Snowflake to create a token for DuckDB access:
 
@@ -30,16 +27,12 @@ ALTER USER <YOUR_USERNAME>
 | `<YOUR_USERNAME>` | Your Snowflake username | `STREAMEV` |
 | `<YOUR_ROLE>` | Least-privilege role with read access to the table | `STREAM_READER` |
 
-> 📝 **Note**: Save the `client_secret` value returned - you'll need it in the next step!
+Save the returned `client_secret` value for the OAuth token exchange. Do not use
+`ACCOUNTADMIN` for query tokens.
 
-Do not use `ACCOUNTADMIN` for query tokens. Create or reuse a role that can
-read only the Iceberg objects you need to inspect.
+## Exchange The Secret For An OAuth Token
 
----
-
-## 🌐 Step 2: Get OAuth Token via REST API
-
-Use `curl` to exchange your client secret for an OAuth token:
+Use `curl` to exchange the client secret for an OAuth token:
 
 ```bash
 curl -i --fail -X POST "https://<YOUR_ACCOUNT>.snowflakecomputing.com/polaris/api/catalog/v1/oauth/tokens" \
@@ -51,37 +44,33 @@ curl -i --fail -X POST "https://<YOUR_ACCOUNT>.snowflakecomputing.com/polaris/ap
 
 | Parameter | Description |
 |-----------|-------------|
-| `<YOUR_ACCOUNT>` | Your Snowflake account identifier (e.g., `ABC12345-XY98765`) |
-| `<YOUR_ROLE>` | Same role used in Step 1 |
-| `<YOUR_CLIENT_SECRET_FROM_STEP_1>` | The secret from Step 1 |
+| `<YOUR_ACCOUNT>` | Snowflake account identifier, for example `ABC12345-XY98765` |
+| `<YOUR_ROLE>` | Same role used in the token SQL |
+| `<YOUR_CLIENT_SECRET_FROM_STEP_1>` | Secret returned when the PAT was created |
 
-> ✅ **Success**: You'll receive a JSON response with an `access_token`. Save this token for Step 5!
+Save the `access_token` value from the response. DuckDB uses this token in the
+Iceberg catalog secret.
 
----
-
-## 🦆 Step 3: Install DuckDB Extensions
+## Install DuckDB Extensions
 
 Open DuckDB and install the required extensions:
 
 ```sql
--- Install and load Iceberg extension
 INSTALL iceberg;
 LOAD iceberg;
 
--- Install and load HTTP filesystem support
 INSTALL httpfs;
 LOAD httpfs;
 
--- Install and load Azure support
 INSTALL azure;
 LOAD azure;
 ```
 
----
+## Add Optional Azure Storage Credentials
 
-## ☁️ Step 4: Optional Azure Storage Secret
-
-Skip this step for EvSnow's default Snowflake-managed internal Iceberg storage unless your external query workflow requires direct cloud-storage credentials. For customer-managed external-volume Iceberg tables, create a secret to authenticate with the Azure Storage account that contains the table files.
+Skip this step for EvSnow's default Snowflake-managed internal Iceberg storage.
+Use it only when your query workflow needs direct cloud-storage access for a
+customer-managed external-volume table.
 
 ```sql
 CREATE SECRET azure_auto (
@@ -91,17 +80,12 @@ CREATE SECRET azure_auto (
 );
 ```
 
-| Parameter | Description |
-|-----------|-------------|
-| `<YOUR_STORAGE_ACCOUNT>` | Azure Storage account used by a customer-managed external volume |
+The `credential_chain` provider uses local Azure CLI credentials from
+`az login`.
 
-> 💡 **Tip**: The `credential_chain` provider uses your local Azure CLI credentials. Make sure you're logged in with `az login`.
+## Create The Iceberg Catalog Secret
 
----
-
-## 🎫 Step 5: Create Iceberg Catalog Secret
-
-Create a secret with the OAuth token from **Step 2** (not Step 1!):
+Create a DuckDB secret with the OAuth `access_token`:
 
 ```sql
 CREATE OR REPLACE SECRET sf_horizon_token (
@@ -110,13 +94,12 @@ CREATE OR REPLACE SECRET sf_horizon_token (
 );
 ```
 
-> ⚠️ **Important**: Use the `access_token` from the curl response in Step 2, NOT the `client_secret` from Step 1.
+Use the `access_token` from the OAuth response, not the `client_secret` returned
+by the PAT creation SQL.
 
----
+## Attach The Snowflake Iceberg Catalog
 
-## 🔗 Step 6: Attach the Snowflake Iceberg Catalog
-
-Attach your Snowflake catalog to DuckDB:
+Attach the Snowflake catalog to DuckDB:
 
 ```sql
 ATTACH 'sf' AS sf (
@@ -129,18 +112,14 @@ ATTACH 'sf' AS sf (
 
 | Parameter | Description |
 |-----------|-------------|
-| `<YOUR_ACCOUNT>` | Your Snowflake account identifier |
-| `INGESTION` | The database name (matches `setup_snowpipe_streaming.sql`) |
+| `<YOUR_ACCOUNT>` | Snowflake account identifier |
+| `INGESTION` | Database name created by `setup_snowpipe_streaming.sql` |
 
----
-
-## 🚀 Step 7: Query Your Data!
-
-Now you can query the Iceberg table directly from DuckDB:
+## Query The Table
 
 ```sql
--- Query all events
 SELECT * FROM sf.PUBLIC.EVENTS_TABLE1;
 ```
 
-> 🎉 **Congratulations**: You've successfully queried your Snowflake Iceberg table using DuckDB!
+Expected result: DuckDB returns rows from the Snowflake Iceberg table without
+starting the EvSnow pipeline.

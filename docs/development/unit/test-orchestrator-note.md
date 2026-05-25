@@ -8,7 +8,7 @@ The comprehensive test suite for `src/pipeline/orchestrator.py` has been created
 
 To run these tests, the following dependencies must be installed:
 - pytest
-- pytest-asyncio  
+- pytest-asyncio
 - pytest-mock
 - pydantic
 - pydantic-settings

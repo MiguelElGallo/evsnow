@@ -75,6 +75,15 @@ Run the checked-in
 It creates the Snowflake-managed Iceberg table and the required high-performance
 Snowpipe Streaming pipe with `DATA_SOURCE(TYPE => 'STREAMING')`.
 
+The table definition uses Snowflake-managed Iceberg storage by default:
+
+```sql
+CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1
+  CATALOG = SNOWFLAKE
+  EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
+  ICEBERG_VERSION = 3;
+```
+
 Use [Complete Snowflake setup](../snowflake/complete-setup.md) if you need the
 long-form object reference or troubleshooting notes.
 
