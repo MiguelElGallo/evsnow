@@ -175,9 +175,7 @@ def toml_config_to_env(file_config: EvSnowFileConfig) -> dict[str, str]:
         env[f"{key}_BATCH"] = _stringify(target.batch_size)
         env[f"{key}_MAX_RETRY_ATTEMPTS"] = _stringify(target.max_retry_attempts)
         env[f"{key}_RETRY_DELAY_SECONDS"] = _stringify(target.retry_delay_seconds)
-        env[f"{key}_CONNECTION_TIMEOUT_SECONDS"] = _stringify(
-            target.connection_timeout_seconds
-        )
+        env[f"{key}_CONNECTION_TIMEOUT_SECONDS"] = _stringify(target.connection_timeout_seconds)
         env[f"{key}_CHANNEL_STATUS_INTERVAL_SECONDS"] = _stringify(
             target.channel_status_interval_seconds
         )
