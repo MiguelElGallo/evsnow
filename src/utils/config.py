@@ -215,7 +215,9 @@ class EvSnowConfig(BaseSettings):
         super().__init__(**kwargs)
         self._source_env = dict(source_env) if source_env is not None else dict(os.environ)
         if any(key.startswith("LOGFIRE_") for key in self._source_env):
-            self.logfire = LogfireConfig(**_prefixed_model_kwargs(self._source_env, "LOGFIRE_"))
+            self.logfire = LogfireConfig.model_validate(
+                _prefixed_model_kwargs(self._source_env, "LOGFIRE_")
+            )
         self._parse_dynamic_config(self._source_env)
         self._configure_snowflake_connection()
         self._configure_control_backend()
@@ -279,8 +281,8 @@ class EvSnowConfig(BaseSettings):
     def _configure_control_backend(self) -> None:
         if self.control_table_backend == "postgres":
             if self.control_postgres is None:
-                self.control_postgres = PostgresConnectionConfig(
-                    **_prefixed_model_kwargs(self._source_env, "CONTROL_PG_")
+                self.control_postgres = PostgresConnectionConfig.model_validate(
+                    _prefixed_model_kwargs(self._source_env, "CONTROL_PG_")
                 )
             elif any(key.startswith("CONTROL_PG_") for key in self._source_env):
                 merged_postgres = self.control_postgres.model_dump()
@@ -382,9 +384,7 @@ class EvSnowConfig(BaseSettings):
                     "namespace": self.eventhub_namespace,
                 }
                 hub_key = f"EVENTHUBNAME_{hub_num}"
-                self.event_hubs[hub_key] = EventHubConfig(
-                    **event_hub_kwargs,
-                )
+                self.event_hubs[hub_key] = EventHubConfig.model_validate(event_hub_kwargs)
 
         # Parse Snowflake configurations
         snowflake_keys: dict[str, dict[str, str]] = {}
