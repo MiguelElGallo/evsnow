@@ -1,0 +1,71 @@
+[project]
+site_name = "EvSnow"
+site_description = "Azure Event Hubs to Snowflake streaming pipeline documentation"
+site_author = "MiguelElGallo"
+site_url = "https://miguelelgallo.github.io/evsnow/"
+repo_url = "https://github.com/MiguelElGallo/evsnow"
+repo_name = "MiguelElGallo/evsnow"
+edit_uri = "edit/main/docs/"
+docs_dir = "docs"
+site_dir = "site"
+use_directory_urls = true
+copyright = "&copy; 2026 MiguelElGallo"
+
+nav = [
+  { "Overview" = "index.md" },
+  { "Tutorial" = [
+    "tutorial/first-run.md"
+  ] },
+  { "Setup" = [
+    "getting-started/snowflake-quickstart.md",
+    "snowflake/key-pair-auth.md"
+  ] },
+  { "How-to Guides" = [
+    "how-to/query-iceberg-with-duckdb.md"
+  ] },
+  { "Reference" = [
+    "configuration.md",
+    "snowflake/complete-setup.md"
+  ] },
+  { "Tools" = [
+    "tools/eventhub-sender.md"
+  ] },
+  { "Development" = [
+    "development/testing.md",
+    "development/integration-tests.md"
+  ] },
+  { "Project" = [
+    "project/workflows.md",
+    "project/issue-creation-guide.md",
+    "project/copilot-instructions.md",
+    { "GitHub" = "https://github.com/MiguelElGallo/evsnow" }
+  ] },
+  { "Archive" = [
+    "python-pipeline-hardening-plan.md",
+    "archive/control-table-postgres-plan.md",
+    "archive/snowflake-setup-cli-plan.md",
+    "tools/snowflake-setup-cli.md",
+    "development/unit/orchestrator-tests.md",
+    "development/unit/streaming-tests.md",
+    "development/unit/streaming-coverage.md",
+    "development/unit/streaming-implementation-summary.md",
+    "development/unit/test-orchestrator-note.md"
+  ] }
+]
+
+[project.theme]
+features = [
+  "content.action.edit",
+  "content.action.view",
+  "navigation.instant",
+  "navigation.instant.progress",
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.path",
+  "navigation.tracking",
+  "navigation.top",
+  "toc.follow"
+]
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"

@@ -209,5 +209,5 @@ __marimo__/
 .env.smart
 .env.test
 AZURE_OPENAI_PROGRESS.md
-snowflake/
+/snowflake/
 .testenv

@@ -6,8 +6,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SETUP_SQL = REPO_ROOT / "setup_snowpipe_streaming.sql"
 SETUP_GRANTS_SQL = REPO_ROOT / "setup_snowflake.sql"
 MESSAGES_CREATION_SQL = REPO_ROOT / "messages" / "creation.sql"
-QUICKSTART = REPO_ROOT / "SNOWFLAKE_QUICKSTART.md"
-COMPLETE_SETUP = REPO_ROOT / "SNOWFLAKE_COMPLETE_SETUP.md"
+QUICKSTART = REPO_ROOT / "docs" / "getting-started" / "snowflake-quickstart.md"
+COMPLETE_SETUP = REPO_ROOT / "docs" / "snowflake" / "complete-setup.md"
 
 
 def _normalized(path: Path) -> str:
