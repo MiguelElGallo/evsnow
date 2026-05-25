@@ -3,6 +3,10 @@
 EvSnow streams events from Azure Event Hubs into Snowflake with checkpointing,
 configuration validation, and operational observability.
 
+!!! note "Documentation note"
+    Parts of this documentation were drafted with assistance from Codex and
+    GPT-5.5, then reviewed against the EvSnow project.
+
 ## Start With First Run
 
 Start here when you want one Event Hub, one Snowflake target, one checkpoint
