@@ -11,9 +11,14 @@ table, and a repeatable local smoke test.
 Go to [First run](tutorial/first-run.md) to install EvSnow, configure one local
 pipeline, validate the settings, and run it.
 
+[Start first run](tutorial/first-run.md){ .md-button .md-button--primary }
+[Set up Event Hub](getting-started/event-hub-quickstart.md){ .md-button }
+[Set up Snowflake](getting-started/snowflake-quickstart.md){ .md-button }
+
 ## Other Paths
 
 - Set up Snowflake from scratch: [Snowflake quickstart](getting-started/snowflake-quickstart.md)
+- Set up Azure Event Hubs from scratch: [Event Hub quickstart](getting-started/event-hub-quickstart.md)
 - Configure key-pair authentication: [Snowflake key-pair auth](snowflake/key-pair-auth.md)
 - Tune runtime settings: [Configuration](configuration.md)
 - Check every Snowflake object and grant: [Complete Snowflake setup](snowflake/complete-setup.md)

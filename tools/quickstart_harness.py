@@ -230,8 +230,6 @@ class Harness:
                     f"SNOWFLAKE_PRIVATE_KEY_FILE={key_path}",
                     f"SNOWFLAKE_PRIVATE_KEY_PASSWORD={password}",
                     "SNOWFLAKE_WAREHOUSE=COMPUTE_WH",
-                    "SNOWFLAKE_DATABASE=INGESTION",
-                    "SNOWFLAKE_SCHEMA_NAME=PUBLIC",
                     "SNOWFLAKE_ROLE=STREAM",
                     "SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE",
                     "",
@@ -239,7 +237,13 @@ class Harness:
             ),
             encoding="utf-8",
         )
-        self.note("create .env", "Created .env with generated key path and quickstart defaults.")
+        self.note(
+            "create .env",
+            (
+                "Created .env with generated key path and quickstart defaults. "
+                "The Snowflake session database/schema are derived from config/evsnow.toml."
+            ),
+        )
 
     def write_summary(self) -> None:
         first_failure = next((item for item in self.results if item.exit_code != 0), None)
@@ -342,6 +346,9 @@ class Harness:
                 "--config-file config/evsnow.toml --env-file .env"
             ),
             failure_patterns=[
+                "Configuration has errors",
+                "Warnings:",
+                "⚠",
                 "Warning: Could not verify Snowflake control table",
                 "Insufficient privileges",
                 "ERROR",

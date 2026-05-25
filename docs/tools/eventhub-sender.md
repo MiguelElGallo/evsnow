@@ -98,7 +98,8 @@ snow sql -x \
 For a 3-message smoke test, `rows_arrived` should be `3` and the
 `sequence_ids` should be consecutive.
 
-Use the Event Hub and target values from `config/evsnow.toml`. If you
-intentionally run with env-only shape, you can set `EVENTHUB_NAMESPACE`,
-`EVENTHUB_NAME`, `TARGET_DATABASE`, `TARGET_SCHEMA`, and `TARGET_TABLE` from
-the matching env variables instead.
+Use the Event Hub and target values from `config/evsnow.toml`. In the shell
+snippet above, `EVENTHUB_NAME` is only a local shell variable passed with
+`--eventhub`. If you intentionally run the sender with env-only shape and omit
+the flags, set `EVENTHUB_NAMESPACE` and `EVENTHUBNAME_1`, because the sender
+reads `EVENTHUBNAME_1` from `.env`.

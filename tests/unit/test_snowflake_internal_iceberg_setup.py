@@ -9,12 +9,17 @@ SETUP_SQL = REPO_ROOT / "setup_snowpipe_streaming.sql"
 SETUP_GRANTS_SQL = REPO_ROOT / "setup_snowflake.sql"
 MESSAGES_CREATION_SQL = REPO_ROOT / "messages" / "creation.sql"
 QUICKSTART = REPO_ROOT / "docs" / "getting-started" / "snowflake-quickstart.md"
+EVENTHUB_QUICKSTART = REPO_ROOT / "docs" / "getting-started" / "event-hub-quickstart.md"
 COMPLETE_SETUP = REPO_ROOT / "docs" / "snowflake" / "complete-setup.md"
 PARAMETERS = REPO_ROOT / "docs" / "reference" / "parameters.md"
 QUICKSTART_HARNESS = REPO_ROOT / "tools" / "quickstart_harness.py"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 CONFIGURATION = REPO_ROOT / "docs" / "configuration.md"
 ZENSICAL = REPO_ROOT / "zensical.toml"
+FIRST_RUN = REPO_ROOT / "docs" / "tutorial" / "first-run.md"
+EVENTHUB_SENDER = REPO_ROOT / "docs" / "tools" / "eventhub-sender.md"
+WORKFLOWS = REPO_ROOT / "docs" / "project" / "workflows.md"
+DOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs.yml"
 
 
 def _normalized(path: Path) -> str:
@@ -83,6 +88,7 @@ def test_setup_grants_include_iceberg_and_pipe_creation():
     assert "GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM" in docs
     assert "TYPE = SERVICE" in docs
     assert "WARNING: COULD NOT VERIFY SNOWFLAKE CONTROL TABLE" in docs
+    assert "NEXT: RUN SETUP_SNOWPIPE_STREAMING.SQL, UPDATE .ENV" in grants
 
 
 def test_sample_message_creation_sql_uses_internal_storage():
@@ -121,6 +127,20 @@ def test_parameter_reference_covers_config_surfaces():
         assert term in docs
 
 
+def test_eventhub_quickstart_covers_creation_and_rbac():
+    docs = "\n".join(_normalized(path) for path in (EVENTHUB_QUICKSTART, FIRST_RUN))
+    config = _normalized(ZENSICAL)
+
+    assert "EVENT HUB QUICKSTART" in docs
+    assert "AZ EVENTHUBS NAMESPACE CREATE" in docs
+    assert "AZ EVENTHUBS EVENTHUB CREATE" in docs
+    assert "AZURE EVENT HUBS DATA RECEIVER" in docs
+    assert "AZURE EVENT HUBS DATA SENDER" in docs
+    assert "EVENTHUB-RBAC-SMOKE" in docs
+    assert "FULLY QUALIFIED NAMESPACE" in docs
+    assert "GETTING-STARTED/EVENT-HUB-QUICKSTART.MD" in config
+
+
 def test_env_example_keeps_first_run_shape_in_toml():
     active_keys = {
         line.split("=", 1)[0]
@@ -157,6 +177,37 @@ def test_zensical_enables_code_copy_buttons():
     config = ZENSICAL.read_text(encoding="utf-8")
 
     assert '"content.code.copy"' in config
+    assert '"search.highlight"' in config
+    assert "[project.markdown_extensions.attr_list]" in config
+    assert 'name = "mermaid"' in config
+
+
+def test_first_run_includes_arrival_proof():
+    docs = _normalized(FIRST_RUN)
+
+    assert "RUN_ID=\"EVSNOW-FIRST-RUN-" in docs
+    assert "ROWS_ARRIVED" in docs
+    assert "SEQUENCE_IDS" in docs
+    assert "WAIT 15 SECONDS AND RERUN" in docs
+    assert "ROWS_ARRIVED = 3" in docs
+
+
+def test_eventhub_sender_env_only_docs_match_cli_defaults():
+    docs = _normalized(EVENTHUB_SENDER)
+
+    assert "EVENTHUB_NAME` IS ONLY A LOCAL SHELL VARIABLE" in docs
+    assert "READS `EVENTHUBNAME_1` FROM `.ENV`" in docs
+
+
+def test_docs_workflow_deploys_built_artifact_once():
+    workflow = DOCS_WORKFLOW.read_text(encoding="utf-8")
+    docs = _normalized(WORKFLOWS)
+
+    assert "Upload GitHub Pages artifact" in workflow
+    assert "if: github.event_name == 'push'" in workflow
+    assert workflow.count("uv run zensical build --clean --strict") == 1
+    assert "DEPLOY JOB PUBLISHES THE ARTIFACT FROM THE BUILD JOB" in docs
+    assert "CODSPEED" in docs
 
 
 def test_quickstart_harness_fails_on_validation_warnings():
@@ -164,8 +215,14 @@ def test_quickstart_harness_fails_on_validation_warnings():
 
     assert 'os.environ.get("EVSNOW_QUICKSTART_CONNECTION", "default")' in harness
     assert "failure_patterns" in harness
+    assert "Configuration has errors" in harness
+    assert "Warnings:" in harness
+    assert "⚠" in harness
     assert "Warning: Could not verify Snowflake control table" in harness
     assert "Insufficient privileges" in harness
+    assert "SNOWFLAKE_DATABASE=INGESTION" not in harness
+    assert "SNOWFLAKE_SCHEMA_NAME=PUBLIC" not in harness
+    assert "database/schema are derived from config/evsnow.toml" in harness
 
 
 def test_quickstart_harness_resolves_cli_default_connection():

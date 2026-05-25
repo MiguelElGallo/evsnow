@@ -140,4 +140,4 @@ VALUES
 DELETE FROM CONTROL.PUBLIC.INGESTION_STATUS WHERE EVENTHUB = 'test-eventhub';
 */
 
-SELECT 'Snowflake setup completed. Next: update .env, run uv run evsnow validate-config --show-rbac, then run setup_snowpipe_streaming.sql for high-performance streaming objects.' AS STATUS;
+SELECT 'Snowflake setup completed. Next: run setup_snowpipe_streaming.sql, update .env, then run uv run evsnow validate-config --show-rbac.' AS STATUS;

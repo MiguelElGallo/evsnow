@@ -57,6 +57,12 @@ jobs:
       - name: Build documentation
         run: uv run zensical build --clean --strict
 
+      - name: Upload GitHub Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
   deploy:
     name: Deploy to GitHub Pages
     if: github.event_name == 'push'
@@ -72,30 +78,6 @@ jobs:
     steps:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install UV
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Install docs dependencies
-        run: uv sync --group docs --locked
-
-      - name: Build documentation
-        run: uv run zensical build --clean --strict
-
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: site
 
       - name: Deploy GitHub Pages
         id: deployment
