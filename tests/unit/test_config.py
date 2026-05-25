@@ -1219,3 +1219,525 @@ class TestLoadConfig:
         assert config.event_hubs["EVENTHUBNAME_2"].max_wait_time == 10
         assert config.event_hubs["EVENTHUBNAME_2"].prefetch_count == 60
         assert config.event_hubs["EVENTHUBNAME_2"].retry_total == 9
+
+    def test_load_config_with_toml_file_parses_structured_pipeline(self, monkeypatch, tmp_path):
+        """Test loading structured non-secret pipeline config from TOML."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "CONTROL", "TARGET")) or key in (
+                "ENVIRONMENT",
+                "REGION",
+                "EVSNOW_CLIENT_ID",
+            ):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+environment = "production"
+region = "us-east"
+client_id = "client one"
+
+[control]
+target_db = "CONTROL"
+target_schema = "PUBLIC"
+target_table = "INGESTION_STATUS"
+backend = "snowflake"
+ownership_mode = "local_single_consumer_smoke"
+use_hybrid_table = false
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+credential_mode = "azure_cli"
+starting_position_on_no_checkpoint = "@latest"
+checkpoint_interval_seconds = 12
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+batch_size = 3500
+max_retry_attempts = 9
+retry_delay_seconds = 11
+connection_timeout_seconds = 13
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_1"
+snowflake_key = "SNOWFLAKE_1"
+""",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.eventhub_namespace == "test.servicebus.windows.net"
+        assert config.environment == "production"
+        assert config.region == "us-east"
+        assert config.client_id == "client-one"
+        assert config.control_ownership_mode == "local_single_consumer_smoke"
+        assert config.event_hubs["EVENTHUBNAME_1"].name == "hub1"
+        assert config.event_hubs["EVENTHUBNAME_1"].credential_mode == "azure_cli"
+        assert config.event_hubs["EVENTHUBNAME_1"].checkpoint_interval_seconds == 12
+        assert config.snowflake_configs["SNOWFLAKE_1"].batch_size == 3500
+        assert config.snowflake_configs["SNOWFLAKE_1"].max_retry_attempts == 9
+        assert config.snowflake_configs["SNOWFLAKE_1"].retry_delay_seconds == 11
+        assert config.snowflake_configs["SNOWFLAKE_1"].connection_timeout_seconds == 13
+        assert config.mappings[0].event_hub_key == "EVENTHUBNAME_1"
+        assert config.generate_channel_name("EVENTHUBNAME_1", config.client_id) == (
+            "hub1-production-us-east-client-one"
+        )
+
+    def test_load_config_with_toml_file_parses_typed_values(self, monkeypatch, tmp_path):
+        """Test TOML native booleans and numbers flow into Pydantic validators."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_")) or key in (
+                "ENVIRONMENT",
+                "REGION",
+                "EVSNOW_CLIENT_ID",
+            ):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+max_wait_time = 15
+prefetch_count = 75
+retry_total = 7
+retry_backoff_factor = 1.5
+track_last_enqueued_event_properties = true
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+batch_size = 3500
+""",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file=str(config_file))
+        hub = config.event_hubs["EVENTHUBNAME_1"]
+
+        assert hub.max_wait_time == 15
+        assert hub.prefetch_count == 75
+        assert hub.retry_total == 7
+        assert hub.retry_backoff_factor == 1.5
+        assert hub.track_last_enqueued_event_properties is True
+
+    def test_load_config_toml_does_not_pollute_environment(self, monkeypatch, tmp_path):
+        """TOML loading should not write structured values into os.environ."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "CONTROL", "TARGET")) or key in (
+                "ENVIRONMENT",
+                "REGION",
+                "EVSNOW_CLIENT_ID",
+                "USE_HYBRID_TABLE",
+            ):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+""",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.event_hubs["EVENTHUBNAME_1"].name == "hub1"
+        assert os.getenv("EVENTHUB_NAMESPACE") is None
+        assert os.getenv("EVENTHUBNAME_1") is None
+        assert os.getenv("SNOWFLAKE_1_DATABASE") is None
+
+    def test_load_config_env_overrides_toml(self, monkeypatch, tmp_path):
+        """Environment values should override structured TOML defaults."""
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "toml.servicebus.windows.net"
+environment = "from-toml"
+
+[control]
+target_db = "TOML_DB"
+backend = "snowflake"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "toml.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+batch_size = 100
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("EVENTHUB_NAMESPACE", "env.servicebus.windows.net")
+        monkeypatch.setenv("ENVIRONMENT", "from-env")
+        monkeypatch.setenv("EVENTHUBNAME_1", "env-hub")
+        monkeypatch.setenv("SNOWFLAKE_1_BATCH", "200")
+        monkeypatch.setenv("TARGET_DB", "ENV_DB")
+        monkeypatch.setenv("CONTROL_TABLE_BACKEND", "postgres")
+        monkeypatch.setenv("CONTROL_PG_HOST", "localhost")
+        monkeypatch.setenv("CONTROL_PG_USER", "pguser")
+        monkeypatch.setenv("CONTROL_PG_PASSWORD", "pgpass")
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.eventhub_namespace == "env.servicebus.windows.net"
+        assert config.environment == "from-env"
+        assert config.event_hubs["EVENTHUBNAME_1"].namespace == "env.servicebus.windows.net"
+        assert config.event_hubs["EVENTHUBNAME_1"].name == "env-hub"
+        assert config.snowflake_configs["SNOWFLAKE_1"].batch_size == 200
+        assert config.target_db == "env_db"
+        assert config.control_table_backend == "postgres"
+
+    def test_load_config_env_overrides_toml_nested_sections(self, monkeypatch, tmp_path):
+        """Environment values should override TOML nested model sections too."""
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("test key", encoding="utf-8")
+        env_key_file = tmp_path / "env-key.pem"
+        env_key_file.write_text("env key", encoding="utf-8")
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            f"""
+eventhub_namespace = "test.servicebus.windows.net"
+
+[control]
+backend = "postgres"
+
+[control.postgres]
+host = "toml-host"
+user = "toml-user"
+password = "toml-pass"
+
+[snowflake_connection]
+account = "toml-account"
+user = "toml_user"
+private_key_file = "{key_file}"
+warehouse = "toml_wh"
+database = "TOML_DB"
+schema_name = "PUBLIC"
+pipe_name = "TOML_PIPE"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SNOWFLAKE_ACCOUNT", "env-account")
+        monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_FILE", str(env_key_file))
+        monkeypatch.setenv("CONTROL_PG_HOST", "env-host")
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.snowflake_connection is not None
+        assert config.snowflake_connection.account == "env-account"
+        assert config.snowflake_connection.private_key_file == str(env_key_file.resolve())
+        assert config.control_postgres is not None
+        assert config.control_postgres.host == "env-host"
+
+    def test_load_config_derives_snowflake_connection_context_from_single_toml_target(
+        self, monkeypatch, tmp_path
+    ):
+        """Snowflake session database/schema should derive from one TOML target."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "CONTROL", "TARGET")):
+                monkeypatch.delenv(key, raising=False)
+
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("test key", encoding="utf-8")
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_1"
+snowflake_key = "SNOWFLAKE_1"
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SNOWFLAKE_ACCOUNT", "test-account")
+        monkeypatch.setenv("SNOWFLAKE_USER", "test_user")
+        monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_FILE", str(key_file))
+        monkeypatch.setenv("SNOWFLAKE_WAREHOUSE", "test_warehouse")
+        monkeypatch.setenv("SNOWFLAKE_PIPE_NAME", "TEST_PIPE")
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.snowflake_connection is not None
+        assert config.snowflake_connection.database == "INGESTION"
+        assert config.snowflake_connection.schema_name == "PUBLIC"
+
+    def test_load_config_env_snowflake_connection_context_overrides_toml_target(
+        self, monkeypatch, tmp_path
+    ):
+        """Explicit env Snowflake session database/schema should override derived values."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "CONTROL", "TARGET")):
+                monkeypatch.delenv(key, raising=False)
+
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("test key", encoding="utf-8")
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SNOWFLAKE_ACCOUNT", "test-account")
+        monkeypatch.setenv("SNOWFLAKE_USER", "test_user")
+        monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_FILE", str(key_file))
+        monkeypatch.setenv("SNOWFLAKE_WAREHOUSE", "test_warehouse")
+        monkeypatch.setenv("SNOWFLAKE_DATABASE", "SESSION_DB")
+        monkeypatch.setenv("SNOWFLAKE_SCHEMA_NAME", "SESSION_SCHEMA")
+        monkeypatch.setenv("SNOWFLAKE_PIPE_NAME", "TEST_PIPE")
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.snowflake_connection is not None
+        assert config.snowflake_connection.database == "SESSION_DB"
+        assert config.snowflake_connection.schema_name == "SESSION_SCHEMA"
+        assert config.snowflake_configs["SNOWFLAKE_1"].database == "INGESTION"
+        assert config.snowflake_configs["SNOWFLAKE_1"].schema_name == "PUBLIC"
+
+    def test_load_config_does_not_derive_snowflake_connection_context_from_mixed_targets(
+        self, monkeypatch, tmp_path
+    ):
+        """Ambiguous TOML targets should still require explicit connection context."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "CONTROL", "TARGET")):
+                monkeypatch.delenv(key, raising=False)
+
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("test key", encoding="utf-8")
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[event_hubs.EVENTHUBNAME_2]
+name = "hub2"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+
+[snowflake_configs.SNOWFLAKE_2]
+database = "ANALYTICS"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE2"
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_1"
+snowflake_key = "SNOWFLAKE_1"
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_2"
+snowflake_key = "SNOWFLAKE_2"
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SNOWFLAKE_ACCOUNT", "test-account")
+        monkeypatch.setenv("SNOWFLAKE_USER", "test_user")
+        monkeypatch.setenv("SNOWFLAKE_PRIVATE_KEY_FILE", str(key_file))
+        monkeypatch.setenv("SNOWFLAKE_WAREHOUSE", "test_warehouse")
+        monkeypatch.setenv("SNOWFLAKE_PIPE_NAME", "TEST_PIPE")
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.snowflake_connection is None
+
+    def test_load_config_toml_logfire_section(self, monkeypatch, tmp_path):
+        """TOML Logfire settings should load through the resolved config source."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "LOGFIRE_")):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[logfire]
+enabled = false
+service_name = "from-toml"
+environment = "test"
+send_to_logfire = false
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+""",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.logfire.service_name == "from-toml"
+
+    def test_load_config_toml_eventhub_connection_string_default(self, monkeypatch, tmp_path):
+        """A TOML Event Hub default connection string should apply to configured hubs."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_")):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[eventhub_defaults]
+connection_string = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=a;SharedAccessKey=b"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+""",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.event_hubs["EVENTHUBNAME_1"].connection_string is not None
+
+    def test_load_config_toml_eventhub_defaults_are_not_shadowed(
+        self, monkeypatch, tmp_path
+    ):
+        """TOML Event Hub defaults should apply when hubs omit optional fields."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_")):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[eventhub_defaults]
+credential_mode = "azure_cli"
+max_message_batch_size = 123
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+""",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file=str(config_file))
+
+        assert config.event_hubs["EVENTHUBNAME_1"].credential_mode == "azure_cli"
+        assert config.event_hubs["EVENTHUBNAME_1"].max_message_batch_size == 123
+
+    def test_load_config_toml_invalid_mapping_reference(self, monkeypatch, tmp_path):
+        """Structured mappings still validate references to configured keys."""
+        for key in list(os.environ.keys()):
+            if key.startswith(("EVENTHUB", "SNOWFLAKE_", "CONTROL", "TARGET")) or key in (
+                "ENVIRONMENT",
+                "REGION",
+                "EVSNOW_CLIENT_ID",
+                "USE_HYBRID_TABLE",
+            ):
+                monkeypatch.delenv(key, raising=False)
+
+        config_file = tmp_path / "evsnow.toml"
+        config_file.write_text(
+            """
+eventhub_namespace = "test.servicebus.windows.net"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "hub1"
+namespace = "test.servicebus.windows.net"
+consumer_group = "group1"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_2"
+snowflake_key = "SNOWFLAKE_1"
+""",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="non-existent Event Hub"):
+            load_config(config_file=str(config_file))

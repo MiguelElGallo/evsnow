@@ -1,0 +1,35 @@
+# Schema: ../schemas/evsnow.schema.json
+
+eventhub_namespace = "eventhub1.servicebus.windows.net"
+environment = "development"
+region = "local"
+
+[control]
+target_db = "CONTROL"
+target_schema = "PUBLIC"
+target_table = "INGESTION_STATUS"
+backend = "snowflake"
+ownership_mode = "local_single_consumer_smoke"
+use_hybrid_table = false
+
+[eventhub_defaults]
+credential_mode = "azure_cli"
+max_wait_time = 60
+prefetch_count = 300
+starting_position_on_no_checkpoint = "-1"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "topic1"
+namespace = "eventhub1.servicebus.windows.net"
+consumer_group = "$Default"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+batch_size = 100
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_1"
+snowflake_key = "SNOWFLAKE_1"
+channel_name_pattern = "{event_hub}-{env}-{region}-{client_id}"

@@ -1,30 +1,40 @@
 # evsnow
 
-[![EvSnow video](media/videoevsnow.png)](https://www.youtube.com/watch?v=zX3K-rfNZIU)
+EvSnow streams events from Azure Event Hubs into Snowflake with checkpointing
+and observability.
 
-Video: Click the image above for a walkthrough of this repo.
+This README walks through the smallest local setup first: one Event Hub, one
+Snowflake target, one checkpoint table, validation, and a pipeline run.
+
+EvSnow can write to regular Snowflake tables or Snowflake-managed Apache
+Iceberg tables through Snowpipe Streaming.
 
 [![Tests](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/tests.yml)
 [![CI/CD Pipeline](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MiguelElGallo/evsnow/actions/workflows/ci-cd.yml)
 [![codecov](https://codecov.io/gh/MiguelElGallo/evsnow/branch/main/graph/badge.svg)](https://codecov.io/gh/MiguelElGallo/evsnow)
-[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/MiguelElGallo/evsnow?utm_source=badge)
-Stream data from Azure Event Hubs to Snowflake in real-time with built-in checkpointing and observability.
 
-Now supports streaming directly to Snowflake-managed Iceberg tables.
+[![Watch the EvSnow walkthrough](media/videoevsnow.png)](https://www.youtube.com/watch?v=zX3K-rfNZIU)
 
-EvSnow can stream-ingest into **Apache Iceberg tables in Snowflake** using **Snowpipe Streaming**. The default setup uses Snowflake-managed internal Iceberg storage (`EXTERNAL_VOLUME = SNOWFLAKE_MANAGED`), so no Azure Blob external volume is required for the Iceberg target table.
+Video: Click the image above for a walkthrough of this repo.
 
-![alt text](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
-
-See a [video](https://youtu.be/zX3K-rfNZIU) for a general overview.
+![EvSnow Event Hubs to Snowflake overview](<media/ChatGPT Image Nov 9, 2025, 01_36_42 PM.png>)
 
 ## Prerequisites
 
-- Python 3.13+ and `uv` installed
-- Snowflake account/role with permission to create/use the target database, schema, and pipe
-- Azure Event Hub namespace with read access (consumer group) and one supported auth path: local Azure CLI login, service-principal environment variables, managed identity, or an explicit per-hub connection string
-- Ability to run OpenSSL to generate RSA keys for Snowflake key-pair auth
-- Snowflake CLI `snow` (or Snowflake UI) to test key-pair auth and query Snowflake
+For the first local run, you need:
+
+- Python 3.13+ and `uv`
+- Azure CLI (`az`) for the local `azure_cli` auth example
+- One Azure Event Hub you can read from and send to
+- One Snowflake table and pipe you can write to
+- A Snowflake RSA private key for key-pair authentication
+- OpenSSL if you need to generate the Snowflake RSA key locally
+
+For reset/testing workflows, `snowsql` or the Snowflake UI is useful.
+
+If you still need to create the Snowflake table, Snowpipe Streaming pipe, or
+role grants, follow the [Snowflake setup guide](./SNOWFLAKE_COMPLETE_SETUP.md)
+before validation.
 
 ## Install
 
@@ -35,220 +45,366 @@ cd evsnow
 
 # Install dependencies
 uv sync
-
-# CI/reproducible installs use the checked-in dependency lock
-uv sync --locked
-
-# Quickstart
-uv run evsnow validate-config
-uv run evsnow run --dry-run
 ```
+
+Then create the TOML and `.env` files in the next section before running
+validation or the pipeline.
 
 ## Configure
 
-1) Copy and edit the environment file
+Create two local files:
+
+- `config/evsnow.toml` describes the pipeline: Event Hub input, Snowflake
+  target, mappings, and checkpoint table.
+- `.env` stores secrets and local credentials.
+
+Environment variables override TOML. Keep pipeline shape in TOML unless you
+intentionally need a local override.
+
+See [Configuration](./docs/configuration.md) when you need the full reference.
+
+### 1. Copy the structured config file
 
 ```bash
-cp .env.example .env
+cp config/evsnow.example.toml config/evsnow.toml
 ```
 
-Then set your values in `.env`. The pipeline needs:
+The local `config/evsnow.toml` should stay out of Git. It contains deployment
+shape that is often environment-specific, even when it has no passwords.
 
-- **Azure Event Hub** (namespace, event hub name, consumer group, optional connection string)
-- **Snowflake connection** (account, user, key pair, warehouse, database, schema, role)
-- **Checkpoint/control table** for offsets
-- **Topic → table mappings**
+Now edit `config/evsnow.toml`. For one Event Hub to one Snowflake table, the
+core config looks like this:
 
-Key settings (example):
+```toml
+eventhub_namespace = "eventhub1.servicebus.windows.net"
+environment = "development"
+region = "local"
+
+[control]
+target_db = "CONTROL"
+target_schema = "PUBLIC"
+target_table = "INGESTION_STATUS"
+backend = "snowflake"
+ownership_mode = "local_single_consumer_smoke"
+use_hybrid_table = false
+
+[eventhub_defaults]
+credential_mode = "azure_cli"
+starting_position_on_no_checkpoint = "-1"
+
+[event_hubs.EVENTHUBNAME_1]
+name = "topic1"
+namespace = "eventhub1.servicebus.windows.net"
+consumer_group = "$Default"
+
+[snowflake_configs.SNOWFLAKE_1]
+database = "INGESTION"
+schema_name = "PUBLIC"
+table_name = "EVENTS_TABLE1"
+batch_size = 100
+
+[[mappings]]
+event_hub_key = "EVENTHUBNAME_1"
+snowflake_key = "SNOWFLAKE_1"
+```
+
+`EVENTHUBNAME_1` and `SNOWFLAKE_1` are local mapping keys. The real Event Hub
+name is `name = "topic1"`.
+
+For your first run, change only these values:
+
+- `eventhub_namespace`
+- `[event_hubs.EVENTHUBNAME_1].namespace`
+- `[event_hubs.EVENTHUBNAME_1].name`
+- `[snowflake_configs.SNOWFLAKE_1].database`
+- `[snowflake_configs.SNOWFLAKE_1].schema_name`
+- `[snowflake_configs.SNOWFLAKE_1].table_name`
+
+Leave `environment = "development"` and `region = "local"` for a local smoke
+test.
+
+For the first setup, use the same namespace value in both namespace fields.
+
+### 2. Create the environment file
+
+Create `.env` with secrets and local-only runtime values:
+
+If you do not already have a Snowflake RSA key, create it first:
 
 ```bash
-# Azure Event Hub
-EVENTHUB_NAMESPACE=eventhu1.servicebus.windows.net
-EVENTHUBNAME_1=topic1
-EVENTHUBNAME_1_CONSUMER_GROUP=$Default
+./generate_snowflake_keys.sh
+```
 
-# Snowflake Connection
+The script prints the public key value and the `ALTER USER` SQL. Run that SQL
+in Snowflake with a role allowed to alter the target user, such as
+`ACCOUNTADMIN`, before validation; otherwise Snowflake key-pair authentication
+will fail. Then set `SNOWFLAKE_PRIVATE_KEY_FILE` to the generated private key
+path and use the same password for `SNOWFLAKE_PRIVATE_KEY_PASSWORD`.
+
+```bash
+cat > .env <<'EOF'
 SNOWFLAKE_ACCOUNT=aaaaaa-bbbbbbb
 SNOWFLAKE_USER=STREAMEV
-SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/rsa_key_encrypted.p8
+SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=your-password
 SNOWFLAKE_WAREHOUSE=compute_wh
-SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
-
-# Control Table (for checkpointing)
-TARGET_DB=CONTROL
-TARGET_SCHEMA=PUBLIC
-TARGET_TABLE=INGESTION_STATUS
-CONTROL_TABLE_BACKEND=snowflake  # snowflake | postgres
-
-# Postgres control table (only if CONTROL_TABLE_BACKEND=postgres)
-CONTROL_PG_HOST=localhost
-CONTROL_PG_PORT=5432
-CONTROL_PG_USER=checkpoint_user
-CONTROL_PG_PASSWORD=checkpoint_password
-CONTROL_PG_SSLMODE=require
-CONTROL_PG_AUTH_MODE=password  # password | azure_token
-
-# Topic → Table Mapping
-SNOWFLAKE_1_DATABASE=INGESTION
-SNOWFLAKE_1_SCHEMA=PUBLIC
-SNOWFLAKE_1_TABLE=EVENTS_TABLE1
-SNOWFLAKE_1_BATCH=100
+EOF
 ```
 
-Snowpipe Streaming channels are generated per Event Hub partition. The base channel uses the configured pattern (`{event_hub}-{env}-{region}-{client_id}` by default), and each ingest batch appends a sanitized partition suffix such as `-p0`, `-p1`, or `-ppartition-1`. Keep `EVSNOW_CLIENT_ID` stable for a given running instance so channel names remain deterministic across restarts.
+Run these commands from the repo root so the relative key path resolves
+correctly. If your pipe has a different name, change `SNOWFLAKE_PIPE_NAME` in
+`.env`.
 
-`SNOWFLAKE_SCHEMA_NAME` is the shared Snowflake connection schema used by pipe operations. `SNOWFLAKE_1_SCHEMA` is the destination schema for mapping 1.
+Do not copy pipeline shape keys such as `EVENTHUB_NAMESPACE`, `EVENTHUBNAME_1`,
+`TARGET_DB`, or `SNOWFLAKE_1_DATABASE` into `.env` when using TOML. `.env`
+overrides TOML.
 
-Postgres control table notes:
-- When `CONTROL_TABLE_BACKEND=postgres`, `TARGET_DB`, `TARGET_SCHEMA`, and `TARGET_TABLE` are normalized to lowercase unless quoted (e.g., `"Control"` keeps case).
-- When `CONTROL_PG_AUTH_MODE=azure_token`, the app uses `DefaultAzureCredential` and passes the access token as the password; `CONTROL_PG_PASSWORD` is ignored. Ensure the Azure AD principal exists on the server and has access to the database/schema/table.
+For the single-target setup above, no Snowflake database or schema variables are
+needed in `.env`.
 
-Snowflake control table notes:
-- `CONTROL_OWNERSHIP_MODE=durable` is the production mode. With `CONTROL_TABLE_BACKEND=snowflake`, durable Event Hubs partition ownership requires a Snowflake Hybrid Table because standard-table primary and unique constraints are not enforced.
-- `CONTROL_OWNERSHIP_MODE=local_single_consumer_smoke` is only for a local single-consumer smoke test when Hybrid Tables are unavailable. It keeps partition ownership in memory while persisting checkpoints to a standard Snowflake table, so it does not validate multi-consumer ownership or failover.
-
-### Snowflake authentication
-
-Generate RSA key pair for authentication:
+Keep local config files out of Git:
 
 ```bash
-# Generate keys
-./generate_snowflake_keys.sh
-
-# Assign public key to Snowflake user
-# See SNOWFLAKE_QUICKSTART.md for detailed instructions
-# Example: ALTER USER STREAMEV SET RSA_PUBLIC_KEY='MIIBIjANBgkqhki...';
+grep -qxF 'config/evsnow.toml' .git/info/exclude || \
+  printf '\n# Local EvSnow runtime config\nconfig/evsnow.toml\n' >> .git/info/exclude
+git check-ignore -v config/evsnow.toml .env
+git status --short --ignored -- config/evsnow.toml .env
 ```
 
-Test the same RSA key with Snowflake CLI:
+### 3. Validate and run
 
-```bash
-snow connection test \
-  --account "$SNOWFLAKE_ACCOUNT" \
-  --user "$SNOWFLAKE_USER" \
-  --authenticator SNOWFLAKE_JWT \
-  --private-key-path "$SNOWFLAKE_PRIVATE_KEY_FILE"
-```
-
-The `SNOWFLAKE_JWT` authenticator is required for private-key authentication.
-EvSnow passes `SNOWFLAKE_PRIVATE_KEY_FILE` and `SNOWFLAKE_PRIVATE_KEY_PASSWORD`
-directly to the Snowpipe Streaming SDK. It does not write an unencrypted copy
-of the private key to a temporary file.
-
-### Azure authentication
-
-The pipeline uses `DefaultAzureCredential` by default, which supports local Azure CLI
-login, service-principal environment variables, and managed identity in Azure-hosted
-runtimes. Make sure you're logged in for local development:
+The example uses Azure CLI authentication. Log in before running the pipeline:
 
 ```bash
 az login
 ```
 
-For a user-assigned managed identity, set the client ID on each Event Hub config:
+For Azure RBAC, the pipeline identity needs `Azure Event Hubs Data Receiver`.
+To use the sender below, it also needs `Azure Event Hubs Data Sender`.
+
+First validate the config:
 
 ```bash
-EVENTHUBNAME_1_MANAGED_IDENTITY_CLIENT_ID="00000000-0000-0000-0000-000000000000"
+uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
 
-To force Azure CLI-only auth for local testing, opt in explicitly:
+Then test startup without ingesting:
 
 ```bash
-EVENTHUBNAME_1_CREDENTIAL_MODE=azure_cli
+uv run evsnow run --config-file config/evsnow.toml --env-file .env --dry-run
 ```
 
-Or provide a least-privilege Listen connection string in `.env`:
+Then run the pipeline in terminal 1:
 
 ```bash
-EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=EvSnowListen;SharedAccessKey=<listen-key>"
+uv run evsnow run --config-file config/evsnow.toml --env-file .env
+```
+
+Leave terminal 1 running. Then open terminal 2 and send test messages. The
+sender uses Azure `DefaultAzureCredential`; after `az login`, it can use your
+Azure CLI identity. Use the same namespace and Event Hub name that you set in
+`config/evsnow.toml`:
+
+```bash
+uv run python tools/eventhub_sender/main.py \
+  --namespace eventhub1.servicebus.windows.net \
+  --eventhub topic1 \
+  --count 10000 \
+  --batch-size 1000
+```
+
+The sender uses explicit Event Hub flags here because `.env` is reserved for
+secrets and local credentials.
+
+`validate-config` validates the resolved settings and can prompt to verify or
+create the configured control table. If `config/evsnow.toml` exists in the
+current working directory, EvSnow also discovers it by default. Passing
+`--config-file` keeps the source explicit for local testing and runbooks.
+
+When the pipeline starts successfully, logs show the Event Hub name, Snowflake
+target, and `Starting to receive messages`. If the batch has `0 messages`, the
+consumer is connected but has not received new events yet.
+
+The example above is a local single-consumer smoke-test setup. For production,
+use durable ownership with a Snowflake Hybrid Table, or choose the Postgres
+control-table backend. See [Runtime options](#runtime-options) for those
+options.
+
+### Snowflake authentication reference
+
+Generate RSA key pair for authentication:
+
+```bash
+./generate_snowflake_keys.sh
+```
+
+See [SNOWFLAKE_QUICKSTART.md](./SNOWFLAKE_QUICKSTART.md) for detailed
+instructions. The SQL looks like this:
+
+```sql
+ALTER USER STREAMEV SET RSA_PUBLIC_KEY='MIIBIjANBgkqhki...';
+```
+
+Keep private keys outside Git and point `SNOWFLAKE_PRIVATE_KEY_FILE` at that
+local path. Before committing, verify the key path, `.env`, and local TOML are
+not staged:
+
+```bash
+git check-ignore -v snowflake/ .env config/evsnow.toml
+git status --short --ignored -- snowflake/ .env config/evsnow.toml
+```
+
+### Azure authentication
+
+The first-run path already uses `az login`. If you skipped that path, run it
+before using `credential_mode = "azure_cli"`:
+
+```bash
+az login
+```
+
+For production-capable `DefaultAzureCredential` behavior, use
+`credential_mode = "default"` in TOML. That supports service-principal
+environment variables and managed identity in Azure-hosted runtimes.
+
+For a user-assigned managed identity, set the client ID on each Event Hub config
+and use `credential_mode = "default"`:
+
+```toml
+[event_hubs.EVENTHUBNAME_1]
+name = "topic1"
+namespace = "eventhub1.servicebus.windows.net"
+consumer_group = "$Default"
+credential_mode = "default"
+managed_identity_client_id = "00000000-0000-0000-0000-000000000000"
+```
+
+To use Azure CLI-only auth for local testing:
+
+```toml
+[eventhub_defaults]
+credential_mode = "azure_cli"
+```
+
+For the pipeline, you can also provide a per-Event Hub connection string in
+`.env`:
+
+```bash
+EVENTHUBNAME_1_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
 ```
 
 Reference:
 - [DefaultAzureCredential for Python](https://learn.microsoft.com/python/api/azure-identity/azure.identity.aio.defaultazurecredential)
 - [EventHubConsumerClient options](https://learn.microsoft.com/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient)
 
-## Use
+## Command reference
 
 ```bash
 # Validate configuration
-uv run evsnow validate-config
+uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 
 # Run the pipeline
-uv run evsnow run
+uv run evsnow run --config-file config/evsnow.toml --env-file .env
 
 # Check status
-uv run evsnow status
+uv run evsnow status --config-file config/evsnow.toml --env-file .env
 
 # Dry run (test without ingesting)
-uv run evsnow run --dry-run
+uv run evsnow run --config-file config/evsnow.toml --env-file .env --dry-run
 ```
 
-### Starting Fresh (No Checkpoints)
+### Starting Fresh
 
-When starting the pipeline **without existing checkpoints** (e.g., after truncating checkpoint tables), you can control how the consumer processes existing messages:
+Choose where EvSnow starts when there is no saved checkpoint.
+
+Only truncate destination or checkpoint tables in a development/test account
+after confirming the active Snowflake role, database, schema, and table names.
 
 ```bash
-# Example: Starting fresh after truncating tables
-snow sql -x \
-  --account "$SNOWFLAKE_ACCOUNT" \
-  --user "$SNOWFLAKE_USER" \
-  --authenticator SNOWFLAKE_JWT \
-  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
-  --role "$SNOWFLAKE_ROLE" \
-  --warehouse "$SNOWFLAKE_WAREHOUSE" \
-  -q "TRUNCATE TABLE ingestion.public.events_table1;"
+# Development/test only: starting fresh after truncating tables
+snowsql -q "truncate table ingestion.public.events_table1;"
+snowsql -q "truncate table control.public.ingestion_status;"
 
-snow sql -x \
-  --account "$SNOWFLAKE_ACCOUNT" \
-  --user "$SNOWFLAKE_USER" \
-  --authenticator SNOWFLAKE_JWT \
-  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
-  --role "$SNOWFLAKE_ROLE" \
-  --warehouse "$SNOWFLAKE_WAREHOUSE" \
-  -q "TRUNCATE TABLE control.public.ingestion_status;"
-
-# Consumer will process based on STARTING_POSITION_ON_NO_CHECKPOINT setting
-uv run evsnow run
+# EvSnow will use starting_position_on_no_checkpoint on the next run.
+uv run evsnow run --config-file config/evsnow.toml --env-file .env
 ```
 
-**Starting Position Options** (in `.env`): choose where the consumer begins when **no checkpoints exist**. After checkpoints are saved, the setting is ignored (resume from checkpoint).
+```toml
+# Read all existing messages first. This is the default.
+starting_position_on_no_checkpoint = "-1"
 
-```bash
-# Option 1: BEGINNING of stream (default, recommended)
-# Processes ALL existing messages in the Event Hub partitions
-# Use to ensure no messages are lost when starting fresh
-EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=-1
-
-# Option 2: LATEST position
-# Only processes messages that arrive AFTER the consumer connects
-# Skips messages already in Event Hub
-EVENTHUBNAME_1_STARTING_POSITION_ON_NO_CHECKPOINT=@latest
+# Read only messages that arrive after the consumer connects.
+starting_position_on_no_checkpoint = "@latest"
 
 ```
 
-**How It Works:**
+After EvSnow saves checkpoints, it resumes from the last checkpoint and ignores
+this setting. If you truncate the checkpoint table, the next run behaves like a
+first run again.
 
-1. **First run (no checkpoints):** Uses `STARTING_POSITION_ON_NO_CHECKPOINT` (`-1` = all existing messages; `@latest` = only new messages).
-2. **Subsequent runs (checkpoints exist):** Always resumes from the last saved checkpoint; the setting is ignored.
-3. **After truncating checkpoints:** Same as first run again; uses the configured starting position.
+Use `-1` when you do not want to miss existing messages. Use `@latest` for
+development tests that only need new messages.
 
-**Official Azure Documentation:**
+Reference:
 - [Event Hubs Event Position](https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-features#event-consumers)
 - [Starting Position Options](https://learn.microsoft.com/en-us/python/api/azure-eventhub/azure.eventhub.eventhubconsumerclient#azure-eventhub-eventhubconsumerclient-receive)
 
-**Recommendation:** 
-- Use `-1` (default) for production to prevent message loss
-- Use `@latest` for development/testing when you only want new messages
+## Runtime options
 
-## Optional features
+### Control table backends
 
-### Smart Retry (LLM-Powered)
+The local example uses Snowflake for checkpoints and in-memory partition
+ownership:
 
-Use LLM analysis to classify errors and decide whether to retry:
+```toml
+[control]
+backend = "snowflake"
+ownership_mode = "local_single_consumer_smoke"
+use_hybrid_table = false
+```
+
+This mode is only for one local consumer. It persists checkpoints to a standard
+Snowflake table, but it does not validate multi-consumer ownership or failover.
+
+For production with Snowflake as the control backend, use durable ownership with
+a Snowflake Hybrid Table:
+
+```toml
+[control]
+backend = "snowflake"
+ownership_mode = "durable"
+use_hybrid_table = true
+```
+
+Hybrid Tables are required for durable Snowflake ownership because standard
+Snowflake table primary and unique constraints are not enforced.
+
+For Postgres checkpoints, set `[control].backend = "postgres"` and keep the
+Postgres password or Azure token settings in `.env`:
+
+```bash
+CONTROL_PG_HOST=localhost
+CONTROL_PG_PORT=5432
+CONTROL_PG_USER=checkpoint_user
+CONTROL_PG_PASSWORD=checkpoint_password
+CONTROL_PG_SSLMODE=require
+CONTROL_PG_AUTH_MODE=password
+```
+
+When `CONTROL_PG_AUTH_MODE=azure_token`, EvSnow uses `DefaultAzureCredential`
+and passes the access token as the password. In that mode,
+`CONTROL_PG_PASSWORD` is ignored.
+
+For one mapped Snowflake target, EvSnow derives the Snowflake connection
+session database/schema from `[snowflake_configs.SNOWFLAKE_1]` in TOML. If you
+map to multiple database/schema pairs, set `SNOWFLAKE_DATABASE` and
+`SNOWFLAKE_SCHEMA_NAME` explicitly as the session context.
+
+### Smart Retry
+
+Smart Retry is optional. It uses an LLM to classify failures before retrying:
 
 ```bash
 # Add to .env
@@ -265,7 +421,7 @@ SMART_RETRY_ENABLE_CACHING=true
 Run with `--smart` flag:
 
 ```bash
-uv run evsnow run --smart
+uv run evsnow run --config-file config/evsnow.toml --env-file .env --smart
 ```
 
 ### Logfire Observability
@@ -285,37 +441,24 @@ LOGFIRE_LOG_LEVEL=INFO
 
 Get your token at [logfire.pydantic.dev](https://logfire.pydantic.dev)
 
-### Snowpipe Streaming Configuration
+### Snowpipe Streaming
 
-The pipeline uses Snowflake's high-performance Snowpipe Streaming SDK with a
-PIPE object. The checked-in lockfile currently resolves `snowpipe-streaming` to
-`1.4.0`.
+The pipeline uses Snowflake's high-performance Snowpipe Streaming SDK and
+requires a Snowflake PIPE object.
 
-```bash
-# Add to .env
-SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
-SNOWFLAKE_SCHEMA_NAME=PUBLIC
-
-# Create the internal Iceberg table and PIPE in Snowflake (see setup_snowpipe_streaming.sql)
-```
-
-One PIPE serves the target table, while EvSnow opens one Snowpipe Streaming channel per Event Hub partition. A batch containing mixed partitions is split before ingestion, sorted by sequence number within each partition, and sent to channels named `<base-channel>-p<sanitized-partition>`.
-
-Version `1.4.0` adds OAuth and Programmatic Access Token support in the SDK.
-EvSnow still defaults to JWT/RSA key-pair auth because that keeps the runtime
-configuration simple and works with Snowflake trial accounts.
-
-Dependencies are managed through `pyproject.toml` and the checked-in `uv.lock`. Use `uv sync --locked` when you need the exact locked versions, and refresh the lock only when intentionally changing dependencies.
+The main `.env` example already includes `SNOWFLAKE_PIPE_NAME`. Create the pipe
+with the [Snowflake setup guide](./SNOWFLAKE_COMPLETE_SETUP.md) or
+`setup_snowpipe_streaming.sql` before running the pipeline.
 
 ## Configuration reference
 
-See [`.env.example`](./.env.example) for all available configuration options with detailed comments.
+See [Configuration](./docs/configuration.md), [`config/evsnow.example.toml`](./config/evsnow.example.toml), and [`.env.example`](./.env.example) for the full environment-variable reference.
 
 ## Docs
 
+- [Configuration](./docs/configuration.md) - TOML config, `.env` secrets, validation, and examples
 - [Python Pipeline Hardening Plan](./docs/python-pipeline-hardening-plan.md) - Migration findings, milestones, and remaining hardening work
-- [Step by Step Guide](./SNOWFLAKE_COMPLETE_SETUP.md) - Setup guide for Snowflake
-- [Snowflake Quickstart](./SNOWFLAKE_QUICKSTART.md) - Compact setup and validation checklist
+- [Snowflake setup guide](./SNOWFLAKE_COMPLETE_SETUP.md) - Snowflake table, pipe, and role setup
 
 ## License
 

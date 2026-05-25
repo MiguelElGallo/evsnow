@@ -4,10 +4,8 @@ Tests for the main CLI application.
 This module tests the Typer CLI commands and functionality in src/main.py.
 """
 
-import os
 import re
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -62,6 +60,10 @@ def mock_config():
     config.snowflake_connection = None  # Set to None to skip control table creation
     config.control_table_backend = "snowflake"
     config.control_postgres = None
+    config.target_db = "CONTROL"
+    config.target_schema = "PUBLIC"
+    config.target_table = "INGESTION_STATUS"
+    config.use_hybrid_table = False
     config.logfire = MagicMock(
         enabled=False,
         service_name="evsnow",
@@ -184,20 +186,21 @@ class TestValidateConfigCommand:
 
     @patch("utils.snowflake.create_control_table")
     @patch("main.load_config")
-    def test_validate_config_control_table_warn_when_missing_env(
+    def test_validate_config_control_table_uses_resolved_defaults_without_env(
         self, mock_load_config, mock_create_table, cli_runner, mock_config, monkeypatch
     ):
-        """If TARGET_* env vars are missing, validate-config should warn and continue."""
+        """Missing TARGET_* env vars should not hide resolved config control settings."""
         monkeypatch.delenv("TARGET_DB", raising=False)
         monkeypatch.delenv("TARGET_SCHEMA", raising=False)
         monkeypatch.delenv("TARGET_TABLE", raising=False)
         mock_load_config.return_value = mock_config
+        mock_create_table.return_value = True
 
         result = cli_runner.invoke(app, ["validate-config"], input="n\n")
 
         assert result.exit_code == 0
-        assert "Control table settings not found" in result.stdout
-        mock_create_table.assert_not_called()
+        assert "verified/created successfully" in result.stdout
+        mock_create_table.assert_called_once()
 
     @patch("utils.postgres.create_control_table")
     @patch("main.load_config")
@@ -292,7 +295,50 @@ class TestValidateConfigCommand:
         result = cli_runner.invoke(app, ["validate-config", "--env-file", ".env.test"], input="n\n")
 
         assert result.exit_code == 0
-        mock_load_config.assert_called_once_with(".env.test")
+        mock_load_config.assert_called_once_with(env_file=".env.test", config_file=None)
+
+    @patch("utils.snowflake.create_control_table")
+    @patch("main.load_config")
+    def test_validate_config_with_config_file(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config
+    ):
+        """Test validate-config with structured TOML config file."""
+        mock_load_config.return_value = mock_config
+        mock_create_table.return_value = True
+
+        result = cli_runner.invoke(
+            app,
+            ["validate-config", "--config-file", "config/evsnow.toml"],
+            input="n\n",
+        )
+
+        assert result.exit_code == 0
+        mock_load_config.assert_called_once_with(
+            env_file=None,
+            config_file="config/evsnow.toml",
+        )
+
+    @patch("utils.snowflake.create_control_table")
+    @patch("main.load_config")
+    def test_validate_config_control_table_uses_config_values(
+        self, mock_load_config, mock_create_table, cli_runner, mock_config, monkeypatch
+    ):
+        """Control table verification should use resolved config values, not raw env."""
+        monkeypatch.delenv("TARGET_DB", raising=False)
+        monkeypatch.delenv("TARGET_SCHEMA", raising=False)
+        monkeypatch.delenv("TARGET_TABLE", raising=False)
+        mock_config.target_db = "TOML_CONTROL"
+        mock_config.target_schema = "TOML_PUBLIC"
+        mock_config.target_table = "TOML_STATUS"
+        mock_config.snowflake_connection = MagicMock()
+        mock_load_config.return_value = mock_config
+        mock_create_table.return_value = True
+
+        result = cli_runner.invoke(app, ["validate-config"], input="n\n")
+
+        assert result.exit_code == 0
+        mock_create_table.assert_called_once()
+        assert mock_create_table.call_args.kwargs["target_db"] == "TOML_CONTROL"
 
     @patch("main.load_config")
     def test_validate_config_handles_exception(self, mock_load_config, cli_runner):
@@ -320,6 +366,24 @@ class TestRunCommand:
         assert "Processing Plan" in result.stdout
 
     @patch("main.load_config")
+    def test_run_with_config_file_passes_path_to_loader(
+        self, mock_load_config, cli_runner, mock_config
+    ):
+        """Run command should pass --config-file through to the config loader."""
+        mock_load_config.return_value = mock_config
+
+        result = cli_runner.invoke(
+            app,
+            ["run", "--config-file", "config/evsnow.toml", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        mock_load_config.assert_called_once_with(
+            env_file=None,
+            config_file="config/evsnow.toml",
+        )
+
+    @patch("main.load_config")
     def test_run_with_capture_flag_sets_config(self, mock_load_config, cli_runner, mock_config):
         """Test run command accepts --capture and stores it on config."""
         mock_load_config.return_value = mock_config
@@ -327,7 +391,7 @@ class TestRunCommand:
         result = cli_runner.invoke(app, ["run", "--capture", "--dry-run"])
 
         assert result.exit_code == 0
-        assert getattr(mock_config, "capture_messages") is True
+        assert mock_config.capture_messages is True
 
     @patch("main.load_config")
     def test_run_with_config_errors(self, mock_load_config, cli_runner, mock_config):

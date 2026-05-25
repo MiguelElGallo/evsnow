@@ -216,6 +216,12 @@ def validate_config(
         "-e",
         help="Path to environment file (.env)",
     ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config-file",
+        "-c",
+        help="Path to structured TOML config file",
+    ),
     show_rbac: bool = typer.Option(
         False,
         "--show-rbac",
@@ -226,7 +232,7 @@ def validate_config(
     try:
         console.print("[bold blue]Loading configuration...[/bold blue]")
 
-        config = load_config(env_file)
+        config = load_config(env_file=env_file, config_file=config_file)
         validation_results = config.validate_configuration()
 
         if validation_results["valid"]:
@@ -238,11 +244,9 @@ def validate_config(
 
             # Check and create control table if needed
             try:
-                import os
-
-                target_db = os.getenv("TARGET_DB")
-                target_schema = os.getenv("TARGET_SCHEMA")
-                target_table = os.getenv("TARGET_TABLE")
+                target_db = config.target_db
+                target_schema = config.target_schema
+                target_table = config.target_table
                 use_hybrid_table = config.use_hybrid_table
                 control_backend = config.control_table_backend
 
@@ -313,7 +317,7 @@ def validate_config(
                             )
                 else:
                     console.print(
-                        "[yellow]⚠ Control table settings not found in environment (TARGET_DB, TARGET_SCHEMA, TARGET_TABLE)[/yellow]"
+                        "[yellow]⚠ Control table settings not found in resolved configuration[/yellow]"
                     )
 
             except Exception as e:
@@ -364,6 +368,12 @@ def run(
         "-e",
         help="Path to environment file (.env)",
     ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config-file",
+        "-c",
+        help="Path to structured TOML config file",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -385,7 +395,7 @@ def run(
         console.print("[bold blue]Starting EvSnow Pipeline...[/bold blue]")
 
         # Load and validate configuration
-        config = load_config(env_file)
+        config = load_config(env_file=env_file, config_file=config_file)
 
         # Optional runtime-only toggles
         config.capture_messages = capture
@@ -613,13 +623,19 @@ def status(
         "-e",
         help="Path to environment file (.env)",
     ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config-file",
+        "-c",
+        help="Path to structured TOML config file",
+    ),
 ) -> None:
     """Show pipeline status and health check."""
     try:
         console.print("[bold blue]Pipeline Status Check[/bold blue]")
 
         # Load configuration
-        config = load_config(env_file)
+        config = load_config(env_file=env_file, config_file=config_file)
         validation_results = config.validate_configuration()
 
         # Show configuration status

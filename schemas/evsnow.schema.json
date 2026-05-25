@@ -1,0 +1,948 @@
+{
+  "$defs": {
+    "ControlTableFileConfig": {
+      "additionalProperties": false,
+      "description": "Control table settings stored in TOML.",
+      "properties": {
+        "target_db": {
+          "default": "CONTROL",
+          "title": "Target Db",
+          "type": "string"
+        },
+        "target_schema": {
+          "default": "PUBLIC",
+          "title": "Target Schema",
+          "type": "string"
+        },
+        "target_table": {
+          "default": "INGESTION_STATUS",
+          "title": "Target Table",
+          "type": "string"
+        },
+        "backend": {
+          "default": "snowflake",
+          "title": "Backend",
+          "type": "string"
+        },
+        "ownership_mode": {
+          "default": "durable",
+          "title": "Ownership Mode",
+          "type": "string"
+        },
+        "use_hybrid_table": {
+          "default": false,
+          "title": "Use Hybrid Table",
+          "type": "boolean"
+        },
+        "postgres": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PostgresConnectionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ControlTableFileConfig",
+      "type": "object"
+    },
+    "EventHubConfig": {
+      "description": "Configuration for a single Event Hub.",
+      "properties": {
+        "name": {
+          "description": "Event Hub name",
+          "title": "Name",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Event Hub namespace",
+          "title": "Namespace",
+          "type": "string"
+        },
+        "connection_string": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connection String"
+        },
+        "consumer_group": {
+          "description": "Consumer group name (required)",
+          "title": "Consumer Group",
+          "type": "string"
+        },
+        "max_batch_size": {
+          "default": 1000,
+          "title": "Max Batch Size",
+          "type": "integer"
+        },
+        "max_wait_time": {
+          "default": 60,
+          "title": "Max Wait Time",
+          "type": "integer"
+        },
+        "prefetch_count": {
+          "default": 300,
+          "title": "Prefetch Count",
+          "type": "integer"
+        },
+        "retry_total": {
+          "default": 3,
+          "title": "Retry Total",
+          "type": "integer"
+        },
+        "retry_backoff_factor": {
+          "default": 0.8,
+          "title": "Retry Backoff Factor",
+          "type": "number"
+        },
+        "retry_backoff_max": {
+          "default": 120,
+          "title": "Retry Backoff Max",
+          "type": "number"
+        },
+        "retry_mode": {
+          "default": "exponential",
+          "enum": [
+            "exponential",
+            "fixed"
+          ],
+          "title": "Retry Mode",
+          "type": "string"
+        },
+        "load_balancing_interval": {
+          "default": 30,
+          "title": "Load Balancing Interval",
+          "type": "number"
+        },
+        "partition_ownership_expiration_interval": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Partition Ownership Expiration Interval"
+        },
+        "load_balancing_strategy": {
+          "default": "greedy",
+          "enum": [
+            "greedy",
+            "balanced"
+          ],
+          "title": "Load Balancing Strategy",
+          "type": "string"
+        },
+        "track_last_enqueued_event_properties": {
+          "default": false,
+          "title": "Track Last Enqueued Event Properties",
+          "type": "boolean"
+        },
+        "credential_mode": {
+          "default": "default",
+          "description": "Credential strategy for Entra ID auth. Use default for production-capable DefaultAzureCredential; azure_cli is an explicit local-development opt-in.",
+          "enum": [
+            "default",
+            "azure_cli"
+          ],
+          "title": "Credential Mode",
+          "type": "string"
+        },
+        "managed_identity_client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional user-assigned managed identity client ID for DefaultAzureCredential.",
+          "title": "Managed Identity Client Id"
+        },
+        "use_connection_string": {
+          "default": false,
+          "description": "Use connection string instead of DefaultAzureCredential",
+          "title": "Use Connection String",
+          "type": "boolean"
+        },
+        "checkpoint_interval_seconds": {
+          "default": 300,
+          "description": "Checkpoint interval (seconds)",
+          "title": "Checkpoint Interval Seconds",
+          "type": "integer"
+        },
+        "max_message_batch_size": {
+          "default": 1000,
+          "description": "Maximum messages per processing batch",
+          "title": "Max Message Batch Size",
+          "type": "integer"
+        },
+        "batch_timeout_seconds": {
+          "default": 300,
+          "description": "Maximum time to wait for batch completion",
+          "title": "Batch Timeout Seconds",
+          "type": "integer"
+        },
+        "starting_position_on_no_checkpoint": {
+          "default": "-1",
+          "description": "Starting position when no checkpoints exist. Options: '-1' (beginning), '@latest' (only new)",
+          "title": "Starting Position On No Checkpoint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "namespace",
+        "consumer_group"
+      ],
+      "title": "EventHubConfig",
+      "type": "object"
+    },
+    "EventHubDefaultsFileConfig": {
+      "additionalProperties": false,
+      "description": "Optional defaults applied to every Event Hub defined in TOML.",
+      "properties": {
+        "connection_string": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connection String"
+        },
+        "max_batch_size": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Batch Size"
+        },
+        "max_wait_time": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Wait Time"
+        },
+        "prefetch_count": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefetch Count"
+        },
+        "retry_total": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Total"
+        },
+        "retry_backoff_factor": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Backoff Factor"
+        },
+        "retry_backoff_max": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Backoff Max"
+        },
+        "retry_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "exponential",
+                "fixed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Mode"
+        },
+        "load_balancing_interval": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Load Balancing Interval"
+        },
+        "partition_ownership_expiration_interval": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Partition Ownership Expiration Interval"
+        },
+        "load_balancing_strategy": {
+          "anyOf": [
+            {
+              "enum": [
+                "greedy",
+                "balanced"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Load Balancing Strategy"
+        },
+        "track_last_enqueued_event_properties": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Track Last Enqueued Event Properties"
+        },
+        "credential_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "default",
+                "azure_cli"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credential Mode"
+        },
+        "managed_identity_client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Managed Identity Client Id"
+        },
+        "use_connection_string": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Use Connection String"
+        },
+        "checkpoint_interval_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Interval Seconds"
+        },
+        "max_message_batch_size": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Message Batch Size"
+        },
+        "batch_timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Batch Timeout Seconds"
+        },
+        "starting_position_on_no_checkpoint": {
+          "anyOf": [
+            {
+              "enum": [
+                "-1",
+                "@latest"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Starting Position On No Checkpoint"
+        }
+      },
+      "title": "EventHubDefaultsFileConfig",
+      "type": "object"
+    },
+    "EventHubSnowflakeMapping": {
+      "description": "Mapping between Event Hub and Snowflake configurations.",
+      "properties": {
+        "event_hub_key": {
+          "description": "Event Hub configuration key",
+          "title": "Event Hub Key",
+          "type": "string"
+        },
+        "snowflake_key": {
+          "description": "Snowflake configuration key",
+          "title": "Snowflake Key",
+          "type": "string"
+        },
+        "channel_name_pattern": {
+          "default": "{event_hub}-{env}-{region}-{client_id}",
+          "title": "Channel Name Pattern",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_hub_key",
+        "snowflake_key"
+      ],
+      "title": "EventHubSnowflakeMapping",
+      "type": "object"
+    },
+    "LogfireConfig": {
+      "description": "Logfire observability configuration.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable Logfire observability and tracing",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Logfire API token for cloud logging",
+          "title": "Token"
+        },
+        "service_name": {
+          "default": "evsnow",
+          "description": "Service name for Logfire identification",
+          "title": "Service Name",
+          "type": "string"
+        },
+        "environment": {
+          "default": "development",
+          "description": "Environment tag (development, staging, production)",
+          "title": "Environment",
+          "type": "string"
+        },
+        "send_to_logfire": {
+          "default": true,
+          "description": "Send logs to Logfire cloud (requires token)",
+          "title": "Send To Logfire",
+          "type": "boolean"
+        },
+        "console_logging": {
+          "default": true,
+          "description": "Keep Rich console logging alongside Logfire",
+          "title": "Console Logging",
+          "type": "boolean"
+        },
+        "log_level": {
+          "default": "INFO",
+          "description": "Minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+          "title": "Log Level",
+          "type": "string"
+        }
+      },
+      "title": "LogfireConfig",
+      "type": "object"
+    },
+    "PostgresConnectionConfig": {
+      "description": "Postgres connection configuration for checkpoint/control table.",
+      "properties": {
+        "host": {
+          "description": "Postgres host for control table",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 5432,
+          "description": "Postgres port for control table",
+          "title": "Port",
+          "type": "integer"
+        },
+        "user": {
+          "description": "Postgres user for control table",
+          "title": "User",
+          "type": "string"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Postgres password for control table (required for password auth)",
+          "title": "Password"
+        },
+        "sslmode": {
+          "default": "require",
+          "description": "Postgres SSL mode (e.g., require, verify-ca, verify-full)",
+          "title": "Sslmode",
+          "type": "string"
+        },
+        "auth_mode": {
+          "default": "password",
+          "description": "Authentication mode for Postgres control table",
+          "enum": [
+            "password",
+            "azure_token"
+          ],
+          "title": "Auth Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "user"
+      ],
+      "title": "PostgresConnectionConfig",
+      "type": "object"
+    },
+    "SnowflakeConfig": {
+      "description": "Configuration for a single Snowflake destination using Streaming API.",
+      "properties": {
+        "database": {
+          "description": "Snowflake database name",
+          "title": "Database",
+          "type": "string"
+        },
+        "schema_name": {
+          "description": "Snowflake schema name",
+          "title": "Schema Name",
+          "type": "string"
+        },
+        "table_name": {
+          "description": "Snowflake table name",
+          "title": "Table Name",
+          "type": "string"
+        },
+        "batch_size": {
+          "default": 1000,
+          "description": "Number of records per batch insert",
+          "title": "Batch Size",
+          "type": "integer"
+        },
+        "max_retry_attempts": {
+          "default": 3,
+          "description": "Maximum retry attempts",
+          "title": "Max Retry Attempts",
+          "type": "integer"
+        },
+        "retry_delay_seconds": {
+          "default": 5,
+          "description": "Delay between retry attempts",
+          "title": "Retry Delay Seconds",
+          "type": "integer"
+        },
+        "connection_timeout_seconds": {
+          "default": 30,
+          "description": "Connection timeout in seconds",
+          "title": "Connection Timeout Seconds",
+          "type": "integer"
+        },
+        "channel_status_interval_seconds": {
+          "default": 60,
+          "description": "Interval in seconds between Snowflake channel status checks (0 to disable)",
+          "title": "Channel Status Interval Seconds",
+          "type": "integer"
+        },
+        "client_refresh_interval_seconds": {
+          "default": 0,
+          "description": "Interval in seconds to proactively recreate the Snowflake streaming client (0 to disable).",
+          "title": "Client Refresh Interval Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "database",
+        "schema_name",
+        "table_name"
+      ],
+      "title": "SnowflakeConfig",
+      "type": "object"
+    },
+    "SnowflakeConnectionConfig": {
+      "description": "Snowflake connection configuration with JWT authentication.",
+      "properties": {
+        "account": {
+          "description": "Snowflake account identifier",
+          "title": "Account",
+          "type": "string"
+        },
+        "user": {
+          "description": "Snowflake username",
+          "title": "User",
+          "type": "string"
+        },
+        "private_key_file": {
+          "description": "Path to private key file",
+          "title": "Private Key File",
+          "type": "string"
+        },
+        "private_key_password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Private key password (None for unencrypted keys)",
+          "title": "Private Key Password"
+        },
+        "warehouse": {
+          "description": "Snowflake warehouse name",
+          "title": "Warehouse",
+          "type": "string"
+        },
+        "database": {
+          "description": "Snowflake database name",
+          "title": "Database",
+          "type": "string"
+        },
+        "schema_name": {
+          "description": "Snowflake schema name",
+          "title": "Schema Name",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Snowflake role",
+          "title": "Role"
+        },
+        "pipe_name": {
+          "description": "PIPE object name for high-performance SDK (e.g., EVENTS_TABLE_PIPE)",
+          "title": "Pipe Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account",
+        "user",
+        "private_key_file",
+        "warehouse",
+        "database",
+        "schema_name",
+        "pipe_name"
+      ],
+      "title": "SnowflakeConnectionConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Non-secret structured configuration loaded from TOML.",
+  "properties": {
+    "eventhub_namespace": {
+      "title": "Eventhub Namespace",
+      "type": "string"
+    },
+    "environment": {
+      "default": "development",
+      "title": "Environment",
+      "type": "string"
+    },
+    "region": {
+      "default": "default",
+      "title": "Region",
+      "type": "string"
+    },
+    "client_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Client Id"
+    },
+    "max_concurrent_channels": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrent Channels"
+    },
+    "ingestion_timeout_seconds": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ingestion Timeout Seconds"
+    },
+    "max_concurrent_mappings": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrent Mappings"
+    },
+    "health_check_interval_seconds": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Health Check Interval Seconds"
+    },
+    "max_pipeline_restart_attempts": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Pipeline Restart Attempts"
+    },
+    "pipeline_restart_delay_seconds": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pipeline Restart Delay Seconds"
+    },
+    "enable_detailed_logging": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Enable Detailed Logging"
+    },
+    "log_message_samples": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Log Message Samples"
+    },
+    "metrics_collection_enabled": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metrics Collection Enabled"
+    },
+    "control": {
+      "$ref": "#/$defs/ControlTableFileConfig"
+    },
+    "eventhub_defaults": {
+      "$ref": "#/$defs/EventHubDefaultsFileConfig"
+    },
+    "event_hubs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EventHubConfig"
+      },
+      "title": "Event Hubs",
+      "type": "object"
+    },
+    "snowflake_configs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SnowflakeConfig"
+      },
+      "title": "Snowflake Configs",
+      "type": "object"
+    },
+    "mappings": {
+      "items": {
+        "$ref": "#/$defs/EventHubSnowflakeMapping"
+      },
+      "title": "Mappings",
+      "type": "array"
+    },
+    "snowflake_connection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SnowflakeConnectionConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "logfire": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LogfireConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "eventhub_namespace"
+  ],
+  "title": "EvSnowFileConfig",
+  "type": "object"
+}
