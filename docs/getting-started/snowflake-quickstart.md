@@ -130,6 +130,16 @@ The pipe check must return `EVENTS_TABLE_PIPE`, and the grant checks must show
 the runtime role has table access plus `OPERATE` and `MONITOR` on the pipe.
 `DESC USER STREAMEV` should show `TYPE = SERVICE`.
 
+Keep this checklist as the known-good proof before moving on:
+
+| Check | Expected result |
+|-------|-----------------|
+| `DESC USER STREAMEV` | `TYPE` is `SERVICE` |
+| `SHOW GRANTS TO ROLE STREAM` | `CREATE SCHEMA` on `CONTROL`, `CREATE TABLE` on `CONTROL.PUBLIC`, and DML on `CONTROL.PUBLIC.INGESTION_STATUS` |
+| `SHOW PIPES LIKE 'EVENTS_TABLE_PIPE'` | One pipe named `EVENTS_TABLE_PIPE` in `INGESTION.PUBLIC` |
+| `SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE` | `STREAM` has `OPERATE` and `MONITOR` |
+| `DESC TABLE INGESTION.PUBLIC.EVENTS_TABLE1` | The target table exists before EvSnow starts |
+
 ## Configure EvSnow
 
 ```bash
@@ -154,11 +164,14 @@ SNOWFLAKE_USER=STREAMEV
 SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=<key-password>
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
+
+For this one-target quickstart, EvSnow derives the Snowflake session
+database/schema from `config/evsnow.toml`. Set `SNOWFLAKE_DATABASE` and
+`SNOWFLAKE_SCHEMA_NAME` only when you map to multiple database/schema pairs or
+need an explicit session context.
 
 The full environment template remains in
 [`.env.example`](https://github.com/MiguelElGallo/evsnow/blob/main/.env.example).
@@ -176,6 +189,8 @@ pipe grants exist.
 Treat any warning as a setup failure even if the command exits `0`. In
 particular, `Warning: Could not verify Snowflake control table` means the
 runtime role still lacks the control-table privileges needed by validation.
+The expected success marker is
+`Snowflake control table verified/created successfully` with no warnings.
 
 After validation passes without warnings, continue with
 [First run](../tutorial/first-run.md).

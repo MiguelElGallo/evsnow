@@ -59,6 +59,7 @@ variant = "modern"
 features = [
   "content.action.edit",
   "content.action.view",
+  "content.code.copy",
   "navigation.instant",
   "navigation.instant.progress",
   "navigation.tabs",

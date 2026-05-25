@@ -79,15 +79,24 @@ Run validation before starting the pipeline:
 uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
 
-EvSnow loads the TOML file, then applies values from `.env`, then applies real environment variables.
+EvSnow loads `config/evsnow.toml` for shape and then applies environment
+values. There are two environment-file paths:
+
+- A default `.env` file is loaded automatically if present, but it does not
+  replace variables already set in the shell.
+- An explicit `--env-file` is loaded with override semantics, so that file can
+  replace shell values and TOML-derived values for the command.
 
 So the order is:
 
 ```text
-model defaults < TOML < .env / --env-file < process environment < CLI runtime flags
+model defaults < TOML < default .env < process environment < explicit --env-file < CLI runtime flags
 ```
 
-This lets TOML describe the default pipeline, while local shells and deployment systems can still override values.
+This lets TOML describe the default pipeline, while local shells, deployment
+systems, and explicit command env files can still override values. For the first
+run, keep pipeline shape out of `.env` so the TOML remains the source you
+inspect.
 
 ## Run with TOML
 
