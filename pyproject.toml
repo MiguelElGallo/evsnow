@@ -68,7 +68,7 @@ dev = [
     "ruff>=0.15.2",
     "mypy>=1.19.1",
     "ty>=0.0.33",
-    "pytest-codspeed>=5.0.2",
+    "pytest-codspeed>=5.0.3",
 ]
 
 [tool.pytest.ini_options]
