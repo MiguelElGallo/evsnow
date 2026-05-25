@@ -3,6 +3,11 @@
 This tutorial runs one Event Hub into one Snowflake target with one checkpoint
 table. It keeps pipeline shape in TOML and keeps secrets in `.env`.
 
+Fresh Snowflake accounts should complete
+[Snowflake quickstart](../getting-started/snowflake-quickstart.md) first. This
+tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
+`INGESTION` database, target Iceberg table, and streaming pipe already exist.
+
 ## Install
 
 ```bash
@@ -59,19 +64,16 @@ first smoke test. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are local mapping keys.
 
 ## Create `.env`
 
-```bash
-./generate_snowflake_keys.sh
-```
-
-Run the printed `ALTER USER` SQL in Snowflake with a role allowed to alter the
-target user. Then create `.env`:
+Use the encrypted key created during Snowflake setup, then create `.env`:
 
 ```bash
 SNOWFLAKE_ACCOUNT=aaaaaa-bbbbbbb
 SNOWFLAKE_USER=STREAMEV
 SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=your-password
-SNOWFLAKE_WAREHOUSE=compute_wh
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_DATABASE=INGESTION
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
@@ -145,5 +147,5 @@ offsets and ignore `starting_position_on_no_checkpoint`.
 
 - Use [Configuration](../configuration.md) for the full TOML and `.env` reference.
 - Use [Snowflake key-pair auth](../snowflake/key-pair-auth.md) to troubleshoot RSA authentication.
-- Use [Snowflake quickstart](../getting-started/snowflake-quickstart.md) when the target database, pipe, or grants do not exist yet.
+- Use [Snowflake quickstart](../getting-started/snowflake-quickstart.md) when the runtime user, target database, pipe, or grants do not exist yet.
 - Use [Event Hub sender](../tools/eventhub-sender.md) for repeatable local message sends.

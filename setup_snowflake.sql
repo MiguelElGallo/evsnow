@@ -1,9 +1,9 @@
 -- Snowflake Setup SQL Script
--- Run this script in Snowflake Web UI (Worksheets) or SnowSQL
+-- Run this script in Snowflake Web UI (Worksheets) or the Snowflake CLI
 -- Make sure you're logged in as a user with appropriate permissions (ACCOUNTADMIN or similar)
 
 -- ============================================
--- PART 1: Assign RSA Public Key to User
+-- PART 1: Create Runtime Role, Warehouse, And User
 -- ============================================
 
 -- Read the public key value from: snowflake/rsa_key_pub_value.txt
@@ -11,19 +11,26 @@
 
 USE ROLE ACCOUNTADMIN;  -- Or your admin role
 
+CREATE ROLE IF NOT EXISTS STREAM;
+
+CREATE WAREHOUSE IF NOT EXISTS COMPUTE_WH
+    WAREHOUSE_SIZE = XSMALL
+    AUTO_SUSPEND = 300
+    AUTO_RESUME = TRUE
+    INITIALLY_SUSPENDED = TRUE;
+
+CREATE USER IF NOT EXISTS STREAMEV
+    DEFAULT_ROLE = STREAM
+    DEFAULT_WAREHOUSE = COMPUTE_WH
+    RSA_PUBLIC_KEY = '<PUBLIC_KEY_VALUE>';
+
+GRANT ROLE STREAM TO USER STREAMEV;
 ALTER USER STREAMEV SET RSA_PUBLIC_KEY='<PUBLIC_KEY_VALUE>';
 
 -- Verify the key was set:
 DESC USER STREAMEV;
 -- Look for RSA_PUBLIC_KEY_FP (fingerprint) - should not be NULL
 
-
--- ============================================
--- PART 2: Create INGESTION Database and Schema
--- ============================================
-
-CREATE ROLE IF NOT EXISTS STREAM;
-GRANT ROLE STREAM TO USER STREAMEV;
 
 CREATE DATABASE IF NOT EXISTS INGESTION;
 
@@ -106,6 +113,9 @@ GRANT INSERT, SELECT ON FUTURE TABLES IN SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
 
 -- Check RSA public key
 DESC USER STREAMEV;
+
+-- Check runtime role grants
+SHOW GRANTS TO ROLE STREAM;
 
 -- Check databases
 SHOW DATABASES LIKE 'INGESTION';

@@ -1,91 +1,132 @@
 # Snowflake Quickstart
 
 Use this page when the Snowflake objects for the first run do not exist yet.
-It creates the runtime role, service user, control table, target table, and
-Snowpipe Streaming pipe.
+It creates the runtime role, service user, warehouse, control table, target
+table, and Snowpipe Streaming pipe.
+
+## Before You Start
+
+You need an active Snowflake account and a setup role that can create users,
+roles, warehouses, databases, schemas, tables, pipes, and grants. `ACCOUNTADMIN`
+is acceptable for a one-time bootstrap when your organization does not provide a
+narrower setup role.
+
+If `snow connection test` succeeds but object creation fails with
+`000666 ... account is suspended due to lack of payment method`, reactivate the
+Snowflake account before retrying. A successful login does not prove the account
+can run setup DDL.
+
+The commands below use the Snowflake CLI:
+
+```bash
+snow connection test --connection <setup-connection>
+```
+
+You can also run the same SQL in Snowflake Worksheets. Replace
+`<setup-connection>` with the connection name for your setup role.
 
 ## Generate The RSA Key
+
+For an interactive local setup, run:
 
 ```bash
 ./generate_snowflake_keys.sh
 ```
 
-The script creates an encrypted private key and prints the public key value.
-Keep the private key outside Git.
+The script creates:
 
-## Create The Runtime User
+| File | Purpose |
+|------|---------|
+| `snowflake/rsa_key_encrypted.p8` | Encrypted private key used by EvSnow |
+| `snowflake/rsa_key_pub.pem` | Public key file |
+| `snowflake/rsa_key_pub_value.txt` | Public key value to paste into Snowflake SQL |
 
-Run this in Snowflake with a setup role that can create roles, users,
-databases, schemas, tables, and pipes:
-
-```sql
-USE ROLE ACCOUNTADMIN;
-
-CREATE ROLE IF NOT EXISTS STREAM;
-CREATE USER IF NOT EXISTS STREAMEV
-  DEFAULT_ROLE = STREAM
-  DEFAULT_WAREHOUSE = COMPUTE_WH;
-
-GRANT ROLE STREAM TO USER STREAMEV;
-ALTER USER STREAMEV SET RSA_PUBLIC_KEY = '<PUBLIC_KEY_FROM_SCRIPT>';
-```
-
-Use `ACCOUNTADMIN` only for this one-time bootstrap if your organization does
-not provide a narrower setup role. Runtime ingestion should use the `STREAM`
-role or another least-privilege role.
-
-## Create Databases And Schemas
-
-```sql
-CREATE DATABASE IF NOT EXISTS INGESTION;
-CREATE SCHEMA IF NOT EXISTS INGESTION.PUBLIC;
-
-CREATE DATABASE IF NOT EXISTS CONTROL;
-CREATE SCHEMA IF NOT EXISTS CONTROL.PUBLIC;
-
-GRANT USAGE ON DATABASE INGESTION TO ROLE STREAM;
-GRANT USAGE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM;
-GRANT USAGE ON DATABASE CONTROL TO ROLE STREAM;
-GRANT USAGE ON SCHEMA CONTROL.PUBLIC TO ROLE STREAM;
-```
-
-These objects match the defaults used in the first-run tutorial.
-
-## Create The Control Table And Grants
+For headless validation or CI, provide the password through
+`EVSNOW_KEY_PASSWORD`:
 
 ```bash
-# Open setup_snowflake.sql in Snowflake Worksheets or SnowSQL.
-# Replace <PUBLIC_KEY_VALUE> with the value from generate_snowflake_keys.sh.
+EVSNOW_KEY_PASSWORD="replace-with-key-password" ./generate_snowflake_keys.sh
 ```
 
-Run the checked-in
-[`setup_snowflake.sql`](https://github.com/MiguelElGallo/evsnow/blob/main/setup_snowflake.sql).
-It creates the exact `CONTROL.PUBLIC.INGESTION_STATUS` schema used by EvSnow:
-`EVENTHUB_NAMESPACE`, `EVENTHUB`, target database/schema/table, `WATERLEVEL`,
-`PARTITION_ID`, and `METADATA`.
+Do not pipe the password into the script. Keep the encrypted private key and the
+password outside Git. The script does not write an unencrypted private key unless
+you explicitly set `EVSNOW_WRITE_UNENCRYPTED_KEY=yes`.
+
+## Run The Snowflake Bootstrap
+
+Render `setup_snowflake.sql` with the generated public key, then run it with the
+setup connection:
+
+```bash
+mkdir -p .quickstart
+PUBLIC_KEY_VALUE="$(tr -d '\n' < snowflake/rsa_key_pub_value.txt)"
+sed "s|<PUBLIC_KEY_VALUE>|${PUBLIC_KEY_VALUE}|g" \
+  setup_snowflake.sql > .quickstart/setup_snowflake.sql
+
+snow sql \
+  --connection <setup-connection> \
+  --filename .quickstart/setup_snowflake.sql
+```
+
+The script creates or verifies:
+
+| Object | Default |
+|--------|---------|
+| Runtime role | `STREAM` |
+| Runtime user | `STREAMEV` |
+| Warehouse | `COMPUTE_WH` |
+| Ingestion database/schema | `INGESTION.PUBLIC` |
+| Control database/schema/table | `CONTROL.PUBLIC.INGESTION_STATUS` |
+
+It also grants the `STREAM` role the privileges needed by the runtime.
 
 ## Create The Target Table And Pipe
 
+Run the Snowpipe Streaming setup script:
+
 ```bash
-# Open setup_snowpipe_streaming.sql in Snowflake Worksheets or SnowSQL.
+snow sql \
+  --connection <setup-connection> \
+  --filename setup_snowpipe_streaming.sql
 ```
 
-Run the checked-in
-[`setup_snowpipe_streaming.sql`](https://github.com/MiguelElGallo/evsnow/blob/main/setup_snowpipe_streaming.sql).
-It creates the Snowflake-managed Iceberg table and the required high-performance
-Snowpipe Streaming pipe with `DATA_SOURCE(TYPE => 'STREAMING')`.
+The script creates the Snowflake-managed Iceberg target table and the
+high-performance Snowpipe Streaming pipe if they do not already exist:
 
-The table definition uses Snowflake-managed Iceberg storage by default:
+| Object | Default |
+|--------|---------|
+| Target table | `INGESTION.PUBLIC.EVENTS_TABLE1` |
+| Streaming pipe | `INGESTION.PUBLIC.EVENTS_TABLE_PIPE` |
+
+The table uses Snowflake-managed Iceberg storage:
 
 ```sql
-CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1
+CREATE ICEBERG TABLE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE1
   CATALOG = SNOWFLAKE
   EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
   ICEBERG_VERSION = 3;
 ```
 
-Use [Complete Snowflake setup](../snowflake/complete-setup.md) if you need the
-long-form object reference or troubleshooting notes.
+Use [Complete Snowflake setup](../snowflake/complete-setup.md) for the long-form
+object reference.
+
+## Verify Snowflake Objects
+
+Run these checks with the setup connection:
+
+```bash
+snow sql --connection <setup-connection> --query "
+DESC USER STREAMEV;
+SHOW GRANTS TO ROLE STREAM;
+DESC TABLE CONTROL.PUBLIC.INGESTION_STATUS;
+DESC TABLE INGESTION.PUBLIC.EVENTS_TABLE1;
+SHOW PIPES LIKE 'EVENTS_TABLE_PIPE' IN SCHEMA INGESTION.PUBLIC;
+SHOW GRANTS ON PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE;
+"
+```
+
+The pipe check must return `EVENTS_TABLE_PIPE`, and the grant checks must show
+the runtime role has table access plus `OPERATE` and `MONITOR` on the pipe.
 
 ## Configure EvSnow
 
@@ -106,11 +147,13 @@ batch_size = 100
 Create `.env` with only secrets and local credentials:
 
 ```bash
-SNOWFLAKE_ACCOUNT=<account_locator>.<region>
+SNOWFLAKE_ACCOUNT=<account_locator>
 SNOWFLAKE_USER=STREAMEV
 SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=<key-password>
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_DATABASE=INGESTION
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
@@ -118,10 +161,14 @@ SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 The full environment template remains in
 [`.env.example`](https://github.com/MiguelElGallo/evsnow/blob/main/.env.example).
 
-## Verify
+## Verify EvSnow Configuration
 
 ```bash
 uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
+
+This validates the resolved EvSnow configuration and control-table access. Keep
+the Snowflake object checks above as the proof that the Iceberg table, pipe, and
+pipe grants exist.
 
 After validation passes, continue with [First run](../tutorial/first-run.md).

@@ -28,24 +28,65 @@ if [ -f "rsa_key_encrypted.p8" ]; then
 fi
 
 echo "Step 1: Generating RSA private key (2048-bit) and encrypting with DES3..."
-echo "You will be prompted to enter a password (twice)."
-echo "⚠️  IMPORTANT: Remember this password - you'll need it for SNOWFLAKE_PRIVATE_KEY_PASSWORD"
-# Using des3 as per Snowflake official documentation:
-# https://docs.snowflake.com/en/user-guide/key-pair-auth#generate-the-private-keys
-openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 des3 -inform PEM -out rsa_key_encrypted.p8
+if [ -n "${EVSNOW_KEY_PASSWORD:-}" ]; then
+    echo "Using EVSNOW_KEY_PASSWORD for non-interactive key generation."
+    echo "⚠️  IMPORTANT: Store this password - you'll need it for SNOWFLAKE_PRIVATE_KEY_PASSWORD"
+    # Using des3 as per Snowflake official documentation:
+    # https://docs.snowflake.com/en/user-guide/key-pair-auth#generate-the-private-keys
+    openssl genrsa 2048 | openssl pkcs8 \
+        -topk8 \
+        -v2 des3 \
+        -inform PEM \
+        -out rsa_key_encrypted.p8 \
+        -passout "pass:${EVSNOW_KEY_PASSWORD}"
+else
+    echo "You will be prompted to enter a password (twice)."
+    echo "⚠️  IMPORTANT: Remember this password - you'll need it for SNOWFLAKE_PRIVATE_KEY_PASSWORD"
+    # Using des3 as per Snowflake official documentation:
+    # https://docs.snowflake.com/en/user-guide/key-pair-auth#generate-the-private-keys
+    openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 des3 -inform PEM -out rsa_key_encrypted.p8
+fi
 
 echo ""
-echo "Step 2: Creating unencrypted backup copy..."
-openssl pkcs8 -topk8 -inform PEM -in rsa_key_encrypted.p8 -out rsa_key.pem -nocrypt 2>/dev/null || \
-    openssl rsa -in rsa_key_encrypted.p8 -out rsa_key.pem 2>/dev/null
+echo "Step 2: Optional unencrypted backup copy..."
+if [ "${EVSNOW_WRITE_UNENCRYPTED_KEY:-}" = "yes" ]; then
+    if [ -n "${EVSNOW_KEY_PASSWORD:-}" ]; then
+        openssl pkcs8 \
+            -topk8 \
+            -inform PEM \
+            -in rsa_key_encrypted.p8 \
+            -out rsa_key.pem \
+            -nocrypt \
+            -passin "pass:${EVSNOW_KEY_PASSWORD}" 2>/dev/null || \
+            openssl rsa \
+                -in rsa_key_encrypted.p8 \
+                -out rsa_key.pem \
+                -passin "pass:${EVSNOW_KEY_PASSWORD}" 2>/dev/null
+    else
+        openssl pkcs8 -topk8 -inform PEM -in rsa_key_encrypted.p8 -out rsa_key.pem -nocrypt 2>/dev/null || \
+            openssl rsa -in rsa_key_encrypted.p8 -out rsa_key.pem 2>/dev/null
+    fi
+else
+    echo "Skipping unencrypted backup. Set EVSNOW_WRITE_UNENCRYPTED_KEY=yes if you explicitly need rsa_key.pem."
+fi
 
 echo ""
 echo "Step 3: Setting secure file permissions..."
 chmod 600 rsa_key_encrypted.p8
-chmod 600 rsa_key.pem
+if [ -f "rsa_key.pem" ]; then
+    chmod 600 rsa_key.pem
+fi
 
 echo "Step 4: Extracting public key..."
-openssl rsa -in rsa_key_encrypted.p8 -pubout -out rsa_key_pub.pem
+if [ -n "${EVSNOW_KEY_PASSWORD:-}" ]; then
+    openssl rsa \
+        -in rsa_key_encrypted.p8 \
+        -pubout \
+        -out rsa_key_pub.pem \
+        -passin "pass:${EVSNOW_KEY_PASSWORD}"
+else
+    openssl rsa -in rsa_key_encrypted.p8 -pubout -out rsa_key_pub.pem
+fi
 
 echo "Step 5: Preparing public key value for Snowflake..."
 grep -v "BEGIN PUBLIC" rsa_key_pub.pem | grep -v "END PUBLIC" | tr -d '\n' > rsa_key_pub_value.txt
@@ -55,10 +96,12 @@ echo ""
 echo "✅ Keys generated successfully!"
 echo ""
 echo "Files created in snowflake/ directory:"
-echo "  - rsa_key.pem (unencrypted private key - for backup only)"
 echo "  - rsa_key_encrypted.p8 (encrypted private key - USE THIS)"
 echo "  - rsa_key_pub.pem (public key file)"
 echo "  - rsa_key_pub_value.txt (public key value for Snowflake)"
+if [ -f "rsa_key.pem" ]; then
+    echo "  - rsa_key.pem (unencrypted private key - backup only)"
+fi
 echo ""
 echo "=========================================="
 echo "NEXT STEPS:"
