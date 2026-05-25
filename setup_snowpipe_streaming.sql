@@ -1,6 +1,8 @@
 -- ============================================================================
 -- SNOWPIPE STREAMING HIGH-PERFORMANCE ARCHITECTURE SETUP
--- Run this in Snowflake to create the required Iceberg table and PIPE
+-- Run this in Snowflake to create the required Iceberg table and PIPE.
+-- The CREATE statements use IF NOT EXISTS so the quickstart does not replace
+-- an existing target table or pipe.
 --
 -- References:
 --   https://docs.snowflake.com/en/user-guide/tables-iceberg-internal-storage
@@ -30,7 +32,7 @@ USE WAREHOUSE COMPUTE_WH;
 -- Do not create EXVOL, grant external-volume privileges, or set a table base path
 -- for the default setup.
 -- ============================================================================
-CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1 (
+CREATE ICEBERG TABLE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE1 (
     EVENT_BODY STRING,
     PARTITION_ID STRING,
     SEQUENCE_NUMBER DECIMAL(38, 0),
@@ -54,7 +56,7 @@ ICEBERG_VERSION = 3;
 -- EvSnow splits mixed-partition Event Hub batches before ingest, so each
 -- Snowpipe Streaming channel receives only one partition in sequence order.
 -- ============================================================================
-CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
+CREATE PIPE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE_PIPE AS
 COPY INTO INGESTION.PUBLIC.EVENTS_TABLE1 (
     EVENT_BODY,
     PARTITION_ID,

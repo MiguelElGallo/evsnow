@@ -10,6 +10,18 @@ Set up key-pair authentication for EvSnow using RSA keys (JWT).
 
 ## 1) Generate RSA keys (PKCS#8, encrypted)
 
+The repo helper creates the encrypted private key and public key value used by
+the quickstart:
+
+```bash
+./generate_snowflake_keys.sh
+```
+
+For headless validation, set `EVSNOW_KEY_PASSWORD` instead of piping a password
+to OpenSSL.
+
+Manual equivalent:
+
 ```bash
 # Encrypted private key (recommended) - uses DES3 like generate_snowflake_keys.sh
 openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key_encrypted.p8 -v2 des3
@@ -42,7 +54,7 @@ snow connection test \
   --account <account_identifier> \
   --user <username> \
   --authenticator SNOWFLAKE_JWT \
-  --private-key-path rsa_key_encrypted.p8
+  --private-key-file rsa_key_encrypted.p8
 ```
 
 Private-key authentication requires `SNOWFLAKE_JWT`. EvSnow uses the same key

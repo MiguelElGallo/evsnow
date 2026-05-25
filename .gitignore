@@ -210,4 +210,6 @@ __marimo__/
 .env.test
 AZURE_OPENAI_PROGRESS.md
 /snowflake/
+.quickstart/
+.quickstart-runs/
 .testenv

@@ -18,11 +18,11 @@ def _normalized(path: Path) -> str:
 def test_streaming_setup_uses_internal_snowflake_managed_iceberg():
     sql = _normalized(SETUP_SQL)
 
-    assert "CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1" in sql
+    assert "CREATE ICEBERG TABLE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE1" in sql
     assert "CATALOG = SNOWFLAKE" in sql
     assert "EXTERNAL_VOLUME = SNOWFLAKE_MANAGED" in sql
     assert "ICEBERG_VERSION = 3" in sql
-    assert "CREATE OR REPLACE PIPE INGESTION.PUBLIC.EVENTS_TABLE_PIPE" in sql
+    assert "CREATE PIPE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE_PIPE" in sql
     assert "INGESTION_TIMESTAMP" in sql
     assert "CURRENT_TIMESTAMP()::TIMESTAMP_LTZ(6) AS INGESTION_TIMESTAMP" in sql
     assert "DATA_SOURCE(TYPE => 'STREAMING')" in sql

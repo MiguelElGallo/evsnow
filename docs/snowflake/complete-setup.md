@@ -1,9 +1,10 @@
 # Complete Snowflake Setup
 
 This reference collects the Snowflake objects EvSnow needs. New users should
-start with [First run](../tutorial/first-run.md), then use
-[Snowflake quickstart](../getting-started/snowflake-quickstart.md) when the
-Snowflake objects do not exist yet.
+start with [First run](../tutorial/first-run.md) to understand the runtime flow.
+If the Snowflake objects do not already exist, complete
+[Snowflake quickstart](../getting-started/snowflake-quickstart.md) before
+running the pipeline.
 
 ## Object Map
 
@@ -11,6 +12,7 @@ Snowflake objects do not exist yet.
 |--------|--------------|---------|
 | Runtime role | `STREAM` | Least-privilege role used by EvSnow |
 | Runtime user | `STREAMEV` | Key-pair authenticated service user |
+| Warehouse | `COMPUTE_WH` | Runtime warehouse used for validation and setup |
 | Ingestion database | `INGESTION` | Target database for streamed events |
 | Ingestion schema | `PUBLIC` | Target schema for the first-run example |
 | Control database | `CONTROL` | Checkpoint database |
@@ -22,18 +24,22 @@ Snowflake objects do not exist yet.
 
 Use the checked-in scripts as the source of truth:
 
-- [`setup_snowflake.sql`](https://github.com/MiguelElGallo/evsnow/blob/main/setup_snowflake.sql) creates the role, user key assignment, databases, schemas, control table, and grants.
-- [`setup_snowpipe_streaming.sql`](https://github.com/MiguelElGallo/evsnow/blob/main/setup_snowpipe_streaming.sql) creates the Snowflake-managed Iceberg table and pipe with `DATA_SOURCE(TYPE => 'STREAMING')`.
+- [`setup_snowflake.sql`](https://github.com/MiguelElGallo/evsnow/blob/main/setup_snowflake.sql) creates the role, user key assignment, warehouse, databases, schemas, control table, and grants.
+- [`setup_snowpipe_streaming.sql`](https://github.com/MiguelElGallo/evsnow/blob/main/setup_snowpipe_streaming.sql) creates the Snowflake-managed Iceberg table and pipe with `DATA_SOURCE(TYPE => 'STREAMING')` if they do not already exist.
 
-Run the scripts in Snowflake Worksheets or SnowSQL with a setup role that can
-create users, roles, databases, schemas, tables, pipes, and grants. Use
-`ACCOUNTADMIN` only for one-time bootstrap when your organization does not
-provide a narrower setup role.
+Run the scripts in Snowflake Worksheets or with the Snowflake CLI using a setup
+role that can create users, roles, databases, schemas, tables, pipes, and
+grants. Use `ACCOUNTADMIN` only for one-time bootstrap when your organization
+does not provide a narrower setup role.
+
+If Snowflake returns `000666 ... account is suspended due to lack of payment
+method`, the account can authenticate but cannot run setup DDL. Reactivate the
+account and rerun the setup script.
 
 The default setup keeps Iceberg storage Snowflake-managed:
 
 ```sql
-CREATE OR REPLACE ICEBERG TABLE INGESTION.PUBLIC.EVENTS_TABLE1
+CREATE ICEBERG TABLE IF NOT EXISTS INGESTION.PUBLIC.EVENTS_TABLE1
   CATALOG = SNOWFLAKE
   EXTERNAL_VOLUME = SNOWFLAKE_MANAGED
   ICEBERG_VERSION = 3;
@@ -75,6 +81,8 @@ SNOWFLAKE_USER=STREAMEV
 SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=<key-password>
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_DATABASE=INGESTION
+SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
@@ -128,3 +136,12 @@ SHOW GRANTS ON TABLE CONTROL.PUBLIC.INGESTION_STATUS;
 
 The table schema must match `setup_snowflake.sql`, and the runtime role needs
 `SELECT`, `INSERT`, and `UPDATE` privileges.
+
+### Account Suspended
+
+```text
+000666 (57014): Your account is suspended due to lack of payment method.
+```
+
+Fix the Snowflake account billing/reactivation state first. Connection tests can
+still pass while create/drop/alter statements are blocked.
