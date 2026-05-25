@@ -74,11 +74,14 @@ SNOWFLAKE_USER=john_doe
 SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=your_encryption_password
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-SNOWFLAKE_DATABASE=MYDB
-SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=DATA_ENGINEER
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
+
+For the one-target tutorial, leave `SNOWFLAKE_DATABASE` and
+`SNOWFLAKE_SCHEMA_NAME` out of `.env`; EvSnow derives them from the mapped
+Snowflake target in `config/evsnow.toml`. Set them only for multi-target
+mappings or for an explicit session context.
 
 EvSnow passes the encrypted private-key file and
 `SNOWFLAKE_PRIVATE_KEY_PASSWORD` directly to Snowpipe Streaming SDK `1.4.0`.
@@ -95,7 +98,7 @@ uv run evsnow validate-config --show-rbac
 Create the control table using the working DDL:
 
 ```sql
-CREATE OR REPLACE TABLE CONTROL.PUBLIC.INGESTION_STATUS (
+CREATE TABLE IF NOT EXISTS CONTROL.PUBLIC.INGESTION_STATUS (
     TS_INSERTED TIMESTAMP_LTZ(9) DEFAULT CURRENT_TIMESTAMP(),
     EVENTHUB_NAMESPACE VARCHAR(500) NOT NULL,
     EVENTHUB VARCHAR(200) NOT NULL,

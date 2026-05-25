@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Plan: Optional Postgres Checkpoint Table
 
 ## Goals

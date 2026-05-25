@@ -1,6 +1,19 @@
+---
+search:
+  exclude: true
+---
+
 # Snowflake Setup CLI
 
-Automated Snowflake setup CLI with Copilot Agent assistance for the EvSnow project.
+Archived experimental setup CLI with Copilot Agent assistance for the EvSnow
+project.
+
+!!! warning "Archived tool"
+
+    This page is kept for project history. The current supported setup path is
+    [Snowflake quickstart](../getting-started/snowflake-quickstart.md), which
+    uses checked-in SQL and the Snowflake CLI. Do not use this page as the
+    first-run setup guide.
 
 This tool is experimental and setup-only. It can generate Programmatic Access
 Token SQL restricted to an administrative setup role. Do not use those tokens

@@ -14,16 +14,23 @@ Read the hosted docs at <https://miguelelgallo.github.io/evsnow/>.
 
 Use TOML for pipeline shape and `.env` for secrets or local credentials:
 
-Fresh Event Hub namespaces should start with
-[Event Hub quickstart](docs/getting-started/event-hub-quickstart.md). Fresh
-Snowflake accounts should start with
-[Snowflake quickstart](docs/getting-started/snowflake-quickstart.md). If both
-already exist, run:
-
 ```bash
 git clone https://github.com/MiguelElGallo/evsnow.git
 cd evsnow
 uv sync
+```
+
+Fresh Event Hub namespaces should start with
+[Event Hub quickstart](docs/getting-started/event-hub-quickstart.md). Fresh
+Snowflake accounts should start with
+[Snowflake quickstart](docs/getting-started/snowflake-quickstart.md). Both
+setup pages assume commands are run from the repo root after the install step
+above.
+
+If the Event Hub and Snowflake objects already exist, continue with the local
+runtime files:
+
+```bash
 cp config/evsnow.example.toml config/evsnow.toml
 cp .env.example .env
 

@@ -35,6 +35,7 @@ flowchart LR
     pipe --> snowflake["Snowflake table or Snowflake-managed Iceberg table"]
     consumer --> logs["Logfire and local logs"]
 ```
+{ data-search-exclude }
 
 The Event Hub consumer reads from configured partitions. EvSnow writes data
 through Snowpipe Streaming and records progress in a control backend. Later
@@ -50,6 +51,7 @@ flowchart TD
     multi -- yes --> hybrid["Snowflake Hybrid Table\ndurable ownership"]
     multi -- no --> postgres["Postgres backend\npassword or Azure token auth"]
 ```
+{ data-search-exclude }
 
 The local tutorial uses a Snowflake standard table and
 `local_single_consumer_smoke`. Production deployments should use durable

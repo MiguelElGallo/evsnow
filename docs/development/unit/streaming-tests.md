@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Streaming Module Tests
 
 This directory contains comprehensive unit tests for the streaming module, including:

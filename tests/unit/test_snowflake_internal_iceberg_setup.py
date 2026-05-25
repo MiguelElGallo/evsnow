@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+README = REPO_ROOT / "README.md"
 SETUP_SQL = REPO_ROOT / "setup_snowpipe_streaming.sql"
 SETUP_GRANTS_SQL = REPO_ROOT / "setup_snowflake.sql"
 MESSAGES_CREATION_SQL = REPO_ROOT / "messages" / "creation.sql"
@@ -20,6 +21,18 @@ FIRST_RUN = REPO_ROOT / "docs" / "tutorial" / "first-run.md"
 EVENTHUB_SENDER = REPO_ROOT / "docs" / "tools" / "eventhub-sender.md"
 WORKFLOWS = REPO_ROOT / "docs" / "project" / "workflows.md"
 DOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs.yml"
+ARCHIVE_DOCS = [
+    REPO_ROOT / "docs" / "project" / "issue-creation-guide.md",
+    REPO_ROOT / "docs" / "python-pipeline-hardening-plan.md",
+    REPO_ROOT / "docs" / "archive" / "control-table-postgres-plan.md",
+    REPO_ROOT / "docs" / "archive" / "snowflake-setup-cli-plan.md",
+    REPO_ROOT / "docs" / "tools" / "snowflake-setup-cli.md",
+    REPO_ROOT / "docs" / "development" / "unit" / "orchestrator-tests.md",
+    REPO_ROOT / "docs" / "development" / "unit" / "streaming-tests.md",
+    REPO_ROOT / "docs" / "development" / "unit" / "streaming-coverage.md",
+    REPO_ROOT / "docs" / "development" / "unit" / "streaming-implementation-summary.md",
+    REPO_ROOT / "docs" / "development" / "unit" / "test-orchestrator-note.md",
+]
 
 
 def _normalized(path: Path) -> str:
@@ -76,6 +89,8 @@ def test_setup_grants_include_iceberg_and_pipe_creation():
     grants = _normalized(SETUP_GRANTS_SQL)
     docs = "\n".join(_normalized(path) for path in (QUICKSTART, COMPLETE_SETUP))
 
+    assert "CREATE TABLE IF NOT EXISTS CONTROL.PUBLIC.INGESTION_STATUS" in grants
+    assert "CREATE OR REPLACE TABLE CONTROL.PUBLIC.INGESTION_STATUS" not in grants
     assert "TYPE = SERVICE" in grants
     assert "ALTER USER STREAMEV SET TYPE = SERVICE" in grants
     assert "GRANT CREATE SCHEMA ON DATABASE CONTROL TO ROLE STREAM" in grants
@@ -88,6 +103,8 @@ def test_setup_grants_include_iceberg_and_pipe_creation():
     assert "GRANT CREATE PIPE ON SCHEMA INGESTION.PUBLIC TO ROLE STREAM" in docs
     assert "TYPE = SERVICE" in docs
     assert "WARNING: COULD NOT VERIFY SNOWFLAKE CONTROL TABLE" in docs
+    assert "PRESERVES EXISTING CHECKPOINT ROWS" in docs
+    assert "REPLACE THAT LINE" in docs
     assert "NEXT: RUN SETUP_SNOWPIPE_STREAMING.SQL, UPDATE .ENV" in grants
 
 
@@ -137,8 +154,18 @@ def test_eventhub_quickstart_covers_creation_and_rbac():
     assert "AZURE EVENT HUBS DATA RECEIVER" in docs
     assert "AZURE EVENT HUBS DATA SENDER" in docs
     assert "EVENTHUB-RBAC-SMOKE" in docs
+    assert "--CREDENTIAL-MODE AZURE_CLI" in docs
     assert "FULLY QUALIFIED NAMESPACE" in docs
     assert "GETTING-STARTED/EVENT-HUB-QUICKSTART.MD" in config
+
+
+def test_readme_installs_before_repo_local_quickstarts():
+    docs = _normalized(README)
+
+    assert docs.index("GIT CLONE HTTPS://GITHUB.COM/MIGUELELGALLO/EVSNOW.GIT") < docs.index(
+        "EVENT HUB QUICKSTART"
+    )
+    assert "SETUP PAGES ASSUME COMMANDS ARE RUN FROM THE REPO ROOT" in docs
 
 
 def test_env_example_keeps_first_run_shape_in_toml():
@@ -177,15 +204,23 @@ def test_zensical_enables_code_copy_buttons():
     config = ZENSICAL.read_text(encoding="utf-8")
 
     assert '"content.code.copy"' in config
+    assert '"content.code.select"' in config
+    assert '"content.tabs.link"' in config
     assert '"search.highlight"' in config
+    assert '"navigation.indexes"' in config
     assert "[project.markdown_extensions.attr_list]" in config
+    assert "[project.markdown_extensions.admonition]" in config
+    assert "[project.markdown_extensions.pymdownx.details]" in config
+    assert "[project.markdown_extensions.pymdownx.tabbed]" in config
     assert 'name = "mermaid"' in config
 
 
 def test_first_run_includes_arrival_proof():
     docs = _normalized(FIRST_RUN)
 
-    assert "RUN_ID=\"EVSNOW-FIRST-RUN-" in docs
+    assert 'RUN_ID="EVSNOW-FIRST-RUN-' in docs
+    assert "BATCH_SIZE = 3" in docs
+    assert "--CREDENTIAL-MODE AZURE_CLI" in docs
     assert "ROWS_ARRIVED" in docs
     assert "SEQUENCE_IDS" in docs
     assert "WAIT 15 SECONDS AND RERUN" in docs
@@ -197,6 +232,7 @@ def test_eventhub_sender_env_only_docs_match_cli_defaults():
 
     assert "EVENTHUB_NAME` IS ONLY A LOCAL SHELL VARIABLE" in docs
     assert "READS `EVENTHUBNAME_1` FROM `.ENV`" in docs
+    assert "--CREDENTIAL-MODE AZURE_CLI" in docs
 
 
 def test_docs_workflow_deploys_built_artifact_once():
@@ -223,6 +259,12 @@ def test_quickstart_harness_fails_on_validation_warnings():
     assert "SNOWFLAKE_DATABASE=INGESTION" not in harness
     assert "SNOWFLAKE_SCHEMA_NAME=PUBLIC" not in harness
     assert "database/schema are derived from config/evsnow.toml" in harness
+
+
+def test_archive_pages_are_excluded_from_search():
+    for path in ARCHIVE_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("---\nsearch:\n  exclude: true\n---\n"), path
 
 
 def test_quickstart_harness_resolves_cli_default_connection():

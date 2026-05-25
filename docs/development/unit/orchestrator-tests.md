@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Pipeline Orchestrator Tests
 
 ## Overview

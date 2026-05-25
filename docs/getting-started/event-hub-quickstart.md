@@ -8,6 +8,9 @@ Event Hub for the first run.
 You need Azure CLI access to a subscription where you can create resource
 groups, Event Hubs namespaces, Event Hubs, and role assignments.
 
+Run these commands from the EvSnow repo root after cloning the repo and running
+`uv sync`:
+
 ```bash
 az login
 az account set --subscription <subscription-id-or-name>
@@ -79,9 +82,11 @@ az role assignment create \
   --scope "$NAMESPACE_SCOPE"
 ```
 
-Role assignments can take a few minutes to propagate. If the first receiver or
-sender attempt fails with an authorization error, wait and retry before changing
-the EvSnow configuration.
+!!! note "RBAC propagation"
+
+    Role assignments can take a few minutes to propagate. If the first receiver
+    or sender attempt fails with an authorization error, wait and retry before
+    changing the EvSnow configuration.
 
 ## Verify The Resources
 
@@ -117,6 +122,7 @@ uv run python tools/eventhub_sender/main.py \
   --eventhub "$EVENTHUB_NAME" \
   --count 1 \
   --batch-size 1 \
+  --credential-mode azure_cli \
   --payload '{"purpose":"eventhub-rbac-smoke"}'
 ```
 
