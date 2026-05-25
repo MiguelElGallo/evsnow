@@ -30,7 +30,9 @@ Use the checked-in scripts as the source of truth:
 Run the scripts in Snowflake Worksheets or with the Snowflake CLI using a setup
 role that can create users, roles, databases, schemas, tables, pipes, and
 grants. Use `ACCOUNTADMIN` only for one-time bootstrap when your organization
-does not provide a narrower setup role.
+does not provide a narrower setup role. The checked-in
+`setup_snowflake.sql` starts with `USE ROLE ACCOUNTADMIN`; replace that line in
+your rendered copy when using a delegated setup role.
 
 If Snowflake returns `000666 ... account is suspended due to lack of payment
 method`, the account can authenticate but cannot run setup DDL. Reactivate the
@@ -87,11 +89,14 @@ SNOWFLAKE_USER=STREAMEV
 SNOWFLAKE_PRIVATE_KEY_FILE=snowflake/rsa_key_encrypted.p8
 SNOWFLAKE_PRIVATE_KEY_PASSWORD=<key-password>
 SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-SNOWFLAKE_DATABASE=INGESTION
-SNOWFLAKE_SCHEMA_NAME=PUBLIC
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
+
+For one mapped target, EvSnow derives the session database and schema from the
+target in `config/evsnow.toml`. Add `SNOWFLAKE_DATABASE` and
+`SNOWFLAKE_SCHEMA_NAME` only for multi-target mappings or when you need to force
+an explicit Snowflake session context.
 
 See [Configuration](../configuration.md) for precedence and every supported
 TOML/environment setting.

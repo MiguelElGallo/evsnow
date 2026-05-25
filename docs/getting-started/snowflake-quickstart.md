@@ -11,10 +11,15 @@ roles, warehouses, databases, schemas, tables, pipes, and grants. `ACCOUNTADMIN`
 is acceptable for a one-time bootstrap when your organization does not provide a
 narrower setup role.
 
-If `snow connection test` succeeds but object creation fails with
-`000666 ... account is suspended due to lack of payment method`, reactivate the
-Snowflake account before retrying. A successful login does not prove the account
-can run setup DDL.
+Run the local commands on this page from the EvSnow repo root after cloning the
+repo and running `uv sync`.
+
+!!! warning "Connection success is not DDL success"
+
+    If `snow connection test` succeeds but object creation fails with
+    `000666 ... account is suspended due to lack of payment method`, reactivate
+    the Snowflake account before retrying. A successful login does not prove the
+    account can run setup DDL.
 
 The commands below use the Snowflake CLI:
 
@@ -48,14 +53,20 @@ For headless validation or CI, provide the password through
 EVSNOW_KEY_PASSWORD="replace-with-key-password" ./generate_snowflake_keys.sh
 ```
 
-Do not pipe the password into the script. Keep the encrypted private key and the
-password outside Git. The script does not write an unencrypted private key unless
-you explicitly set `EVSNOW_WRITE_UNENCRYPTED_KEY=yes`.
+!!! danger "Keep key material local"
+
+    Do not pipe the password into the script. Keep the encrypted private key and
+    the password outside Git. The script does not write an unencrypted private
+    key unless you explicitly set `EVSNOW_WRITE_UNENCRYPTED_KEY=yes`.
 
 ## Run The Snowflake Bootstrap
 
 Render `setup_snowflake.sql` with the generated public key, then run it with the
 setup connection:
+
+The checked-in script starts with `USE ROLE ACCOUNTADMIN`. If your organization
+provides a narrower setup role, replace that line with `USE ROLE <setup-role>`
+in `.quickstart/setup_snowflake.sql` before running it.
 
 ```bash
 mkdir -p .quickstart
@@ -68,7 +79,9 @@ snow sql \
   --filename .quickstart/setup_snowflake.sql
 ```
 
-The script creates or verifies:
+The script creates missing objects and verifies them. It uses
+`CREATE TABLE IF NOT EXISTS` for `CONTROL.PUBLIC.INGESTION_STATUS`, so rerunning
+the script preserves existing checkpoint rows.
 
 | Object | Default |
 |--------|---------|
@@ -186,12 +199,14 @@ This validates the resolved EvSnow configuration and control-table access. Keep
 the Snowflake object checks above as the proof that the Iceberg table, pipe, and
 pipe grants exist.
 
-Do not rely only on the process exit code. Treat any validation error or warning
-as a setup failure even if the command exits `0`. In particular,
-`Warning: Could not verify Snowflake control table` means the runtime role still
-lacks the control-table privileges needed by validation. The expected success
-marker is `Snowflake control table verified/created successfully` with no
-warnings.
+!!! warning "Validation warnings are failures"
+
+    Do not rely only on the process exit code. Treat any validation error or
+    warning as a setup failure even if the command exits `0`. In particular,
+    `Warning: Could not verify Snowflake control table` means the runtime role
+    still lacks the control-table privileges needed by validation. The expected
+    success marker is `Snowflake control table verified/created successfully`
+    with no warnings.
 
 After validation passes without warnings, continue with
 [First run](../tutorial/first-run.md).

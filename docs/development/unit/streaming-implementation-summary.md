@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Streaming Module Test Implementation - Summary
 
 ## Overview

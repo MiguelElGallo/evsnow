@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Python Pipeline Hardening Plan
 
 This plan tracks the Python fixes chosen instead of a Rust migration. The gates below are intentionally scoped so each one can be implemented, peer reviewed, and verified before moving on.

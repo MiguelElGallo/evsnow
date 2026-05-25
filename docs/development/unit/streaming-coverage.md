@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Test Coverage Report - Streaming Module
 
 ## Overview

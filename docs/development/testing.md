@@ -2,7 +2,9 @@
 
 ## Overview
 
-This directory contains the test suite for the EvSnow project (EventHub to Snowflake streaming pipeline). After the major refactoring from Motherduck to Snowflake, all tests have been redesigned to use mocks instead of real services.
+This guide covers the EvSnow test suite for the Event Hub to Snowflake
+streaming pipeline. Unit and integration tests use mocks for external services;
+live Snowflake checks belong in the quickstart harness, not in pytest.
 
 ## Quick Start
 
@@ -52,11 +54,8 @@ tests/
    - Mocking patterns for all services
    - Best practices and examples
 
-2. **[Issue creation guide](../project/issue-creation-guide.md)** - GitHub issue templates for writing tests
-   - Issue templates for each major source file
-   - Test requirements and scenarios
-   - Acceptance criteria
-   - Priority ordering
+2. **[GitHub Actions workflows](../project/workflows.md)** - CI and local parity
+   commands for tests, docs, and the Snowflake quickstart harness
 
 ## Writing Tests
 
@@ -231,10 +230,12 @@ mocker.patch("utils.snowflake.get_connection")
 
 ### Before Writing Tests
 
-1. Read testing guidance on this page
-2. Find your module's issue in [Issue creation guide](../project/issue-creation-guide.md)
-3. Review existing fixtures in `conftest.py`
-4. Check similar test files for patterns
+1. Read testing guidance on this page.
+2. Review existing fixtures in `tests/conftest.py` and the relevant
+   `tests/unit/` or `tests/integration/` file.
+3. Keep service calls mocked unless you are extending the documented
+   quickstart harness.
+4. Check similar test files for patterns before adding new fixtures.
 
 ### Test Checklist
 
@@ -251,11 +252,10 @@ mocker.patch("utils.snowflake.get_connection")
 ### Submitting Tests
 
 1. Write tests following the standards
-2. Run tests locally: `pytest -v`
-3. Check coverage: `pytest --cov=src`
-4. Run linting: `ruff check src tests`
-5. Commit with clear message
-6. Create PR linking to the test issue
+2. Run tests locally: `uv run pytest -v`
+3. Check coverage when behavior changes: `uv run pytest --cov=src`
+4. Run linting: `uv run ruff check src tests`
+5. Commit with a clear message and include validation output in the PR notes
 
 ## Resources
 
@@ -263,8 +263,7 @@ mocker.patch("utils.snowflake.get_connection")
 - [pytest-asyncio](https://pytest-asyncio.readthedocs.io/)
 - [pytest-mock](https://pytest-mock.readthedocs.io/)
 - [unittest.mock](https://docs.python.org/3/library/unittest.mock.html)
-- testing guidance on this page - Project testing guidelines
-- [Issue creation guide](../project/issue-creation-guide.md) - Test work breakdown
+- [GitHub Actions workflows](../project/workflows.md) - CI and local parity
 
 ## Questions?
 

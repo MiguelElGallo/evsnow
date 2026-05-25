@@ -19,6 +19,15 @@ tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
 - If the objects already exist, continue below and create only the runtime
   files.
 
+## Before You Start
+
+You need:
+
+- Python `3.13` and `uv`.
+- Azure CLI logged in with access to the Event Hub namespace.
+- Snowflake CLI for the arrival proof query.
+- The encrypted Snowflake private key generated during Snowflake setup.
+
 ## Install
 
 ```bash
@@ -63,7 +72,7 @@ consumer_group = "$Default"
 database = "INGESTION"
 schema_name = "PUBLIC"
 table_name = "EVENTS_TABLE1"
-batch_size = 100
+batch_size = 3
 
 [[mappings]]
 event_hub_key = "EVENTHUBNAME_1"
@@ -71,7 +80,10 @@ snowflake_key = "SNOWFLAKE_1"
 ```
 
 Change only the namespace, Event Hub name, and Snowflake target values for the
-first smoke test. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are local mapping keys.
+first smoke test. `batch_size = 3` matches the three test messages below so the
+arrival proof can complete without waiting for the default batch timeout. Raise
+it after the smoke test. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are local mapping
+keys.
 
 ## Create `.env`
 
@@ -143,6 +155,7 @@ uv run python tools/eventhub_sender/main.py \
   --count 3 \
   --start-id "$START_ID" \
   --batch-size 3 \
+  --credential-mode azure_cli \
   --partition-key "$RUN_ID" \
   --payload "{\"run_id\":\"$RUN_ID\",\"purpose\":\"first-run\"}"
 ```
@@ -178,10 +191,13 @@ snow sql -x \
       WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID';"
 ```
 
-Snowpipe Streaming flush and consumer checkpoint timing are asynchronous. If
-the first query returns `rows_arrived = 0`, wait 15 seconds and rerun the same
-query while the pipeline is still running. The required proof is
-`rows_arrived = 3` and consecutive `sequence_ids`.
+!!! note "Arrival timing"
+
+    Snowpipe Streaming flush and consumer checkpoint timing are asynchronous.
+    If the first query returns `rows_arrived = 0`, wait 15 seconds and rerun
+    the same query while the pipeline is still running. The required proof is
+    `rows_arrived = 3` and consecutive `sequence_ids`.
+
 Use [Event Hub sender](../tools/eventhub-sender.md) for the longer sender
 reference and repeatable arrival checks.
 
@@ -200,6 +216,7 @@ sequenceDiagram
     EvSnow->>Snowflake: Append through Snowpipe Streaming
     EvSnow->>Control: Save checkpoints
 ```
+{ data-search-exclude }
 
 If a batch has `0 messages`, the consumer is connected but no new events have
 arrived. After EvSnow saves checkpoints, later runs resume from the saved

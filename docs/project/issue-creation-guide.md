@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Creating GitHub Issues for Test Coverage
 
 This document provides quick commands and templates to create the 9 GitHub issues for test coverage.

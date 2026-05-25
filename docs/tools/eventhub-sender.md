@@ -11,6 +11,7 @@ uv run python tools/eventhub_sender/main.py \
   --count 100 \
   --start-id 1 \
   --batch-size 50 \
+  --credential-mode azure_cli \
   --payload '{"kind":"test"}'
 ```
 
@@ -62,6 +63,7 @@ uv run python tools/eventhub_sender/main.py \
   --count 3 \
   --start-id "$START_ID" \
   --batch-size 3 \
+  --credential-mode azure_cli \
   --partition-key "$RUN_ID" \
   --payload "{\"run_id\":\"$RUN_ID\",\"purpose\":\"arrival-check\"}"
 ```
@@ -103,3 +105,8 @@ snippet above, `EVENTHUB_NAME` is only a local shell variable passed with
 `--eventhub`. If you intentionally run the sender with env-only shape and omit
 the flags, set `EVENTHUB_NAMESPACE` and `EVENTHUBNAME_1`, because the sender
 reads `EVENTHUBNAME_1` from `.env`.
+
+Use `--credential-mode azure_cli` when you want the sender to prove the same
+local Azure CLI identity used by a first-run config with
+`credential_mode = "azure_cli"`. Leave it at the default when you want
+`DefaultAzureCredential`.

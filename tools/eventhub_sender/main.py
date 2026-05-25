@@ -1,7 +1,7 @@
 """
 CLI utility to send sequentially numbered JSON messages to an Event Hub.
 
-Uses either an Event Hub connection string or DefaultAzureCredential
+Uses either an Event Hub connection string or an Azure identity credential
 against a fully qualified namespace. Each message carries a monotonic
 `sequence_id` so downstream ingestion checks can verify no IDs are missing.
 """
@@ -24,8 +24,9 @@ import typer
 from azure.eventhub import EventData
 from azure.eventhub.aio import EventHubProducerClient
 from azure.eventhub.exceptions import EventHubError
-from azure.identity.aio import DefaultAzureCredential
 from dotenv import load_dotenv
+
+from utils.azure_identity import EventHubCredentialMode, build_eventhub_credential
 
 app = typer.Typer(help="Send sequential JSON messages to an Event Hub for ingestion checks.")
 
@@ -49,8 +50,9 @@ async def _build_producer(
     connection_string: str | None,
     namespace: str | None,
     eventhub: str,
-) -> tuple[EventHubProducerClient, DefaultAzureCredential | None]:
-    """Create an Event Hub producer using connection string or DefaultAzureCredential."""
+    credential_mode: EventHubCredentialMode,
+) -> tuple[EventHubProducerClient, Any | None]:
+    """Create an Event Hub producer using connection string or Azure identity."""
     if connection_string:
         logger.info("Using connection string authentication")
         return (
@@ -64,8 +66,12 @@ async def _build_producer(
     if not namespace:
         raise typer.BadParameter("Namespace is required when no connection string is provided")
 
-    logger.info("Using DefaultAzureCredential for authentication")
-    credential = DefaultAzureCredential()
+    credential, _expires_on, credential_label = await build_eventhub_credential(
+        namespace=namespace,
+        logger=logger,
+        credential_mode=credential_mode,
+    )
+    logger.info("Using %s for authentication", credential_label)
     return (
         EventHubProducerClient(
             fully_qualified_namespace=namespace,
@@ -168,6 +174,7 @@ async def send_messages(
     max_retries: int,
     retry_base_delay_seconds: float,
     retry_max_delay_seconds: float,
+    credential_mode: EventHubCredentialMode,
     partition_key: str | None,
     payload_json: str | None,
 ) -> None:
@@ -180,7 +187,9 @@ async def send_messages(
         except Exception as err:
             raise typer.BadParameter(f"Invalid JSON for --payload: {err}") from err
 
-    producer, credential = await _build_producer(connection_string, namespace, eventhub)
+    producer, credential = await _build_producer(
+        connection_string, namespace, eventhub, credential_mode
+    )
     try:
         async with producer:
             await _send_messages_with_producer(
@@ -312,7 +321,7 @@ def send(
             envvar="AZURE_EVENTHUB_CONNECTION_STRING",
             help=(
                 "Event Hub connection string (default: AZURE_EVENTHUB_CONNECTION_STRING in .env). "
-                "If absent, DefaultAzureCredential is used."
+                "If absent, the selected Azure credential mode is used."
             ),
         ),
     ] = None,
@@ -343,6 +352,14 @@ def send(
         float,
         typer.Option(help="Max delay for retry backoff (seconds)"),
     ] = 30.0,
+    credential_mode: Annotated[
+        EventHubCredentialMode,
+        typer.Option(
+            help=(
+                "Azure identity mode when no connection string is used: 'default' or 'azure_cli'."
+            )
+        ),
+    ] = "default",
     partition_key: Annotated[str | None, typer.Option(help="Partition key to pin messages")] = None,
     payload: Annotated[
         str | None,
@@ -384,6 +401,7 @@ def send(
                 max_retries=max_retries,
                 retry_base_delay_seconds=retry_base_delay_seconds,
                 retry_max_delay_seconds=retry_max_delay_seconds,
+                credential_mode=credential_mode,
                 partition_key=partition_key,
                 payload_json=payload,
             )

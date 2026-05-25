@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Test Orchestrator Note
 
 ## Current Status

@@ -86,12 +86,12 @@ Manual run:
 gh workflow run codspeed.yml
 ```
 
-### End-To-End Quickstart Audit
+### Snowflake Quickstart Harness
 
 Use the quickstart harness when docs or setup SQL changes could affect a fresh
 Snowflake setup. The harness copies the repo to `.quickstart-runs/`, executes
-the quickstart commands, and writes every command plus stdout and stderr to
-`commands.jsonl`.
+the Snowflake quickstart commands, and writes every command plus stdout and
+stderr to `commands.jsonl`.
 
 ```bash
 uv run python tools/quickstart_harness.py --connection default
@@ -108,6 +108,10 @@ The acceptance gate is the generated summary reporting `passed`, plus a
 `validate EvSnow config` command with no validation errors or warning lines.
 The expected success marker is
 `Snowflake control table verified/created successfully`.
+
+The harness does not create Azure Event Hubs, start the receiver, send events,
+or query row arrival. Use [First run](../tutorial/first-run.md) for that full
+runtime proof.
 
 ### Copilot Setup (`.github/workflows/copilot-setup-steps.yml`)
 
@@ -145,6 +149,8 @@ gh run list --workflow docs.yml --branch main --limit 3
 curl -fsSL "https://miguelelgallo.github.io/evsnow/?v=<commit-sha>" >/dev/null
 curl -fsSL "https://miguelelgallo.github.io/evsnow/getting-started/snowflake-quickstart/?v=<commit-sha>" \
   | rg "Snowflake control table verified/created successfully"
+curl -fsSL "https://miguelelgallo.github.io/evsnow/getting-started/event-hub-quickstart/?v=<commit-sha>" \
+  | rg "eventhub-rbac-smoke"
 curl -fsSL "https://miguelelgallo.github.io/evsnow/tutorial/first-run/?v=<commit-sha>" \
   | rg "Choose Your Starting Point"
 curl -fsSL "https://miguelelgallo.github.io/evsnow/reference/parameters/?v=<commit-sha>" \

@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # 🚀 Snowflake Setup CLI with Copilot Agent - Implementation Plan
 
 ## 📋 Overview
