@@ -70,6 +70,9 @@ dev = [
     "ty>=0.0.33",
     "pytest-codspeed>=5.0.2",
 ]
+docs = [
+    "zensical==0.0.43",
+]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
