@@ -69,3 +69,8 @@ ownership with a Snowflake Hybrid Table or the Postgres control-table backend.
 Use the Snowflake setup pages when you need to create or audit account objects.
 Use the configuration reference when you are changing pipeline behavior. Use the
 how-to guides for operational tasks after the first pipeline works.
+
+## Documentation Provenance
+
+Parts of this documentation were drafted with assistance from Codex and
+GPT-5.5, then reviewed against the EvSnow project.
