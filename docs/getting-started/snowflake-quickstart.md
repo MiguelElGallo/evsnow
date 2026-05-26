@@ -59,6 +59,13 @@ EVSNOW_KEY_PASSWORD="replace-with-key-password" ./generate_snowflake_keys.sh
     the password outside Git. The script does not write an unencrypted private
     key unless you explicitly set `EVSNOW_WRITE_UNENCRYPTED_KEY=yes`.
 
+!!! note "Streaming SDK key format"
+
+    The helper writes an AES-256 encrypted PKCS#8 key. That format works for
+    both Snowflake connector validation and the Snowpipe Streaming
+    high-performance SDK runtime. Older DES3-encrypted keys can pass
+    `validate-config` but fail when the streaming client starts.
+
 ## Run The Snowflake Bootstrap
 
 Render `setup_snowflake.sql` with the generated public key, then run it with the
@@ -67,6 +74,14 @@ setup connection:
 The checked-in script starts with `USE ROLE ACCOUNTADMIN`. If your organization
 provides a narrower setup role, replace that line with `USE ROLE <setup-role>`
 in `.quickstart/setup_snowflake.sql` before running it.
+
+!!! warning "Reruns rotate the runtime key"
+
+    The bootstrap script sets `STREAMEV` to the generated public key every time
+    it runs. That is useful for a fresh setup, but on a shared account it
+    invalidates older private keys for this runtime user. After rerunning the
+    bootstrap, update `.env` to point at the matching
+    `snowflake/rsa_key_encrypted.p8` file and password.
 
 ```bash
 mkdir -p .quickstart
@@ -210,3 +225,18 @@ pipe grants exist.
 
 After validation passes without warnings, continue with
 [First run](../tutorial/first-run.md).
+
+## Maintainer Harness
+
+When setup SQL or Snowflake setup docs change, maintainers can run the same path
+in a scratch copy and keep the command log:
+
+```bash
+uv run python tools/quickstart_harness.py --connection <setup-connection>
+```
+
+The harness writes `summary.json` and `commands.jsonl` under
+`.quickstart-runs/`. A passing run reports `"status": "passed"` and includes
+`Snowflake control table verified/created successfully` in the validation
+output. It does not create Event Hubs or prove row arrival; use
+[First run](../tutorial/first-run.md) for that runtime proof.

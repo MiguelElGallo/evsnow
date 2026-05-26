@@ -711,13 +711,21 @@ class TestHelperFunctions:
         """Test _show_processing_plan displays processing plan."""
         from main import _show_processing_plan
 
+        type(mock_config.snowflake_configs["SNOWFLAKE_1"]).batch_size = PropertyMock(
+            return_value=3
+        )
+
         _show_processing_plan(mock_config)
 
         assert mock_console.print.called
         calls = [str(call) for call in mock_console.print.call_args_list]
         combined_output = " ".join(calls)
 
-        assert "Processing Plan" in combined_output or mock_console.print.call_count > 0
+        assert "Processing Plan" in combined_output
+        assert "Receive Batch Size" in combined_output
+        assert "1000 messages" in combined_output
+        assert "Target Batch Size" in combined_output
+        assert "3 records" in combined_output
 
 
 class TestCLIEntryPoints:

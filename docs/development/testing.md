@@ -15,10 +15,10 @@ live Snowflake checks belong in the quickstart harness, not in pytest.
 uv run pytest
 
 # Run only unit tests
-uv run pytest -m unit
+uv run pytest tests/unit/
 
 # Run only integration tests
-uv run pytest -m integration
+uv run pytest tests/integration/
 
 # Run with coverage
 uv run pytest --cov=src --cov-report=html --cov-report=term
@@ -34,8 +34,9 @@ uv run pytest -k "test_load_config"
 
 ```
 tests/
-├── README.md                    # This file
+├── README.md                    # Short repository test overview
 ├── conftest.py                  # Shared fixtures and mocks
+├── benchmarks/                  # CodSpeed benchmark tests
 ├── unit/                        # Unit tests
 │   ├── __init__.py
 │   └── test_*.py               # Unit test files
@@ -193,10 +194,13 @@ Use markers to categorize tests:
 
 Run specific categories:
 ```bash
-uv run pytest -m unit              # Only unit tests
-uv run pytest -m integration       # Only integration tests
+uv run pytest tests/unit/          # Only unit tests
+uv run pytest tests/integration/   # Only integration tests
 uv run pytest -m "not slow"        # Exclude slow tests
 ```
+
+CI selects unit and integration tests by directory, not by `unit` or
+`integration` markers. Use markers for extra filtering such as `slow`.
 
 ## Common Issues
 

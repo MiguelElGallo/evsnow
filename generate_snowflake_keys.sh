@@ -27,24 +27,24 @@ if [ -f "rsa_key_encrypted.p8" ]; then
     echo ""
 fi
 
-echo "Step 1: Generating RSA private key (2048-bit) and encrypting with DES3..."
+echo "Step 1: Generating RSA private key (2048-bit) and encrypting with AES-256..."
 if [ -n "${EVSNOW_KEY_PASSWORD:-}" ]; then
     echo "Using EVSNOW_KEY_PASSWORD for non-interactive key generation."
     echo "⚠️  IMPORTANT: Store this password - you'll need it for SNOWFLAKE_PRIVATE_KEY_PASSWORD"
-    # Using des3 as per Snowflake official documentation:
-    # https://docs.snowflake.com/en/user-guide/key-pair-auth#generate-the-private-keys
+    # Snowflake's general key-pair docs show DES3, but the Snowpipe Streaming
+    # high-performance SDK path is more reliable with AES-256 PKCS#8 keys.
     openssl genrsa 2048 | openssl pkcs8 \
         -topk8 \
-        -v2 des3 \
+        -v2 aes256 \
         -inform PEM \
         -out rsa_key_encrypted.p8 \
         -passout "pass:${EVSNOW_KEY_PASSWORD}"
 else
     echo "You will be prompted to enter a password (twice)."
     echo "⚠️  IMPORTANT: Remember this password - you'll need it for SNOWFLAKE_PRIVATE_KEY_PASSWORD"
-    # Using des3 as per Snowflake official documentation:
-    # https://docs.snowflake.com/en/user-guide/key-pair-auth#generate-the-private-keys
-    openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 des3 -inform PEM -out rsa_key_encrypted.p8
+    # Snowflake's general key-pair docs show DES3, but the Snowpipe Streaming
+    # high-performance SDK path is more reliable with AES-256 PKCS#8 keys.
+    openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes256 -inform PEM -out rsa_key_encrypted.p8
 fi
 
 echo ""

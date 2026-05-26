@@ -2,6 +2,10 @@
 
 Small Typer CLI to push sequentially numbered JSON messages to an Event Hub so you can verify downstream ingestion gaps.
 
+Use this page after the EvSnow receiver is already running. For the shortest
+end-to-end path, follow [First run](../tutorial/first-run.md); this page is the
+sender reference.
+
 ## Usage
 
 ```bash
@@ -14,6 +18,12 @@ uv run python tools/eventhub_sender/main.py \
   --credential-mode azure_cli \
   --payload '{"kind":"test"}'
 ```
+
+!!! warning "Connection strings are secrets"
+
+    Prefer `--credential-mode azure_cli` for local smoke tests. Use a
+    connection string only when you intentionally bypass Entra ID auth, and keep
+    it out of committed files.
 
 Or use a connection string (env var supported):
 
@@ -79,6 +89,7 @@ TARGET_DATABASE=INGESTION
 TARGET_SCHEMA=PUBLIC
 TARGET_TABLE=EVENTS_TABLE1
 
+PRIVATE_KEY_PASSPHRASE="$SNOWFLAKE_PRIVATE_KEY_PASSWORD" \
 snow sql -x \
   --account "$SNOWFLAKE_ACCOUNT" \
   --user "$SNOWFLAKE_USER" \
@@ -89,16 +100,22 @@ snow sql -x \
   --database "$TARGET_DATABASE" \
   --schema "$TARGET_SCHEMA" \
   --format JSON \
-  -q "SELECT COUNT(*) AS rows_arrived,
-             LISTAGG(TRY_PARSE_JSON(EVENT_BODY):sequence_id::STRING, ',')
-               WITHIN GROUP (ORDER BY TRY_PARSE_JSON(EVENT_BODY):sequence_id::NUMBER)
-             AS sequence_ids
-      FROM ${TARGET_DATABASE}.${TARGET_SCHEMA}.${TARGET_TABLE}
-      WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID';"
+  -q "WITH proof AS (
+          SELECT TRY_PARSE_JSON(EVENT_BODY):sequence_id::NUMBER AS sequence_id
+          FROM ${TARGET_DATABASE}.${TARGET_SCHEMA}.${TARGET_TABLE}
+          WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID'
+      )
+      SELECT COUNT(*) AS rows_arrived,
+             LISTAGG(sequence_id::STRING, ',')
+               WITHIN GROUP (ORDER BY sequence_id)
+             AS sequence_ids,
+             IFF(COUNT(*) = 0, NULL, MAX(sequence_id) - MIN(sequence_id) + 1 - COUNT(*))
+             AS missing_sequence_count
+      FROM proof;"
 ```
 
 For a 3-message smoke test, `rows_arrived` should be `3` and the
-`sequence_ids` should be consecutive.
+`missing_sequence_count` should be `0`.
 
 Use the Event Hub and target values from `config/evsnow.toml`. In the shell
 snippet above, `EVENTHUB_NAME` is only a local shell variable passed with
@@ -109,4 +126,6 @@ reads `EVENTHUBNAME_1` from `.env`.
 Use `--credential-mode azure_cli` when you want the sender to prove the same
 local Azure CLI identity used by a first-run config with
 `credential_mode = "azure_cli"`. Leave it at the default when you want
-`DefaultAzureCredential`.
+`DefaultAzureCredential`. If `AZURE_EVENTHUB_CONNECTION_STRING` is set in
+`.env` or the shell, the sender uses the connection string and ignores
+`--credential-mode`.

@@ -8,7 +8,7 @@ Set up key-pair authentication for EvSnow using RSA keys (JWT).
 - Snowflake account with a role that can set user keys
 - Ability to run SQL in Snowflake (Snowsight or Snowflake CLI `snow`)
 
-## 1) Generate RSA keys (PKCS#8, encrypted)
+## 1) Generate RSA keys (PKCS#8, AES-256 encrypted)
 
 The repo helper creates the encrypted private key and public key value used by
 the quickstart:
@@ -23,8 +23,8 @@ to OpenSSL.
 Manual equivalent:
 
 ```bash
-# Encrypted private key (recommended) - uses DES3 like generate_snowflake_keys.sh
-openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key_encrypted.p8 -v2 des3
+# Encrypted private key used by EvSnow and Snowpipe Streaming
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key_encrypted.p8 -v2 aes256
 
 # Public key
 openssl rsa -in rsa_key_encrypted.p8 -pubout -out rsa_key_pub.pem
@@ -54,6 +54,7 @@ creates `STREAMEV` as a service user and assigns the public key.
 ## 4) Test authentication with Snowflake CLI
 
 ```bash
+PRIVATE_KEY_PASSPHRASE="<key-password>" \
 snow connection test \
   --account <account_identifier> \
   --user <username> \
@@ -62,7 +63,8 @@ snow connection test \
 ```
 
 Private-key authentication requires `SNOWFLAKE_JWT`. EvSnow uses the same key
-file through `SNOWFLAKE_PRIVATE_KEY_FILE`.
+file through `SNOWFLAKE_PRIVATE_KEY_FILE`. Snowflake CLI needs the passphrase in
+`PRIVATE_KEY_PASSPHRASE` for this direct command.
 
 ## 5) Configure EvSnow
 
@@ -85,7 +87,10 @@ mappings or for an explicit session context.
 
 EvSnow passes the encrypted private-key file and
 `SNOWFLAKE_PRIVATE_KEY_PASSWORD` directly to Snowpipe Streaming SDK `1.4.0`.
-It does not create an unencrypted temporary private-key file.
+It does not create an unencrypted temporary private-key file. The repository
+helper uses AES-256 encryption for the PKCS#8 key so the same key works for
+both Snowflake connector validation and the Snowpipe Streaming
+high-performance SDK runtime.
 
 Then validate:
 
@@ -124,6 +129,8 @@ GRANT SELECT, INSERT, UPDATE ON TABLE CONTROL.PUBLIC.INGESTION_STATUS TO ROLE <r
 
 - **Private key file not found**: Check `SNOWFLAKE_PRIVATE_KEY_FILE` path and permissions.
 - **Invalid/incorrect key password**: Re-run OpenSSL with the right passphrase.
+- **`unknown/unsupported OID: 1.2.840.113549.3.7`**: This is a DES3-encrypted
+  key. Regenerate with the current helper or use `-v2 aes256`.
 - **Authentication failed / JWT invalid**: Reassign the public key to the user; ensure usernames match case.
 - **Permissions**: User/role needs `CREATE SCHEMA` on the control database,
   `CREATE TABLE` on the control schema, and DML on `INGESTION_STATUS`.

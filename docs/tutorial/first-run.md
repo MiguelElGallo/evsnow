@@ -23,7 +23,7 @@ tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
 
 You need:
 
-- Python `3.13` and `uv`.
+- Python `3.13` or newer and `uv`.
 - Azure CLI logged in with access to the Event Hub namespace.
 - Snowflake CLI for the arrival proof query.
 - The encrypted Snowflake private key generated during Snowflake setup.
@@ -61,7 +61,7 @@ use_hybrid_table = false
 
 [eventhub_defaults]
 credential_mode = "azure_cli"
-starting_position_on_no_checkpoint = "-1"
+starting_position_on_no_checkpoint = "@latest"
 
 [event_hubs.EVENTHUBNAME_1]
 name = "topic1"
@@ -80,10 +80,14 @@ snowflake_key = "SNOWFLAKE_1"
 ```
 
 Change only the namespace, Event Hub name, and Snowflake target values for the
-first smoke test. `batch_size = 3` matches the three test messages below so the
-arrival proof can complete without waiting for the default batch timeout. Raise
-it after the smoke test. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are local mapping
-keys.
+first smoke test. For that smoke test, read only new events: start the pipeline
+before sending the three test messages below. `batch_size = 3` then flushes that
+complete test batch without waiting for the default batch timeout.
+
+After the smoke test, raise `batch_size` for normal throughput. Change
+`starting_position_on_no_checkpoint` to `-1` only when you intentionally want to
+backfill retained Event Hub messages. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are
+local mapping keys.
 
 ## Create `.env`
 
@@ -105,6 +109,17 @@ SNOWFLAKE_WAREHOUSE=COMPUTE_WH
 SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
+
+If local Azure CLI auth is not the path you want to test, add the Event Hub
+connection string to `.env`:
+
+```bash
+AZURE_EVENTHUB_CONNECTION_STRING="Endpoint=sb://...;SharedAccessKey=..."
+```
+
+When a connection string is present, EvSnow uses it for the receiver and the
+sender utility uses it automatically. `credential_mode = "azure_cli"` only
+applies when no connection string is configured.
 
 Do not put pipeline shape keys such as `EVENTHUB_NAMESPACE`, `TARGET_DB`, or
 `SNOWFLAKE_1_DATABASE` in `.env` for this path. An explicit `--env-file`
@@ -143,6 +158,12 @@ uv run evsnow run --config-file config/evsnow.toml --env-file .env
 When startup succeeds, logs show the Event Hub name, Snowflake target, and
 `Starting to receive messages`.
 
+If the receiver fails with `Failed to invoke Azure CLI`, first confirm `az login`
+and `az account get-access-token --resource https://eventhubs.azure.net/` work
+in the same shell. For a quick local smoke test, use
+`AZURE_EVENTHUB_CONNECTION_STRING` in `.env`; for production, prefer
+`credential_mode = "default"` with a service principal or managed identity.
+
 Open terminal 2 and send test messages:
 
 ```bash
@@ -173,6 +194,7 @@ TARGET_DATABASE=INGESTION
 TARGET_SCHEMA=PUBLIC
 TARGET_TABLE=EVENTS_TABLE1
 
+PRIVATE_KEY_PASSPHRASE="$SNOWFLAKE_PRIVATE_KEY_PASSWORD" \
 snow sql -x \
   --account "$SNOWFLAKE_ACCOUNT" \
   --user "$SNOWFLAKE_USER" \
@@ -183,12 +205,18 @@ snow sql -x \
   --database "$TARGET_DATABASE" \
   --schema "$TARGET_SCHEMA" \
   --format JSON \
-  -q "SELECT COUNT(*) AS rows_arrived,
-             LISTAGG(TRY_PARSE_JSON(EVENT_BODY):sequence_id::STRING, ',')
-               WITHIN GROUP (ORDER BY TRY_PARSE_JSON(EVENT_BODY):sequence_id::NUMBER)
-             AS sequence_ids
-      FROM ${TARGET_DATABASE}.${TARGET_SCHEMA}.${TARGET_TABLE}
-      WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID';"
+  -q "WITH proof AS (
+          SELECT TRY_PARSE_JSON(EVENT_BODY):sequence_id::NUMBER AS sequence_id
+          FROM ${TARGET_DATABASE}.${TARGET_SCHEMA}.${TARGET_TABLE}
+          WHERE TRY_PARSE_JSON(EVENT_BODY):payload:run_id::STRING = '$RUN_ID'
+      )
+      SELECT COUNT(*) AS rows_arrived,
+             LISTAGG(sequence_id::STRING, ',')
+               WITHIN GROUP (ORDER BY sequence_id)
+             AS sequence_ids,
+             IFF(COUNT(*) = 0, NULL, MAX(sequence_id) - MIN(sequence_id) + 1 - COUNT(*))
+             AS missing_sequence_count
+      FROM proof;"
 ```
 
 !!! note "Arrival timing"
@@ -196,14 +224,14 @@ snow sql -x \
     Snowpipe Streaming flush and consumer checkpoint timing are asynchronous.
     If the first query returns `rows_arrived = 0`, wait 15 seconds and rerun
     the same query while the pipeline is still running. The required proof is
-    `rows_arrived = 3` and consecutive `sequence_ids`.
+    `rows_arrived = 3` and `missing_sequence_count = 0`.
 
 Use [Event Hub sender](../tools/eventhub-sender.md) for the longer sender
 reference and repeatable arrival checks.
 
 ## What Happened
 
-```mermaid
+``` { .mermaid data-search-exclude }
 sequenceDiagram
     participant Sender as Event Hub sender
     participant EventHub as Azure Event Hubs
@@ -216,7 +244,6 @@ sequenceDiagram
     EvSnow->>Snowflake: Append through Snowpipe Streaming
     EvSnow->>Control: Save checkpoints
 ```
-{ data-search-exclude }
 
 If a batch has `0 messages`, the consumer is connected but no new events have
 arrived. After EvSnow saves checkpoints, later runs resume from the saved

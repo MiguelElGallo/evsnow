@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 README = REPO_ROOT / "README.md"
@@ -21,6 +22,7 @@ FIRST_RUN = REPO_ROOT / "docs" / "tutorial" / "first-run.md"
 EVENTHUB_SENDER = REPO_ROOT / "docs" / "tools" / "eventhub-sender.md"
 WORKFLOWS = REPO_ROOT / "docs" / "project" / "workflows.md"
 DOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs.yml"
+GENERATE_KEYS = REPO_ROOT / "generate_snowflake_keys.sh"
 ARCHIVE_DOCS = [
     REPO_ROOT / "docs" / "project" / "issue-creation-guide.md",
     REPO_ROOT / "docs" / "python-pipeline-hardening-plan.md",
@@ -189,6 +191,22 @@ def test_env_example_keeps_first_run_shape_in_toml():
     }
 
     assert active_keys.isdisjoint(shape_keys)
+    assert 'starting_position_on_no_checkpoint = "@latest"' in (
+        REPO_ROOT / "config" / "evsnow.example.toml"
+    ).read_text(encoding="utf-8")
+
+
+def test_key_generator_and_docs_use_streaming_sdk_compatible_encryption():
+    script = GENERATE_KEYS.read_text(encoding="utf-8").lower()
+    docs = "\n".join(
+        _normalized(path)
+        for path in (QUICKSTART, REPO_ROOT / "docs" / "snowflake" / "key-pair-auth.md")
+    )
+
+    assert "-v2 aes256" in script
+    assert "-V2 DES3" not in docs
+    assert "AES-256" in docs
+    assert "UNKNOWN/UNSUPPORTED OID" in docs
 
 
 def test_docs_explain_default_and_explicit_env_precedence():
@@ -215,16 +233,28 @@ def test_zensical_enables_code_copy_buttons():
     assert 'name = "mermaid"' in config
 
 
+def test_mermaid_blocks_attach_search_exclusion_to_fence():
+    docs = "\n".join(
+        path.read_text(encoding="utf-8") for path in (REPO_ROOT / "docs" / "index.md", FIRST_RUN)
+    )
+
+    assert "``` { .mermaid data-search-exclude }" in docs
+    assert "\n{ data-search-exclude }" not in docs
+
+
 def test_first_run_includes_arrival_proof():
     docs = _normalized(FIRST_RUN)
 
     assert 'RUN_ID="EVSNOW-FIRST-RUN-' in docs
     assert "BATCH_SIZE = 3" in docs
     assert "--CREDENTIAL-MODE AZURE_CLI" in docs
+    assert "PRIVATE_KEY_PASSPHRASE" in docs
     assert "ROWS_ARRIVED" in docs
     assert "SEQUENCE_IDS" in docs
+    assert "MISSING_SEQUENCE_COUNT" in docs
     assert "WAIT 15 SECONDS AND RERUN" in docs
     assert "ROWS_ARRIVED = 3" in docs
+    assert "MISSING_SEQUENCE_COUNT = 0" in docs
 
 
 def test_eventhub_sender_env_only_docs_match_cli_defaults():
@@ -289,16 +319,19 @@ def test_quickstart_harness_marks_failure_patterns(tmp_path):
     harness = harness_module.Harness(connection="default", run_root=tmp_path, keep_going=True)
     harness.run_dir.mkdir(parents=True)
 
-    result = harness.run(
-        "warning command",
-        [
-            sys.executable,
-            "-c",
-            "print('Warning: Could not verify Snowflake control table')",
-        ],
-        cwd=tmp_path,
-        failure_patterns=["Warning: Could not verify Snowflake control table"],
+    completed = harness_module.subprocess.CompletedProcess(
+        args=["warning-command"],
+        returncode=0,
+        stdout="Warning: Could not verify Snowflake control table\n",
+        stderr="",
     )
+    with patch.object(harness_module.subprocess, "run", return_value=completed):
+        result = harness.run(
+            "warning command",
+            ["warning-command"],
+            cwd=tmp_path,
+            failure_patterns=["Warning: Could not verify Snowflake control table"],
+        )
 
     assert result.exit_code == 1
     assert harness.failed is True

@@ -16,7 +16,7 @@ use_hybrid_table = false
 credential_mode = "azure_cli"
 max_wait_time = 60
 prefetch_count = 300
-starting_position_on_no_checkpoint = "-1"
+starting_position_on_no_checkpoint = "@latest"
 
 [event_hubs.EVENTHUBNAME_1]
 name = "topic1"

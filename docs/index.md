@@ -1,11 +1,16 @@
+---
+title: EvSnow
+description: Stream Azure Event Hubs into Snowflake with checkpointing, validation, and operational observability.
+tags:
+  - Azure Event Hubs
+  - Snowflake
+  - First run
+---
+
 # EvSnow
 
 EvSnow streams events from Azure Event Hubs into Snowflake with checkpointing,
 configuration validation, and operational observability.
-
-!!! note "Documentation note"
-    Parts of this documentation were drafted with assistance from Codex and
-    GPT-5.5, then reviewed against the EvSnow project.
 
 ## Start With First Run
 
@@ -31,7 +36,7 @@ pipeline, validate the settings, and run it.
 
 ## What EvSnow Connects
 
-```mermaid
+``` { .mermaid data-search-exclude }
 flowchart LR
     eventhub["Azure Event Hubs"] --> consumer["EvSnow consumer"]
     consumer --> checkpoint["Checkpoint backend"]
@@ -39,7 +44,6 @@ flowchart LR
     pipe --> snowflake["Snowflake table or Snowflake-managed Iceberg table"]
     consumer --> logs["Logfire and local logs"]
 ```
-{ data-search-exclude }
 
 The Event Hub consumer reads from configured partitions. EvSnow writes data
 through Snowpipe Streaming and records progress in a control backend. Later
@@ -47,17 +51,16 @@ runs resume from saved checkpoints.
 
 ## Runtime Choices
 
-```mermaid
+``` { .mermaid data-search-exclude }
 flowchart TD
     start["Pick checkpoint backend"] --> smoke{"Local smoke test?"}
-    smoke -- yes --> standard["Snowflake standard table\nlocal_single_consumer_smoke"]
+    smoke -- yes --> standard["Snowflake standard control table\nlocal_single_consumer_smoke"]
     smoke -- no --> multi{"Multiple consumers or failover?"}
     multi -- yes --> hybrid["Snowflake Hybrid Table\ndurable ownership"]
     multi -- no --> postgres["Postgres backend\npassword or Azure token auth"]
 ```
-{ data-search-exclude }
 
-The local tutorial uses a Snowflake standard table and
+The local tutorial uses a Snowflake standard control table and
 `local_single_consumer_smoke`. Production deployments should use durable
 ownership with a Snowflake Hybrid Table or the Postgres control-table backend.
 

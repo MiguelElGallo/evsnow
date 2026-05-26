@@ -20,26 +20,29 @@ cd evsnow
 uv sync
 ```
 
-Fresh Event Hub namespaces should start with
-[Event Hub quickstart](docs/getting-started/event-hub-quickstart.md). Fresh
-Snowflake accounts should start with
-[Snowflake quickstart](docs/getting-started/snowflake-quickstart.md). Both
-setup pages assume commands are run from the repo root after the install step
-above.
+For the smallest complete path, start with
+[First run](docs/tutorial/first-run.md). It walks through one Event Hub, one
+Snowflake target, validation, a dry run, and a three-message arrival proof.
 
-If the Event Hub and Snowflake objects already exist, continue with the local
-runtime files:
+If the tutorial tells you an object is missing, use only the setup page you
+need:
+
+- [Event Hub quickstart](docs/getting-started/event-hub-quickstart.md)
+- [Snowflake quickstart](docs/getting-started/snowflake-quickstart.md)
+
+Setup pages assume commands are run from the repo root.
+
+If the Event Hub and Snowflake objects already exist, create the local runtime
+files and validate them:
 
 ```bash
 cp config/evsnow.example.toml config/evsnow.toml
 cp .env.example .env
 
-# Edit config/evsnow.toml for Event Hub, Snowflake target, and mappings.
-# Edit .env for Snowflake credentials and local secrets.
 uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
 
-Then continue with [First run](docs/tutorial/first-run.md).
+Continue only when validation completes without warnings.
 
 The full configuration surface is documented in
 [Parameter reference](docs/reference/parameters.md).

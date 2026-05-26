@@ -28,6 +28,13 @@ Find the right section:
 - Observability and retry behavior: [Logfire Observability](#logfire-observability)
   and [Smart Retry Settings](#smart-retry-settings)
 
+!!! tip "Looking for the first-run values?"
+
+    Use [First run](../tutorial/first-run.md) first. For that path, only edit
+    the Event Hub namespace/name and the Snowflake database/schema/table. Leave
+    advanced retry, observability, and backend settings at the tutorial defaults
+    until the arrival check passes.
+
 The tables use these conventions:
 
 - `{N}` is a numeric mapping suffix such as `1`, `2`, or `3`.
@@ -117,7 +124,7 @@ same SDK tuning applies to every Event Hub. Per-hub TOML keys and
 
 | Setting | TOML key | `.env` variable | Default / allowed values | Notes |
 |---------|----------|-----------------|--------------------------|-------|
-| Connection string | `eventhub_defaults.connection_string` | `AZURE_EVENTHUB_CONNECTION_STRING` | unset | Secret; applies to hubs without a per-hub connection string. |
+| Connection string | `eventhub_defaults.connection_string` | `AZURE_EVENTHUB_CONNECTION_STRING` | unset | Secret; applies to hubs without a per-hub connection string. When set, connection-string auth takes precedence over Azure credential modes. |
 | Maximum wait time | `eventhub_defaults.max_wait_time` | `EVENTHUB_MAX_WAIT_TIME` | unset; `>= 0` | Falls back to per-model default `60` when unset. |
 | Prefetch count | `eventhub_defaults.prefetch_count` | `EVENTHUB_PREFETCH_COUNT` | unset; `> 0` | Falls back to per-model default `300` when unset. |
 | Retry total | `eventhub_defaults.retry_total` | `EVENTHUB_RETRY_TOTAL` | unset; `> 0` | Falls back to per-model default `3` when unset. |

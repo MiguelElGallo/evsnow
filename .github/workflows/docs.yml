@@ -12,6 +12,12 @@ on:
       - "zensical.toml"
       - "pyproject.toml"
       - "uv.lock"
+      - "config/evsnow.example.toml"
+      - "generate_snowflake_keys.sh"
+      - "setup_snowflake.sql"
+      - "setup_snowpipe_streaming.sql"
+      - "tools/quickstart_harness.py"
+      - "tools/eventhub_sender/**"
       - ".github/workflows/docs.yml"
   push:
     branches:
@@ -23,6 +29,12 @@ on:
       - "zensical.toml"
       - "pyproject.toml"
       - "uv.lock"
+      - "config/evsnow.example.toml"
+      - "generate_snowflake_keys.sh"
+      - "setup_snowflake.sql"
+      - "setup_snowpipe_streaming.sql"
+      - "tools/quickstart_harness.py"
+      - "tools/eventhub_sender/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 

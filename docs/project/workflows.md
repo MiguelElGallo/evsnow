@@ -104,6 +104,14 @@ you want to audit:
 uv run python tools/quickstart_harness.py --connection <setup-connection>
 ```
 
+!!! warning "Use a disposable setup target"
+
+    The harness executes the same bootstrap SQL as the Snowflake quickstart in a
+    scratch workspace. It creates or updates the quickstart objects in the
+    selected Snowflake account and rotates `STREAMEV` to a generated public key.
+    Use a trial or test account, or update any local `.env` files that still
+    point at the previous `STREAMEV` private key.
+
 The acceptance gate is the generated summary reporting `passed`, plus a
 `validate EvSnow config` command with no validation errors or warning lines.
 The expected success marker is

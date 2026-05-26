@@ -131,6 +131,17 @@ propagation and retry. Continue only after the sender smoke succeeds. The
 receiver role is proven in [First run](../tutorial/first-run.md), when EvSnow
 connects and starts reading from the Event Hub.
 
+This message proves sender RBAC only. It is not the row-arrival proof. The
+First Run tutorial sends a separate batch with a unique `run_id`.
+
 After the Event Hub exists, continue with [Snowflake quickstart](snowflake-quickstart.md)
 if Snowflake objects are missing, or [First run](../tutorial/first-run.md) if
 Snowflake is already ready.
+
+## Clean Up Quickstart Resources
+
+If this was only a disposable smoke test, delete the resource group:
+
+```bash
+az group delete --name "$RESOURCE_GROUP" --yes --no-wait
+```
