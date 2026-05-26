@@ -611,12 +611,8 @@ def _show_processing_plan(config: EvSnowConfig) -> None:
             console.print(
                 f"  [cyan]Target:[/cyan] Snowflake '{md_config.database}.{md_config.schema_name}.{md_config.table_name}'"
             )
-            console.print(
-                f"  [cyan]Receive Batch Size:[/cyan] {eh_config.max_batch_size} messages"
-            )
-            console.print(
-                f"  [cyan]Target Batch Size:[/cyan] {md_config.batch_size} records"
-            )
+            console.print(f"  [cyan]Receive Batch Size:[/cyan] {eh_config.max_batch_size} messages")
+            console.print(f"  [cyan]Target Batch Size:[/cyan] {md_config.batch_size} records")
             console.print(f"  [cyan]Max Wait:[/cyan] {eh_config.max_wait_time} seconds")
 
 
