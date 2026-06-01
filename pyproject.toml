@@ -21,7 +21,7 @@ dependencies = [
     "logfire>=4.25.0",
     "psycopg[binary]>=3.3.3",
     "snowflake-connector-python>=4.3.0",
-    "cryptography>=46.0.5",
+    "cryptography>=48.0.0",
     "snowpipe-streaming>=1.2.0",
 ]
 
