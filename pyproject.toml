@@ -10,7 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "azure-eventhub>=5.15.1",
     "azure-identity>=1.25.2",
-    "aiohttp>=3.13.3",
+    "aiohttp>=3.14.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.1",
