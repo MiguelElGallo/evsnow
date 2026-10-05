@@ -1,0 +1,22 @@
+{
+  "verified_at": "2026-10-05T19:45:58.751714+00:00",
+  "azure": {
+    "subscription": "27589aed-1762-4e6a-a78d-a82226365c73",
+    "resource_group": "rg-evsnow-elastic-20261005-1931",
+    "run_tag": "elastic-20261005-1931",
+    "exists_after_cleanup": false
+  },
+  "snowflake": {
+    "warehouse": {
+      "name": "EVSNOW_ELASTIC_261005_1931_WH",
+      "state": "SUSPENDED",
+      "size": "X-Small",
+      "auto_suspend": 60,
+      "enable_query_acceleration": "false"
+    },
+    "service_user": "EVSNOW_ELASTIC_261005_1931_SVC",
+    "service_user_disabled": true,
+    "retained_table": "EVSNOW_ELASTIC_261005_1931.PUBLIC.EVENTS",
+    "retained_view": "EVSNOW_ELASTIC_261005_1931.PUBLIC.EVENTS_BY_EVENT_ID"
+  }
+}

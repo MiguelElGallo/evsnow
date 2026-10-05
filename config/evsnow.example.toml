@@ -4,6 +4,15 @@ eventhub_namespace = "eventhub1.servicebus.windows.net"
 environment = "development"
 region = "local"
 
+# For the standard .env credentials path, set SNOWFLAKE_CHANNEL_MODE=elastic
+# in .env to opt into Elastic Channels. Optional acknowledgement/close settings
+# are SNOWFLAKE_ACK_TIMEOUT_SECONDS=60 and SNOWFLAKE_CLOSE_TIMEOUT_SECONDS=60.
+# TOML equivalents belong in a complete [snowflake_connection] table, including
+# account, user, private_key_file, warehouse, database, schema_name, and pipe_name:
+# channel_mode = "named"       # "named" (default) or "elastic"
+# ack_timeout_seconds = 60     # Positive integer; Elastic acknowledgement wait
+# close_timeout_seconds = 60   # Positive integer; Elastic adapter close budget
+
 [control]
 target_db = "CONTROL"
 target_schema = "PUBLIC"

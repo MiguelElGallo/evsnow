@@ -1,6 +1,6 @@
 [project]
 name = "evsnow"
-version = "0.2.1"
+version = "0.3.0"
 description = "EvSnow - Azure EventHub to Snowflake streaming pipeline"
 readme = "README.md"
 authors = [
@@ -22,7 +22,7 @@ dependencies = [
     "psycopg[binary]>=3.3.3",
     "snowflake-connector-python>=4.3.0",
     "cryptography>=46.0.5",
-    "snowpipe-streaming>=1.2.0",
+    "snowpipe-streaming>=1.8.0",
 ]
 
 [project.scripts]

@@ -213,3 +213,4 @@ AZURE_OPENAI_PROGRESS.md
 .quickstart/
 .quickstart-runs/
 .testenv
+.local/

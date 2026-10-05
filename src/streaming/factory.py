@@ -21,6 +21,7 @@ import logging
 from typing import Any
 
 from streaming.base import SnowflakeStreamingClientBase
+from streaming.snowflake_elastic import SnowflakeElasticStreamingClient
 from streaming.snowflake_high_performance import SnowflakeHighPerformanceStreamingClient
 from utils.config import SnowflakeConfig, SnowflakeConnectionConfig
 
@@ -34,7 +35,7 @@ def create_snowflake_client(
     retry_manager: Any | None = None,
 ) -> SnowflakeStreamingClientBase:
     """
-    Create a Snowflake High-Performance streaming client.
+    Create a High-Performance client for the configured Named or Elastic mode.
 
     Uses the High-Performance Snowpipe Streaming SDK with PIPE objects
     for maximum throughput (~10 GB/s per table).
@@ -48,7 +49,7 @@ def create_snowflake_client(
         retry_manager: Optional retry manager for error handling
 
     Returns:
-        SnowflakeHighPerformanceStreamingClient: Configured high-performance client
+        SnowflakeStreamingClientBase: Configured Named or Elastic client
 
     Raises:
         ValueError: If required config is missing (e.g., pipe_name)
@@ -77,7 +78,12 @@ def create_snowflake_client(
         f"requires PIPE object: {connection_config.pipe_name}"
     )
 
-    return SnowflakeHighPerformanceStreamingClient(
+    client_type = (
+        SnowflakeElasticStreamingClient
+        if connection_config.channel_mode == "elastic"
+        else SnowflakeHighPerformanceStreamingClient
+    )
+    return client_type(
         snowflake_config=snowflake_config,
         connection_config=connection_config,
         client_name_suffix=client_name_suffix,

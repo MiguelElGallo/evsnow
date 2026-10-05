@@ -51,6 +51,9 @@ class MockSnowflakeConnectionConfig:
         self.schema_name = kwargs.get("schema_name", "TEST_SCHEMA")
         self.role = kwargs.get("role", "TEST_ROLE")
         self.pipe_name = kwargs.get("pipe_name", "TEST_PIPE")
+        self.channel_mode = kwargs.get("channel_mode", "named")
+        self.ack_timeout_seconds = kwargs.get("ack_timeout_seconds", 60)
+        self.close_timeout_seconds = kwargs.get("close_timeout_seconds", 60)
 
     def model_copy(self, update=None):
         """Mock model_copy for pydantic-like behavior."""
@@ -64,6 +67,9 @@ class MockSnowflakeConnectionConfig:
             "schema_name": self.schema_name,
             "role": self.role,
             "pipe_name": self.pipe_name,
+            "channel_mode": self.channel_mode,
+            "ack_timeout_seconds": self.ack_timeout_seconds,
+            "close_timeout_seconds": self.close_timeout_seconds,
         }
         if update:
             data.update(update)
@@ -81,6 +87,9 @@ class MockSnowflakeConnectionConfig:
             "schema_name": self.schema_name,
             "role": self.role,
             "pipe_name": self.pipe_name,
+            "channel_mode": self.channel_mode,
+            "ack_timeout_seconds": self.ack_timeout_seconds,
+            "close_timeout_seconds": self.close_timeout_seconds,
         }
 
 

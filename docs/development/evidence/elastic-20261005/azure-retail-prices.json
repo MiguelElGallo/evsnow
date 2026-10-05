@@ -1,0 +1,26 @@
+{
+  "read_at": "2026-10-05T19:42:41.769933+00:00",
+  "source": "https://prices.azure.com/api/retail/prices?currencyCode=%27USD%27&%24filter=serviceName+eq+%27Event+Hubs%27+and+armRegionName+eq+%27swedencentral%27+and+priceType+eq+%27Consumption%27",
+  "items": [
+    {
+      "serviceName": "Event Hubs",
+      "armRegionName": "swedencentral",
+      "skuName": "Basic",
+      "meterName": "Basic Throughput Unit",
+      "unitOfMeasure": "1 Hour",
+      "retailPrice": 0.015,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2021-06-08T00:00:00Z"
+    },
+    {
+      "serviceName": "Event Hubs",
+      "armRegionName": "swedencentral",
+      "skuName": "Basic",
+      "meterName": "Basic Ingress Events",
+      "unitOfMeasure": "1M",
+      "retailPrice": 0.028,
+      "currencyCode": "USD",
+      "effectiveStartDate": "2021-06-08T00:00:00Z"
+    }
+  ]
+}

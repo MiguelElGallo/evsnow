@@ -1,0 +1,10 @@
+{
+  "id": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-20261005-1931",
+  "location": "swedencentral",
+  "name": "rg-evsnow-elastic-20261005-1931",
+  "tags": {
+    "cleanup": "delete-after-test",
+    "project": "evsnow",
+    "test_run": "elastic-20261005-1931"
+  }
+}

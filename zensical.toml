@@ -25,7 +25,11 @@ nav = [
   ] },
   { "How-to Guides" = [
     "how-to/index.md",
+    "how-to/use-elastic-channels.md",
     "how-to/query-iceberg-with-duckdb.md"
+  ] },
+  { "Explanation" = [
+    "explanation/elastic-channels.md"
   ] },
   { "Reference" = [
     "reference/index.md",
@@ -40,10 +44,12 @@ nav = [
   { "Development" = [
     "development/index.md",
     "development/testing.md",
-    "development/integration-tests.md"
+    "development/integration-tests.md",
+    "development/live-test-results.md"
   ] },
   { "Project" = [
     "project/index.md",
+    { "Release notes" = "release-notes/0.3.0.md" },
     "project/workflows.md",
     "project/copilot-instructions.md",
     { "Archive" = [

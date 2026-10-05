@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from evsnow import __version__
 from utils.cli_bootstrap import (
     configure_early_logfire,
     configure_logging,
@@ -709,7 +710,7 @@ def monitor(
 @app.command()
 def version() -> None:
     """Show version information."""
-    console.print("EvSnow v0.2.1")
+    console.print(f"EvSnow v{__version__}")
     console.print("EventHub to Snowflake streaming pipeline")
     console.print("\nComponents:")
     console.print("  • Azure EventHub async consumer with custom checkpointing")

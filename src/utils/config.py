@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from .config_file import (
@@ -70,6 +70,9 @@ SNOWFLAKE_CONNECTION_FIELDS = {
     "schema_name",
     "role",
     "pipe_name",
+    "channel_mode",
+    "ack_timeout_seconds",
+    "close_timeout_seconds",
 }
 
 SNOWFLAKE_TARGET_SETTING_PATTERN = re.compile(
@@ -236,6 +239,13 @@ class EvSnowConfig(BaseSettings):
                     self.snowflake_connection = SnowflakeConnectionConfig(**connection_kwargs)
                 else:
                     self.snowflake_connection = None
+            except ValidationError as error:
+                # A missing optional connection remains supported. Explicit channel
+                # settings must not silently disappear when their values are invalid.
+                channel_fields = {"channel_mode", "ack_timeout_seconds", "close_timeout_seconds"}
+                if any(item["loc"][0] in channel_fields for item in error.errors()):
+                    raise
+                self.snowflake_connection = None
             except Exception:
                 # Snowflake connection is optional, may not be configured
                 self.snowflake_connection = None

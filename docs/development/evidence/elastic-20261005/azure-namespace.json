@@ -1,0 +1,14 @@
+{
+  "autoInflate": false,
+  "disableLocalAuth": true,
+  "id": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-20261005-1931/providers/Microsoft.EventHub/namespaces/evsnow-elastic-20261005-1931",
+  "kafka": true,
+  "location": "swedencentral",
+  "name": "evsnow-elastic-20261005-1931",
+  "provisioningState": "Succeeded",
+  "sku": {
+    "capacity": 1,
+    "name": "Basic",
+    "tier": "Basic"
+  }
+}

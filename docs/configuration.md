@@ -116,6 +116,34 @@ If `config/evsnow.toml` exists, EvSnow will use it by default.
 
 Passing `--config-file` makes the source explicit.
 
+## Select the Snowflake channel mode
+
+Named Channels are the default. To use Elastic Channels with the standard
+example's `.env` connection credentials, add:
+
+```dotenv
+SNOWFLAKE_CHANNEL_MODE=elastic
+SNOWFLAKE_ACK_TIMEOUT_SECONDS=60
+SNOWFLAKE_CLOSE_TIMEOUT_SECONDS=60
+```
+
+The two timeouts accept positive integers. Elastic mode waits for a durable
+buffer acknowledgement before reporting batch success to the consumer. A wait
+timeout retains the submitted append's Future and prevents checkpoint progress
+until a later processing attempt observes success. Query visibility and
+processing-error checks are separate from that acknowledgement.
+
+The corresponding TOML keys are `channel_mode`, `ack_timeout_seconds`, and
+`close_timeout_seconds` under `[snowflake_connection]`. That table must contain
+the complete connection model, including `database` and `schema_name`, before
+environment overrides are applied. Use `.env` for these settings when your TOML
+only defines pipeline shape and targets, as in `config/evsnow.example.toml`.
+
+Use [Enable Elastic Channels](how-to/use-elastic-channels.md) for validation and
+run commands. Read [Elastic acknowledgements and replay](explanation/elastic-channels.md)
+before choosing duplicate-handling rules. Removing the mode setting restores
+the `named` default unless another higher-precedence source sets it.
+
 ## Use schema validation
 
 The generated JSON Schema lives at `schemas/evsnow.schema.json`.

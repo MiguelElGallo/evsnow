@@ -10,6 +10,10 @@ configuration validation, and observability.
 
 Read the hosted docs at <https://miguelelgallo.github.io/evsnow/>.
 
+The prepared **0.3.0** update adds opt-in Elastic Channels. Read the
+[release notes](docs/release-notes/0.3.0.md) and [changelog](CHANGELOG.md) for the
+configuration, delivery guarantees, and verified 200,000-event test.
+
 ## Quick Start
 
 Use TOML for pipeline shape and `.env` for secrets or local credentials:
@@ -46,6 +50,11 @@ Continue only when validation completes without warnings.
 
 The full configuration surface is documented in
 [Parameter reference](docs/reference/parameters.md).
+
+To opt into Snowflake Elastic Channels, follow
+[Enable Elastic Channels](docs/how-to/use-elastic-channels.md) and read
+[Elastic acknowledgements and replay](docs/explanation/elastic-channels.md).
+Named Channels remain the default.
 
 ## Documentation Development
 

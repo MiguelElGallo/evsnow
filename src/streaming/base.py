@@ -1,7 +1,7 @@
 """
 Abstract base class for the Snowflake **high-performance** streaming client.
 
-Only the high-performance Snowpipe Streaming architecture is supported.
+Named and Elastic Channels share this high-performance ingestion contract.
 """
 
 from abc import ABC, abstractmethod
@@ -78,7 +78,8 @@ class SnowflakeStreamingClientBase(ABC):
             partition_id: Source partition identifier (for channel management)
 
         Returns:
-            True if ingestion was successful, False otherwise
+            True only after durable acknowledgement, False on failure or timeout.
+            Acknowledgement does not establish table visibility or transformation success.
 
         Raises:
             Exception: If ingestion fails and retry is exhausted

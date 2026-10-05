@@ -6,6 +6,7 @@ Use these pages when changing EvSnow or validating a pull request.
 
 - [Testing](testing.md)
 - [Integration tests](integration-tests.md)
+- [Elastic Channels live test](live-test-results.md)
 
 ## Local Gate
 
@@ -16,4 +17,3 @@ uv run ruff check src/
 uv run ty check src/
 uv run pytest
 ```
-
