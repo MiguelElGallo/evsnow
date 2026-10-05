@@ -10,7 +10,58 @@ This proof belongs to the fresh `MiguelElGallo/evsnow` checkout on branch
 `mpz/elastic-channels`. The run ID is `elastic-20261005-2008`. It does not reuse
 results from the earlier checkout.
 
-## Results
+## Retest after the PR review fixes
+
+The corrected code also passed a fresh 200,000-event run, `elastic-fixes-20261005-2043`,
+on Azure Event Hubs Basic with one throughput unit and an isolated Snowflake
+X-Small warehouse. The first half ingested 100,000 events in 137.377 seconds;
+the restarted consumer ingested the next 100,000 in 135.131 seconds, resuming at
+sequence `50000` on both partitions. Both halves recorded zero acknowledgement
+failures, wait timeouts, and close failures.
+
+Before explicit replay, the target contained 200,000 raw rows and 200,000 distinct
+IDs. Replaying sequences `99980` through `99999` on each partition produced
+200,040 raw rows, 200,000 distinct IDs, and exactly 40 duplicate rows. Missing or
+invalid IDs, payload errors, source metadata errors, and Snowflake processing
+errors all remained zero. The run completed from `2026-10-05T20:58:34Z` through
+`2026-10-05T21:03:41Z`.
+
+[Full run evidence](evidence/elastic-fixes-20261005/live-test.json) and
+[independent SQL read-back](evidence/elastic-fixes-20261005/snowflake-final-verification.json)
+record these results. The source hashes match before and after both cloud runs.
+
+The new disposable Azure group was deleted and its absence verified repeatedly.
+The isolated Snowflake warehouse is suspended and the test service user is
+disabled. Both raw tables and event-ID views remain available for review.
+[Cleanup read-backs](evidence/elastic-fixes-20261005/cleanup-final.json) and
+[local validation](evidence/elastic-fixes-20261005/local-validation.json) record
+these checks.
+
+A fresh four-event test passed on the corrected consumer, shutdown, and replay
+paths. The two consumer stages saved sequence `0`, then resumed at sequence `1`
+on both partitions. Before replay, Snowflake held four raw rows and four distinct
+IDs. Replaying all four retained source events produced eight raw rows and four
+distinct IDs, with zero missing events, invalid payloads, invalid source metadata,
+or processing errors. The replay started after integer sequence `-1` on each
+partition, confirming the small-count boundary against the real Azure service.
+
+This run used the larger target batch size and therefore exercised the existing
+300-second partial-batch timeout in each stage. The configured Event Hub batch
+timeout is not forwarded by the mapping; it did not shorten that wait. Set the
+target `batch_size` to `2` for a quick four-event smoke run.
+
+The small run's mapping counters include a final drain that reused acknowledged
+receipts, so they count processing attempts rather than distinct ingested rows.
+The SDK and independent SQL checks confirm two ingested events per stage and no
+duplicates before the deliberate replay.
+
+[Four-event evidence](evidence/elastic-fixes-20261005/small-smoke/live-test.json),
+[effective configuration](evidence/elastic-fixes-20261005/test-configuration.json),
+and [source hashes](evidence/elastic-fixes-20261005/source-provenance.json) record
+the tested inputs and code. Failure exit statuses are covered by deterministic
+CLI regressions, including unresolved acknowledgements and signal-driven cleanup.
+
+## Dependency-refresh run results
 
 | Check | Before explicit replay | After explicit replay |
 |---|---:|---:|
@@ -111,7 +162,7 @@ read back `DISABLED=true`. The result database, raw table, control checkpoints
 and deduplicated view remain available for review. Private keys and runtime
 credentials remain in the ignored `.local/` directory.
 
-The current sanitized evidence directory is
+The dependency-refresh evidence directory is
 `docs/development/evidence/elastic-deps-20261005/`:
 
 - `live-test.json`: every stage's counts, acknowledgements, checkpoints, first
@@ -136,10 +187,10 @@ The harness operates the configured resources; arrange guarded Azure deletion
 on both success and failure. Its test requires an empty target/control table and
 a new two-partition Event Hub.
 
-Local checks passed: **508 tests**, Ruff lint and formatting, ty, and the strict
-Zensical documentation build. The 35 new Elastic tests include original-Future
-reuse, late acknowledgement, partial partition success and checkpoint-write
-failure. Seven additional offline SDK tests exercise AI providers and Logfire;
+Local checks passed after the PR review fixes: **530 tests**, Ruff lint and formatting, ty, and the strict
+Zensical documentation build. The 57 focused Elastic tests include original-Future reuse, late acknowledgement,
+partial partition success, checkpoint-write failure, CLI failure status, concurrent
+shutdown, and replay boundaries from four through 44 events. Seven additional offline SDK tests exercise AI providers and Logfire;
 16 helper tests check the separate Copilot integration. An installed wheel was
 checked outside the source checkout. [Release notes](../release-notes/0.3.0.md) explain how to opt in and what
 delivery guarantees apply.

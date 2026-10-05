@@ -10,9 +10,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from snowflake.ingest.streaming import StreamingIngestClient, StreamingIngestElasticChannel
+from typer.testing import CliRunner
 
 from consumers.eventhub import EventHubAsyncConsumer, EventHubMessage, MessageBatch
-from pipeline.orchestrator import PipelineMapping
+from main import app
+from pipeline.orchestrator import PipelineMapping, PipelineOrchestrator, run_pipeline
 from streaming.snowflake_elastic import SnowflakeElasticStreamingClient
 from utils.config import EvSnowConfig, SnowflakeConnectionConfig
 
@@ -212,3 +214,212 @@ async def test_wait_timeout_then_late_ack_without_source_retry_cannot_advance_ch
     adapter.stop()
     contexts[0].update_checkpoint.assert_not_called()
     assert adapter.get_stats()["total_messages_sent"] == 1
+
+
+@pytest.fixture
+def cli_pipeline(pipeline_boundary, mocker):
+    """Keep the CLI and all pipeline layers real; replace only cloud I/O/setup."""
+    consumer, mapping, adapter, sdk, channel = pipeline_boundary
+    config = mapping.pipeline_config
+    adapter.connection_config = adapter.connection_config.model_copy(
+        update={"ack_timeout_seconds": 0.02, "close_timeout_seconds": 0.02}
+    )
+    mapping.eventhub_consumer = consumer
+    mapping.running = True
+    manager = MagicMock()
+    manager.get_last_checkpoint = AsyncMock(return_value=None)
+    credential = MagicMock(close=AsyncMock())
+    client = MagicMock(close=AsyncMock())
+    mocker.patch("consumers.eventhub.SnowflakeCheckpointManager", return_value=manager)
+    mocker.patch("consumers.eventhub.EventHubConsumerClient", return_value=client)
+    mocker.patch(
+        "consumers.eventhub.build_eventhub_credential",
+        new=AsyncMock(return_value=(credential, 0, "offline")),
+    )
+    orchestrator = PipelineOrchestrator(config)
+
+    def initialize():
+        orchestrator.mappings = [mapping]
+
+    mocker.patch.object(orchestrator, "initialize", side_effect=initialize)
+    mocker.patch.object(orchestrator, "setup_signal_handlers")
+    mocker.patch("pipeline.orchestrator.PipelineOrchestrator", return_value=orchestrator)
+    mocker.patch("utils.snowflake.close_all_cached_connections")
+    mocker.patch("main.load_config", return_value=config)
+    mocker.patch("main._initialize_logfire")
+    mocker.patch("utils.smart_retry.RetryManager")
+    return consumer, mapping, adapter, sdk, channel, orchestrator, client, credential, manager
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["pending_append", "sdk_cancellation", "terminal_late_ack", "final_drain", "close", "signal"],
+)
+def test_cli_reports_pipeline_failure_after_cleaning_every_component(cli_pipeline, failure):
+    consumer, mapping, _, sdk, channel, orchestrator, client, credential, manager = cli_pipeline
+    batch, contexts = source_batch("0")
+    pending = Future()
+    channel.append_rows_with_wait.return_value = pending
+
+    async def receive(**kwargs):
+        consumer.current_batch = batch
+        if failure in {"pending_append", "sdk_cancellation", "terminal_late_ack"}:
+            consumer.current_batch = None
+            consumer._detached_batches.append(batch)
+            assert await consumer._process_detached_batch(batch) is False
+            if failure == "terminal_late_ack":
+                pending.set_result(None)
+            if failure == "sdk_cancellation":
+                raise asyncio.CancelledError
+        elif failure == "close":
+            pending.set_result(None)
+            sdk.close.side_effect = RuntimeError("SDK close failed")
+        elif failure == "signal":
+            # Model the separate cleanup task scheduled by SIGTERM, while the
+            # receive task returns and run_pipeline enters its finally block.
+            orchestrator.shutdown_task = asyncio.create_task(orchestrator.stop())
+
+    client.receive = receive
+    result = CliRunner().invoke(app, ["run"])
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, SystemExit)
+    sdk.close.assert_called_once()
+    client.close.assert_awaited_once()
+    credential.close.assert_awaited_once()
+    manager.close.assert_called_once()
+    assert mapping.eventhub_consumer is None
+    assert mapping.snowflake_client is None
+    assert orchestrator.mappings == []
+    assert orchestrator.tasks == []
+    if failure in {"terminal_late_ack", "close"}:
+        contexts[0].update_checkpoint.assert_awaited_once()
+    else:
+        contexts[0].update_checkpoint.assert_not_called()
+        assert consumer.current_batch is batch
+    assert channel.append_rows_with_wait.call_count == 1
+
+
+def test_cli_graceful_final_drain_waits_for_ack_and_exits_successfully(cli_pipeline):
+    consumer, _, adapter, sdk, channel, orchestrator, client, credential, manager = cli_pipeline
+    batch, contexts = source_batch("0")
+    pending = Future()
+    channel.append_rows_with_wait.return_value = pending
+
+    async def receive(**kwargs):
+        consumer.current_batch = batch
+        asyncio.get_running_loop().call_later(0.001, pending.set_result, None)
+        orchestrator.shutdown_task = asyncio.create_task(orchestrator.stop())
+
+    client.receive = receive
+    result = CliRunner().invoke(app, ["run"])
+    assert result.exit_code == 0, result.output
+    contexts[0].update_checkpoint.assert_awaited_once_with(batch.messages[0].event_data)
+    assert consumer.current_batch is None
+    assert adapter.get_stats()["total_messages_sent"] == 1
+    sdk.close.assert_called_once()
+    client.close.assert_awaited_once()
+    credential.close.assert_awaited_once()
+    manager.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_mapping_stops_healthy_peer_without_waiting_indefinitely(cli_pipeline):
+    consumer, mapping, _, sdk, channel, orchestrator, client, _, _ = cli_pipeline
+    batch, contexts = source_batch("0")
+    channel.append_rows_with_wait.return_value = Future()
+    peer_receiving = asyncio.Event()
+    peer_stopped = asyncio.Event()
+
+    async def peer_start():
+        peer_receiving.set()
+        await peer_stopped.wait()
+
+    peer = MagicMock()
+    peer.stats = {"mapping_key": "healthy-peer"}
+    peer.start_async = peer_start
+    peer.stop = AsyncMock(side_effect=peer_stopped.set)
+
+    def initialize():
+        orchestrator.mappings = [mapping, peer]
+
+    orchestrator.initialize.side_effect = initialize
+
+    async def receive(**kwargs):
+        await peer_receiving.wait()
+        consumer.current_batch = None
+        consumer._detached_batches.append(batch)
+        assert await consumer._process_detached_batch(batch) is False
+
+    client.receive = receive
+    with pytest.raises(RuntimeError, match="Batch processing failed"):
+        await asyncio.wait_for(run_pipeline(mapping.pipeline_config), timeout=1)
+    peer.stop.assert_awaited_once()
+    assert peer_stopped.is_set()
+    contexts[0].update_checkpoint.assert_not_called()
+    sdk.close.assert_called_once()
+    assert orchestrator.mappings == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_consumer_shutdown_drains_once_and_closes_after_ack(pipeline_boundary):
+    consumer, _, adapter, _, channel = pipeline_boundary
+    adapter.connection_config = adapter.connection_config.model_copy(
+        update={"ack_timeout_seconds": 1}
+    )
+    batch, contexts = source_batch("0")
+    consumer.current_batch = batch
+    consumer.running = True
+    credential = MagicMock(close=AsyncMock())
+    consumer.credential = credential
+    pending = Future()
+    submitted = Event()
+
+    def append(rows, append_token):
+        submitted.set()
+        return pending
+
+    channel.append_rows_with_wait.side_effect = append
+    first_stop = asyncio.create_task(consumer.stop())
+    assert await asyncio.to_thread(submitted.wait, 1)
+    second_stop = asyncio.create_task(consumer.stop())
+    await asyncio.sleep(0)
+    assert not second_stop.done()
+    credential.close.assert_not_called()
+    pending.set_result(None)
+    await asyncio.gather(first_stop, second_stop)
+    contexts[0].update_checkpoint.assert_awaited_once()
+    channel.append_rows_with_wait.assert_called_once()
+    credential.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_consumer_cleanup_continues_after_checkpoint_manager_close_fails(
+    pipeline_boundary, mocker
+):
+    consumer, _, _, _, _ = pipeline_boundary
+    manager = MagicMock()
+    manager.close.side_effect = RuntimeError("checkpoint close failed")
+    consumer.checkpoint_manager = manager
+    capture_stop = mocker.patch.object(consumer, "_stop_capture_writer", new=AsyncMock())
+    with pytest.raises(RuntimeError, match="checkpoint close failed"):
+        await consumer.stop()
+    capture_stop.assert_awaited_once()
+    assert consumer.checkpoint_manager is None
+
+
+@pytest.mark.asyncio
+async def test_failed_background_close_keeps_client_for_shutdown_retry(pipeline_boundary):
+    consumer, _, _, _, _ = pipeline_boundary
+    client = MagicMock(close=AsyncMock(side_effect=[RuntimeError("close failed"), None]))
+    credential = MagicMock(close=AsyncMock())
+    consumer.client = client
+    consumer.credential = credential
+    await consumer._stop_after_batch_failure()
+    assert consumer._receive_error_close_task is not None
+    await consumer._receive_error_close_task
+    assert consumer.client is client
+    with pytest.raises(RuntimeError, match="Batch processing failed"):
+        await consumer.stop()
+    assert client.close.await_count == 2
+    credential.close.assert_awaited_once()
+    assert consumer.client is None

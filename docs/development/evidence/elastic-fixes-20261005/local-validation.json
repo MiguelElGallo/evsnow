@@ -1,0 +1,40 @@
+{
+  "verified_at": "2026-10-05T21:08:17.171524+00:00",
+  "evsnow": "0.3.0",
+  "python": "3.13.16",
+  "tests": {
+    "main": {
+      "passed": 530,
+      "warnings": 2,
+      "seconds": 34.74,
+      "command": "UV_PROJECT_ENVIRONMENT=.local/validation-py313 uv run --locked --python 3.13 pytest tests/ -q"
+    },
+    "focused_failure_and_replay": {
+      "passed": 156,
+      "warnings": 2,
+      "seconds": 19.0
+    },
+    "elastic_collected": 57,
+    "setup_helper": {
+      "passed": 16,
+      "command": "uv run --locked python -m unittest discover -s tests -v (tools/snowflake_setup)"
+    }
+  },
+  "negative_regressions": {
+    "pending_append_cli": "Previous consumer/orchestrator modules return CLI status 0; the new expected-status-1 test fails against those modules and passes against the fixes.",
+    "four_event_replay": "Previous replay call times out for four events; the new production run/replay transport test fails against the previous call and passes for all counts 4 through 44 in steps of four."
+  },
+  "ruff": "passed lint and formatting for source, harness, and new Elastic tests",
+  "ty": "passed source, harness, and new Elastic tests",
+  "zensical": "passed build --clean --strict",
+  "build": "passed main sdist and wheel",
+  "installed_wheel": "Updated 0.3.0 wheel console version and consumer/orchestrator imports verified from site-packages outside checkout on Python 3.13.16.",
+  "source_provenance": "source-provenance.json",
+  "cloud_evidence": "live-test.json and small-smoke/live-test.json",
+  "cleanup": "cleanup-final.json",
+  "cloud_tests": {
+    "events_200000": "passed restart and replay: 200040 raw rows, 200000 distinct IDs, 40 expected duplicates, zero data and processing errors",
+    "events_4": "passed restart and replay: 8 raw rows, 4 distinct IDs, 4 expected duplicates, zero data and processing errors"
+  },
+  "cleanup_result": "Azure group absent on repeated read-backs; isolated Snowflake warehouse SUSPENDED and service user DISABLED=true."
+}

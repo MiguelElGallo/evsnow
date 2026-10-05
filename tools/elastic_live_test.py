@@ -348,7 +348,7 @@ async def run(args: argparse.Namespace) -> None:
         evidence["before_replay"] = evidence["stages"][-1]["verification"]
         if evidence["before_replay"]["DUPLICATE_ROWS"] != 0:
             raise AssertionError("Clean persisted restart unexpectedly duplicated rows")
-        replay = await replay_source(config)
+        replay = await replay_source(config, per_partition=min(20, args.events // 2))
         evidence["replay"] = replay
         final = await wait_for_visibility(
             connection,

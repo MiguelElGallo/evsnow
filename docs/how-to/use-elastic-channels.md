@@ -58,6 +58,12 @@ it on the next attempt for that batch; it does not immediately append the rows
 again. Until a processing attempt reports success, the source checkpoint does
 not advance.
 
+A terminal batch failure, failed final drain, or client shutdown error makes
+`evsnow run` exit with status `1` after cleanup, so a supervisor can detect and
+restart a failed pipeline. A late acknowledgement can make the final drain
+succeed and save its checkpoint, but an earlier terminal failure still reports
+status `1`. A successful graceful shutdown reports status `0`.
+
 These settings also exist as `channel_mode`, `ack_timeout_seconds`, and
 `close_timeout_seconds` in a complete `[snowflake_connection]` TOML table. A
 table containing only those three keys is invalid: the current configuration
@@ -145,11 +151,18 @@ and `message`. For event IDs `0` through `199999`, `value = event_id * 17 + 3`,
 
 The harness sends two halves with a consumer restart between them, records
 checkpoints and resumed messages, and polls SQL visibility. It then replays the
-last 20 source events from each partition. Report the raw row count separately
+last 20 source events from each partition. Smaller smoke runs accept any event
+count of at least four that is divisible by four, and replay only the events
+available in each partition. Report the raw row count separately
 from the 200,000 distinct IDs and the deduplicated result; this replay is intended
 to show duplicate behavior. Inspect
 [live test results](../development/live-test-results.md) for the recorded run and
 cleanup evidence.
+
+For a quick four-event smoke test, set `batch_size = 2` in the target's
+`[snowflake_configs.SNOWFLAKE_1]` TOML table. Each half then fills one processing
+batch. A larger batch can wait for the consumer's 300-second partial-batch
+timeout before ingestion proceeds.
 
 ### Use Azure Basic for a disposable test
 

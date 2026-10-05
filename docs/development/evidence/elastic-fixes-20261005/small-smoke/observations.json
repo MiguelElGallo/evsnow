@@ -1,0 +1,29 @@
+{
+  "configured_event_hub_batch_timeout_seconds": 10,
+  "effective_consumer_batch_timeout_seconds": 300,
+  "timeout_reason": "The existing PipelineMapping.start constructor omits batch_timeout_seconds, so the consumer uses its 300-second default.",
+  "mapping_counter_semantics": "Mapping messages_processed counts successful processing callbacks, including final-drain retries that reuse acknowledged Elastic receipts. It is not a count of unique source events or persisted target rows.",
+  "observed_stages": [
+    {
+      "producer_sent": 2,
+      "consumer_messages_received": 2,
+      "mapping_messages_processed": 4,
+      "mapping_batches_processed": 2,
+      "sdk_total_messages_sent": 2,
+      "sdk_append_requests": 2,
+      "verification_raw_rows": 2,
+      "verification_distinct_ids": 2
+    },
+    {
+      "producer_sent": 2,
+      "consumer_messages_received": 2,
+      "mapping_messages_processed": 4,
+      "mapping_batches_processed": 2,
+      "sdk_total_messages_sent": 2,
+      "sdk_append_requests": 2,
+      "verification_raw_rows": 4,
+      "verification_distinct_ids": 4
+    }
+  ],
+  "acceptance_basis": "Producer and receiver counts, SDK submission counts, exact persisted SQL results and both partition checkpoint positions agree. Raw evidence is preserved in live-test.json; final replay intentionally creates four duplicates."
+}
