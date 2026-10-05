@@ -229,7 +229,7 @@ only when the run command uses `--smart`.
 | Setting | TOML key | `.env` variable | Default / allowed values | Notes |
 |---------|----------|-----------------|--------------------------|-------|
 | Enabled flag | not supported | `SMART_RETRY_ENABLED` | `false` | Parsed by the settings model, but `uv run evsnow run --smart` is the runtime switch. |
-| LLM provider | not supported | `SMART_RETRY_LLM_PROVIDER` | `openai`; `openai`, `azure`, `anthropic`, `gemini`, `groq`, `cohere` | Case-normalized. |
+| LLM provider | not supported | `SMART_RETRY_LLM_PROVIDER` | `openai`; `openai`, `azure`, `anthropic`, `gemini`, `groq`, `cohere` | Case-normalized. OpenAI uses Chat Completions; `gemini` selects the Google provider. |
 | LLM model | not supported | `SMART_RETRY_LLM_MODEL` | `gpt-4o-mini` | For Azure, use your deployment name. |
 | API key | not supported | `SMART_RETRY_LLM_API_KEY` | required with `--smart` | Keep in `.env` or a secret store. |
 | Endpoint | not supported | `SMART_RETRY_LLM_ENDPOINT` | unset | Required for Azure OpenAI-style custom endpoints. |

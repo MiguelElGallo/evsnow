@@ -16,7 +16,7 @@ quickstart uses `INGESTION.PUBLIC.EVENTS_TABLE1` and
 `INGESTION.PUBLIC.EVENTS_TABLE_PIPE`; use your configured names below.
 
 Run `uv sync --locked` from the repository root. Elastic mode requires
-`snowpipe-streaming` 1.8.0 or later, which the project dependency and lockfile
+`snowpipe-streaming` 1.8.1 or later, which the project dependency and lockfile
 provide. EvSnow uses the custom pipe named by `SNOWFLAKE_PIPE_NAME`; it does not
 switch to Snowflake's automatic table pipe. The runtime role needs database and
 schema `USAGE`, target-table `INSERT`, and custom-pipe `OPERATE`.

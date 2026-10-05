@@ -103,6 +103,12 @@ class ExceptionAnalyzer:
                 os.environ["OPENAI_API_KEY"] = llm_api_key
             elif llm_provider == "anthropic":
                 os.environ["ANTHROPIC_API_KEY"] = llm_api_key
+            elif llm_provider == "gemini":
+                os.environ["GOOGLE_API_KEY"] = llm_api_key
+            elif llm_provider == "groq":
+                os.environ["GROQ_API_KEY"] = llm_api_key
+            elif llm_provider == "cohere":
+                os.environ["CO_API_KEY"] = llm_api_key
 
         # Create pydantic-ai agent
         # Support both standard OpenAI and Azure OpenAI
@@ -129,7 +135,13 @@ class ExceptionAnalyzer:
             # Create agent with custom model
             self.agent = Agent(model)
         else:
-            model_string = f"{llm_provider}:{llm_model}"
+            # Pydantic AI V2 routes `openai:` to Responses. Keep this
+            # application's existing Chat Completions behavior explicit, and
+            # translate the public Gemini name to the SDK's Google provider.
+            model_provider = {"openai": "openai-chat", "gemini": "google"}.get(
+                llm_provider, llm_provider
+            )
+            model_string = f"{model_provider}:{llm_model}"
             self.agent = Agent(model_string)
 
     def _get_system_instructions(self) -> str:

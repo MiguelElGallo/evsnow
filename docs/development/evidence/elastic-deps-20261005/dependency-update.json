@@ -1,0 +1,285 @@
+{
+  "checked_at": "2026-10-05T20:14:22.483172+00:00",
+  "base_commit": "d498c190b4bd6c8289c1e80e1f21dca39c676809",
+  "scope": "Latest stable direct dependencies and refreshed transitive locks; prereleases excluded",
+  "superseded_pull_requests": [
+    82,
+    83,
+    84,
+    85,
+    86,
+    87
+  ],
+  "runtime": [
+    {
+      "package": "azure-eventhub",
+      "previous_lock": "5.15.1",
+      "tested_version": "5.15.1",
+      "requirement": "azure-eventhub>=5.15.1",
+      "primary_source": "https://pypi.org/project/azure-eventhub/5.15.1/"
+    },
+    {
+      "package": "azure-identity",
+      "previous_lock": "1.25.3",
+      "tested_version": "1.26.0",
+      "requirement": "azure-identity>=1.26.0",
+      "primary_source": "https://pypi.org/project/azure-identity/1.26.0/"
+    },
+    {
+      "package": "aiohttp",
+      "previous_lock": "3.13.5",
+      "tested_version": "3.14.4",
+      "requirement": "aiohttp>=3.14.4",
+      "primary_source": "https://pypi.org/project/aiohttp/3.14.4/"
+    },
+    {
+      "package": "pydantic",
+      "previous_lock": "2.13.3",
+      "tested_version": "2.13.5",
+      "requirement": "pydantic>=2.13.5",
+      "primary_source": "https://pypi.org/project/pydantic/2.13.5/"
+    },
+    {
+      "package": "pydantic-settings",
+      "previous_lock": "2.14.0",
+      "tested_version": "2.15.0",
+      "requirement": "pydantic-settings>=2.15.0",
+      "primary_source": "https://pypi.org/project/pydantic-settings/2.15.0/"
+    },
+    {
+      "package": "python-dotenv",
+      "previous_lock": "1.2.2",
+      "tested_version": "1.2.4",
+      "requirement": "python-dotenv>=1.2.4",
+      "primary_source": "https://pypi.org/project/python-dotenv/1.2.4/"
+    },
+    {
+      "package": "typer",
+      "previous_lock": "0.25.0",
+      "tested_version": "0.27.2",
+      "requirement": "typer>=0.27.2",
+      "primary_source": "https://pypi.org/project/typer/0.27.2/"
+    },
+    {
+      "package": "rich",
+      "previous_lock": "15.0.0",
+      "tested_version": "15.0.0",
+      "requirement": "rich>=15.0.0",
+      "primary_source": "https://pypi.org/project/rich/15.0.0/"
+    },
+    {
+      "package": "tenacity",
+      "previous_lock": "9.1.4",
+      "tested_version": "9.1.4",
+      "requirement": "tenacity>=9.1.4",
+      "primary_source": "https://pypi.org/project/tenacity/9.1.4/"
+    },
+    {
+      "package": "pydantic-ai",
+      "previous_lock": "1.102.0",
+      "tested_version": "2.54.0",
+      "requirement": "pydantic-ai[groq,cohere]>=2.54.0,<3",
+      "primary_source": "https://pypi.org/project/pydantic-ai/2.54.0/"
+    },
+    {
+      "package": "logfire",
+      "previous_lock": "4.32.1",
+      "tested_version": "5.1.1",
+      "requirement": "logfire>=5.1.1,<6",
+      "primary_source": "https://pypi.org/project/logfire/5.1.1/"
+    },
+    {
+      "package": "psycopg",
+      "previous_lock": "3.3.3",
+      "tested_version": "3.3.6",
+      "requirement": "psycopg[binary]>=3.3.6",
+      "primary_source": "https://pypi.org/project/psycopg/3.3.6/"
+    },
+    {
+      "package": "snowflake-connector-python",
+      "previous_lock": "4.4.0",
+      "tested_version": "4.8.0",
+      "requirement": "snowflake-connector-python>=4.8.0,<5",
+      "primary_source": "https://pypi.org/project/snowflake-connector-python/4.8.0/"
+    },
+    {
+      "package": "cryptography",
+      "previous_lock": "47.0.0",
+      "tested_version": "50.0.2",
+      "requirement": "cryptography>=50.0.2,<51",
+      "primary_source": "https://pypi.org/project/cryptography/50.0.2/"
+    },
+    {
+      "package": "snowpipe-streaming",
+      "previous_lock": "1.4.0",
+      "tested_version": "1.8.1",
+      "requirement": "snowpipe-streaming>=1.8.1",
+      "primary_source": "https://pypi.org/project/snowpipe-streaming/1.8.1/"
+    }
+  ],
+  "development": [
+    {
+      "package": "pytest",
+      "previous_lock": "9.0.3",
+      "tested_version": "9.1.1",
+      "requirement": "pytest>=9.1.1",
+      "primary_source": "https://pypi.org/project/pytest/9.1.1/"
+    },
+    {
+      "package": "pytest-asyncio",
+      "previous_lock": "1.3.0",
+      "tested_version": "1.4.0",
+      "requirement": "pytest-asyncio>=1.4.0",
+      "primary_source": "https://pypi.org/project/pytest-asyncio/1.4.0/"
+    },
+    {
+      "package": "pytest-cov",
+      "previous_lock": "7.1.0",
+      "tested_version": "7.1.0",
+      "requirement": "pytest-cov>=7.1.0",
+      "primary_source": "https://pypi.org/project/pytest-cov/7.1.0/"
+    },
+    {
+      "package": "pytest-mock",
+      "previous_lock": "3.15.1",
+      "tested_version": "3.16.0",
+      "requirement": "pytest-mock>=3.16.0",
+      "primary_source": "https://pypi.org/project/pytest-mock/3.16.0/"
+    },
+    {
+      "package": "ruff",
+      "previous_lock": "0.15.12",
+      "tested_version": "0.16.10",
+      "requirement": "ruff>=0.16.10",
+      "primary_source": "https://pypi.org/project/ruff/0.16.10/"
+    },
+    {
+      "package": "mypy",
+      "previous_lock": "1.20.2",
+      "tested_version": "2.4.0",
+      "requirement": "mypy>=2.4.0",
+      "primary_source": "https://pypi.org/project/mypy/2.4.0/"
+    },
+    {
+      "package": "ty",
+      "previous_lock": "0.0.33",
+      "tested_version": "0.0.84",
+      "requirement": "ty>=0.0.84",
+      "primary_source": "https://pypi.org/project/ty/0.0.84/"
+    },
+    {
+      "package": "pytest-codspeed",
+      "previous_lock": "5.0.2",
+      "tested_version": "5.0.3",
+      "requirement": "pytest-codspeed>=5.0.3",
+      "primary_source": "https://pypi.org/project/pytest-codspeed/5.0.3/"
+    }
+  ],
+  "documentation": [
+    {
+      "package": "zensical",
+      "previous_lock": "0.0.43",
+      "tested_version": "0.0.68",
+      "requirement": "zensical==0.0.68",
+      "primary_source": "https://pypi.org/project/zensical/0.0.68/"
+    }
+  ],
+  "build": {
+    "requirement": "hatchling>=1.32.4,<2",
+    "tested_version": "1.32.4",
+    "primary_source": "https://pypi.org/project/hatchling/1.32.4/"
+  },
+  "compatibility_sources": [
+    "https://pydantic.dev/docs/ai/overview/migration/",
+    "https://pydantic.dev/docs/ai/models/google/",
+    "https://pydantic.dev/docs/logfire/resources/release-notes/",
+    "https://github.com/github/copilot-sdk/blob/main/CHANGELOG.md"
+  ],
+  "setup_helper": [
+    {
+      "package": "typer",
+      "requirement": "typer>=0.27.2,<0.28",
+      "tested_version": "0.27.2",
+      "primary_source": "https://pypi.org/project/typer/0.27.2/"
+    },
+    {
+      "package": "rich",
+      "requirement": "rich>=15.0.0,<16",
+      "tested_version": "15.0.0",
+      "primary_source": "https://pypi.org/project/rich/15.0.0/"
+    },
+    {
+      "package": "github-copilot-sdk",
+      "requirement": "github-copilot-sdk>=1.0.16,<2",
+      "tested_version": "1.0.16",
+      "primary_source": "https://pypi.org/project/github-copilot-sdk/1.0.16/"
+    }
+  ],
+  "transitive_constraints": [
+    {
+      "family": "filelock",
+      "constraint": "snowflake-connector-python 4.8.0 requires filelock<4"
+    },
+    {
+      "family": "huggingface-hub",
+      "constraint": "tokenizers 0.23.2 requires huggingface-hub<2"
+    },
+    {
+      "family": "msgspec",
+      "constraint": "snowpipe-streaming 1.8.1 requires msgspec>=0.20.0,<0.21"
+    },
+    {
+      "family": "multidict",
+      "constraint": "aiohttp 3.14.4 requires multidict<7"
+    },
+    {
+      "family": "opentelemetry",
+      "constraint": "logfire 5.1.1 requires SDK/exporter<1.45; SDK pins API/proto to1.44"
+    },
+    {
+      "family": "pydantic-core",
+      "constraint": "pydantic 2.13.5 requires pydantic-core==2.46.5"
+    },
+    {
+      "family": "websockets",
+      "constraint": "google-genai 2.28.0 requires websockets<17"
+    }
+  ],
+  "github_actions": [
+    {
+      "action": "actions/checkout",
+      "version": "v7.0.1",
+      "primary_source": "https://github.com/actions/checkout/releases/tag/v7.0.1"
+    },
+    {
+      "action": "actions/setup-python",
+      "version": "v7.0.0",
+      "primary_source": "https://github.com/actions/setup-python/releases/tag/v7.0.0"
+    },
+    {
+      "action": "actions/upload-artifact",
+      "version": "v7.0.1",
+      "primary_source": "https://github.com/actions/upload-artifact/releases/tag/v7.0.1"
+    },
+    {
+      "action": "docker/setup-buildx-action",
+      "version": "v4.4.1",
+      "primary_source": "https://github.com/docker/setup-buildx-action/releases/tag/v4.4.1"
+    },
+    {
+      "action": "docker/login-action",
+      "version": "v4.6.0",
+      "primary_source": "https://github.com/docker/login-action/releases/tag/v4.6.0"
+    },
+    {
+      "action": "docker/metadata-action",
+      "version": "v6.2.0",
+      "primary_source": "https://github.com/docker/metadata-action/releases/tag/v6.2.0"
+    },
+    {
+      "action": "docker/build-push-action",
+      "version": "v7.4.0",
+      "primary_source": "https://github.com/docker/build-push-action/releases/tag/v7.4.0"
+    }
+  ]
+}

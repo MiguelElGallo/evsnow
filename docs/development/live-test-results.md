@@ -1,13 +1,13 @@
 # Elastic Channels live test
 
-The Elastic implementation passed a real Azure Event Hubs-to-Snowflake test on
+EvSnow 0.3.0 with refreshed dependencies passed a real Azure Event Hubs-to-Snowflake test on
 5 October 2026. All 200,000 expected events arrived with correct contents and
 source metadata. A persisted consumer restart introduced no duplicates. A
 separate replay of 40 retained source events produced exactly 40 duplicate rows.
 The disposable Azure resource group was deleted and its absence was verified.
 
 This proof belongs to the fresh `MiguelElGallo/evsnow` checkout on branch
-`mpz/elastic-channels`. The run ID is `elastic-20261005-1931`. It does not reuse
+`mpz/elastic-channels`. The run ID is `elastic-20261005-2008`. It does not reuse
 results from the earlier checkout.
 
 ## Results
@@ -39,8 +39,8 @@ The production `PipelineMapping` and Event Hubs consumer ingested two halves:
 
 | Stage | Published | First source sequence on both partitions | Last saved sequence on both partitions | Duration |
 |---|---:|---:|---:|---:|
-| Initial consumer | 100,000 | 0 | 49,999 | 137.153 s |
-| Fresh consumer using persisted checkpoints | 100,000 | 50,000 | 99,999 | 139.187 s |
+| Initial consumer | 100,000 | 0 | 49,999 | 135.098 s |
+| Fresh consumer using persisted checkpoints | 100,000 | 50,000 | 99,999 | 135.109 s |
 
 The second consumer's first event IDs were `100000` and `100001`. Checkpoint
 read-backs and observed first messages agree. Each stage durably acknowledged
@@ -51,12 +51,12 @@ partition and appended them through the production mapping and Elastic adapter.
 It left the primary consumer checkpoints at `99999`. The target gained 40 rows
 while preserving exactly 200,000 distinct IDs.
 
-A retained SQL view, `EVSNOW_ELASTIC_261005_1931.PUBLIC.EVENTS_BY_EVENT_ID`, selects
+A retained SQL view, `EVSNOW_ELASTIC_261005_2008.PUBLIC.EVENTS_BY_EVENT_ID`, selects
 one row per run/event ID. Its independent read-back returned 200,000 rows,
 IDs `0` through `199999`, and zero invalid deterministic values. This demonstrates
 downstream reconciliation; Elastic itself does not deduplicate source replay.
 
-The full proof ran from `2026-10-05T19:38:30Z` to `2026-10-05T19:43:44Z`, including
+The full proof ran from `2026-10-05T20:11:33Z` to `2026-10-05T20:16:31Z`, including
 restart, query visibility polling and replay. The producer spent approximately
 125 seconds per half at a configured ceiling of 800 events/second. These are
 observations from this test, not a maximum-throughput benchmark.
@@ -67,7 +67,7 @@ observations from this test, not a maximum-throughput benchmark.
 |---|---|
 | Azure subscription | `OpenAI demos` |
 | Azure region | Sweden Central |
-| Event Hubs namespace | `evsnow-elastic-20261005-1931` |
+| Event Hubs namespace | `evsnow-elastic-20261005-2008` |
 | Event Hubs SKU | Basic, one throughput unit |
 | Hub / partitions / retention | `events`, two partitions, 24 hours |
 | Consumer group | `$Default` |
@@ -75,11 +75,13 @@ observations from this test, not a maximum-throughput benchmark.
 | Source authentication | Azure CLI identity scoped to the disposable hub |
 | Checkpoint storage | Existing Snowflake control table; local single-consumer ownership |
 | Snowflake account / region | `VAYNIMM-KP67615` / `AZURE_SWEDENCENTRAL` |
-| Target | Native table `EVSNOW_ELASTIC_261005_1931.PUBLIC.EVENTS` |
-| Streaming pipe | `EVSNOW_ELASTIC_261005_1931.PUBLIC.EVENTS_PIPE`, implicit Elastic Channel |
+| Target | Native table `EVSNOW_ELASTIC_261005_2008.PUBLIC.EVENTS` |
+| Streaming pipe | `EVSNOW_ELASTIC_261005_2008.PUBLIC.EVENTS_PIPE`, implicit Elastic Channel |
 | Runtime authentication | Dedicated key-pair service user and scoped role |
 | Query/checkpoint warehouse | X-Small, 60-second auto-suspend, query acceleration disabled |
-| SDKs | `snowpipe-streaming` 1.8.1; `azure-eventhub` 5.15.1 |
+| Runtime | EvSnow 0.3.0; Python 3.13.16 |
+| SDKs | `snowpipe-streaming` 1.8.1; `azure-eventhub` 5.15.1; connector 4.8.0 |
+| Other refreshed libraries | Cryptography 50.0.2; Logfire 5.1.1; Pydantic AI 2.54.0; aiohttp 3.14.4; Typer 0.27.2 |
 
 Basic is the lowest Event Hubs tier and supports this test's default consumer
 group and small messages. The Azure Retail Prices API returned USD 0.015 per
@@ -90,15 +92,16 @@ an invoice; Snowflake ingestion and warehouse charges are separate.
 [Azure tier limits](https://learn.microsoft.com/en-us/azure/event-hubs/compare-tiers),
 [Azure pricing API](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices).
 
-The live JSON records package metadata `0.2.1` because the user requested the
-version bump after ingestion began. The tested Elastic code is included in the
-prepared `0.3.0` package; its package, installed metadata and CLI versions agree,
-and the full local suite was rerun after the metadata/CLI change.
+This retest uses the final dependency lock and records package metadata `0.3.0`.
+The original implementation proof, run `elastic-20261005-1931`, remains in
+`docs/development/evidence/elastic-20261005/`. That earlier run recorded version
+`0.2.1` before the requested version bump and dependency refresh. Its evidence is
+historical; the measurements above come from the fresh dependency retest.
 
 ## Cleanup and retained evidence
 
 The cleanup handler checked the unique run tag before deleting
-`rg-evsnow-elastic-20261005-1931`. `az group exists` returned `false`, including a
+`rg-evsnow-elastic-20261005-2008`. `az group exists` returned `false`, including a
 second independent read-back. Its Event Hubs namespace, hub and scoped role
 assignment were contained in that group. No resources from earlier runs were
 included in deletion.
@@ -108,7 +111,8 @@ read back `DISABLED=true`. The result database, raw table, control checkpoints
 and deduplicated view remain available for review. Private keys and runtime
 credentials remain in the ignored `.local/` directory.
 
-The sanitized evidence directory is `docs/development/evidence/elastic-20261005/`:
+The current sanitized evidence directory is
+`docs/development/evidence/elastic-deps-20261005/`:
 
 - `live-test.json`: every stage's counts, acknowledgements, checkpoints, first
   messages, replay and final acceptance result.
@@ -119,6 +123,7 @@ The sanitized evidence directory is `docs/development/evidence/elastic-20261005/
   deduplicated, processing-error and checkpoint queries.
 - `azure-group-exists-after.txt`, `cleanup-final.json`, `snowflake-cleanup.json`:
   deletion, suspension and disabled-user read-backs.
+- `dependency-update.json`: direct library upgrades and upstream constraints.
 - `local-validation.json` and `peer-review.md`: tests, static checks and review.
 
 ## Reproduce
@@ -131,8 +136,10 @@ The harness operates the configured resources; arrange guarded Azure deletion
 on both success and failure. Its test requires an empty target/control table and
 a new two-partition Event Hub.
 
-Local checks passed: **501 tests**, Ruff lint and formatting, ty, and the strict
+Local checks passed: **508 tests**, Ruff lint and formatting, ty, and the strict
 Zensical documentation build. The 35 new Elastic tests include original-Future
 reuse, late acknowledgement, partial partition success and checkpoint-write
-failure. [Release notes](../release-notes/0.3.0.md) explain how to opt in and what
+failure. Seven additional offline SDK tests exercise AI providers and Logfire;
+16 helper tests check the separate Copilot integration. An installed wheel was
+checked outside the source checkout. [Release notes](../release-notes/0.3.0.md) explain how to opt in and what
 delivery guarantees apply.

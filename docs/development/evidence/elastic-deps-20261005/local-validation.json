@@ -1,0 +1,26 @@
+{
+  "verified_at": "2026-10-05T20:20:12.476595+00:00",
+  "evsnow": "0.3.0",
+  "python": "3.13.16",
+  "uv_lock_sha256": "b323abb8a5bbc99360e0b5cfbcf0fab8b2cd8dc654a6145c30a66b6da2e0d86e",
+  "tests": {
+    "main": {
+      "passed": 508,
+      "warnings": 2,
+      "seconds": 24.61,
+      "command": "UV_PROJECT_ENVIRONMENT=.local/validation-py313 uv run --locked --python 3.13 pytest tests/ -q"
+    },
+    "setup_helper": {
+      "passed": 16,
+      "command": "uv run --locked python -m unittest discover -s tests -v (tools/snowflake_setup)"
+    }
+  },
+  "ruff": "passed lint and formatting",
+  "ty": "passed main source, harness and helper",
+  "zensical": "passed build --clean --strict,0.0.68",
+  "build": "passed main/helper sdist+wheel with Hatchling1.32.4",
+  "installed_wheel": "passed console/module versions and allruntime imports outsidecheckout onPython3.13,withoutPYTHONPATH",
+  "actionlint": "passed with declared Avrea label and suppression only for intentionallydisabled Docker job condition",
+  "live_test": "passed200000events+restart+40source replay; see live-test.json",
+  "cleanup": "see cleanup-final.json"
+}

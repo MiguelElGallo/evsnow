@@ -287,7 +287,23 @@ async def run(args: argparse.Namespace) -> None:
         "target": table,
         "namespace": hub.namespace,
         "event_hub": hub.name,
-        "versions": {p: version(p) for p in ("snowpipe-streaming", "azure-eventhub", "evsnow")},
+        "versions": {
+            package: version(package)
+            for package in (
+                "evsnow",
+                "snowpipe-streaming",
+                "snowflake-connector-python",
+                "azure-eventhub",
+                "azure-identity",
+                "aiohttp",
+                "pydantic",
+                "pydantic-settings",
+                "cryptography",
+                "logfire",
+                "pydantic-ai",
+                "typer",
+            )
+        },
         "python": platform.python_version(),
         "stages": [],
     }
