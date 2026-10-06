@@ -20,7 +20,7 @@ running the pipeline.
 | Target table | `INGESTION.PUBLIC.EVENTS_TABLE1` | Snowflake-managed Iceberg table |
 | Pipe | `INGESTION.PUBLIC.EVENTS_TABLE_PIPE` | Required high-performance Snowpipe Streaming pipe |
 
-## Tested Setup Scripts
+## Setup Scripts
 
 Use the checked-in scripts as the source of truth:
 

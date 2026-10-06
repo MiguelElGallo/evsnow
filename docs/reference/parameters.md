@@ -95,7 +95,7 @@ Event Hub. Per-hub settings override shared defaults.
 |---------|----------|-----------------|--------------------------|-------|
 | Event Hub name | `event_hubs.<KEY>.name` | `EVENTHUBNAME_{N}` | required | Event Hub entity name. |
 | Namespace | `event_hubs.<KEY>.namespace` | use `EVENTHUB_NAMESPACE` | required in TOML table | Keep this aligned with top-level `eventhub_namespace`. |
-| Consumer group | `event_hubs.<KEY>.consumer_group` | `EVENTHUBNAME_{N}_CONSUMER_GROUP` | required | Usually `$Default` for local smoke tests. |
+| Consumer group | `event_hubs.<KEY>.consumer_group` | `EVENTHUBNAME_{N}_CONSUMER_GROUP` | required | Usually `$Default` for local runs. |
 | Connection string | `event_hubs.<KEY>.connection_string` | `EVENTHUBNAME_{N}_CONNECTION_STRING` | unset | Secret; use only when bypassing Entra ID auth. |
 | Maximum SDK batch size | `event_hubs.<KEY>.max_batch_size` | `EVENTHUBNAME_{N}_MAX_BATCH_SIZE` | `1000`; `> 0` | Azure Event Hubs receive batch size. |
 | Maximum wait time | `event_hubs.<KEY>.max_wait_time` | `EVENTHUBNAME_{N}_MAX_WAIT_TIME`; global `EVENTHUB_MAX_WAIT_TIME` | `60`; `>= 0` | Seconds; `0` lets the SDK wait until an event is received. |
@@ -111,9 +111,9 @@ Event Hub. Per-hub settings override shared defaults.
 | Credential mode | `event_hubs.<KEY>.credential_mode` | `EVENTHUBNAME_{N}_CREDENTIAL_MODE`; global `EVENTHUB_CREDENTIAL_MODE` | `default`; `default`, `azure_cli` | `default` uses production-capable `DefaultAzureCredential`. |
 | Managed identity client ID | `event_hubs.<KEY>.managed_identity_client_id` | `EVENTHUBNAME_{N}_MANAGED_IDENTITY_CLIENT_ID`; global `EVENTHUB_MANAGED_IDENTITY_CLIENT_ID` | unset | User-assigned managed identity client ID. |
 | Connection-string compatibility flag | `event_hubs.<KEY>.use_connection_string` | `EVENTHUBNAME_{N}_USE_CONNECTION_STRING` | `false` | Compatibility setting accepted by the config parser. Runtime auth follows whether a connection string is set. |
-| Checkpoint interval | `event_hubs.<KEY>.checkpoint_interval_seconds` | `EVENTHUBNAME_{N}_CHECKPOINT_INTERVAL_SECONDS`; global `EVENTHUB_CHECKPOINT_INTERVAL_SECONDS` | `300`; `> 0` | Seconds. |
-| Maximum message batch size | `event_hubs.<KEY>.max_message_batch_size` | `EVENTHUBNAME_{N}_MAX_MESSAGE_BATCH_SIZE`; global `EVENTHUB_MAX_MESSAGE_BATCH_SIZE` | `1000`; `> 0` | Processing batch size. |
-| Batch timeout | `event_hubs.<KEY>.batch_timeout_seconds` | `EVENTHUBNAME_{N}_BATCH_TIMEOUT_SECONDS`; global `EVENTHUB_BATCH_TIMEOUT_SECONDS` | `300`; `> 0` | Seconds. |
+| Checkpoint interval | `event_hubs.<KEY>.checkpoint_interval_seconds` | `EVENTHUBNAME_{N}_CHECKPOINT_INTERVAL_SECONDS`; global `EVENTHUB_CHECKPOINT_INTERVAL_SECONDS` | `300`; integer | Accepted by the parser but has no runtime effect. Checkpoints follow each successfully processed batch. |
+| Maximum message batch size | `event_hubs.<KEY>.max_message_batch_size` | `EVENTHUBNAME_{N}_MAX_MESSAGE_BATCH_SIZE`; global `EVENTHUB_MAX_MESSAGE_BATCH_SIZE` | `1000`; integer | Accepted by the parser but has no runtime effect. Use the Snowflake target's `batch_size`. |
+| Batch timeout | `event_hubs.<KEY>.batch_timeout_seconds` | `EVENTHUBNAME_{N}_BATCH_TIMEOUT_SECONDS`; global `EVENTHUB_BATCH_TIMEOUT_SECONDS` | `300`; integer | Accepted by the parser but has no runtime effect. The pipeline uses a 300-second partial-batch timeout. |
 | Starting position without checkpoint | `event_hubs.<KEY>.starting_position_on_no_checkpoint` | `EVENTHUBNAME_{N}_STARTING_POSITION_ON_NO_CHECKPOINT` | `-1`; `-1`, `@latest` | `-1` starts from the beginning; `@latest` reads only new events. |
 
 ## Shared Event Hub Defaults
@@ -138,9 +138,9 @@ same SDK tuning applies to every Event Hub. Per-hub TOML keys and
 | Credential mode | `eventhub_defaults.credential_mode` | `EVENTHUB_CREDENTIAL_MODE` | unset; `default`, `azure_cli` | Falls back to per-model default `default` when unset. |
 | Managed identity client ID | `eventhub_defaults.managed_identity_client_id` | `EVENTHUB_MANAGED_IDENTITY_CLIENT_ID` | unset | User-assigned managed identity client ID. |
 | Connection-string compatibility flag | `eventhub_defaults.use_connection_string` | no global variable | unset; boolean | Compatibility setting accepted by TOML. Runtime auth follows whether a connection string is set. |
-| Checkpoint interval | `eventhub_defaults.checkpoint_interval_seconds` | `EVENTHUB_CHECKPOINT_INTERVAL_SECONDS` | unset; `> 0` | Falls back to per-model default `300` when unset. |
-| Maximum message batch size | `eventhub_defaults.max_message_batch_size` | `EVENTHUB_MAX_MESSAGE_BATCH_SIZE` | unset; `> 0` | Falls back to per-model default `1000` when unset. |
-| Batch timeout | `eventhub_defaults.batch_timeout_seconds` | `EVENTHUB_BATCH_TIMEOUT_SECONDS` | unset; `> 0` | Falls back to per-model default `300` when unset. |
+| Checkpoint interval | `eventhub_defaults.checkpoint_interval_seconds` | `EVENTHUB_CHECKPOINT_INTERVAL_SECONDS` | unset; TOML requires `> 0` | Accepted by the parser but has no runtime effect. Checkpoints follow each successfully processed batch. |
+| Maximum message batch size | `eventhub_defaults.max_message_batch_size` | `EVENTHUB_MAX_MESSAGE_BATCH_SIZE` | unset; TOML requires `> 0` | Accepted by the parser but has no runtime effect. Use the Snowflake target's `batch_size`. |
+| Batch timeout | `eventhub_defaults.batch_timeout_seconds` | `EVENTHUB_BATCH_TIMEOUT_SECONDS` | unset; TOML requires `> 0` | Accepted by the parser but has no runtime effect. The pipeline uses a 300-second partial-batch timeout. |
 | Starting position without checkpoint | `eventhub_defaults.starting_position_on_no_checkpoint` | no global variable | unset; `-1`, `@latest` | Falls back to per-model default `-1` when unset. |
 
 ## Snowflake Connection Settings
@@ -165,7 +165,7 @@ because that table is validated as a complete Snowflake connection model.
 | Session database | `snowflake_connection.database` | `SNOWFLAKE_DATABASE` | derived when one mapped target has one database/schema | Set explicitly when mappings span multiple database/schema pairs. |
 | Session schema | `snowflake_connection.schema_name` | `SNOWFLAKE_SCHEMA_NAME` | derived when one mapped target has one database/schema | `.env` uses `SCHEMA_NAME`, not `SCHEMA`. |
 | Role | `snowflake_connection.role` | `SNOWFLAKE_ROLE` | unset | Optional runtime role. |
-| Pipe name | `snowflake_connection.pipe_name` | `SNOWFLAKE_PIPE_NAME` | required | Snowpipe Streaming pipe object name. |
+| Pipe name | `snowflake_connection.pipe_name` | `SNOWFLAKE_PIPE_NAME` | required | Shared pipe name, resolved in each target's database/schema. The pipe's `COPY INTO` determines the destination table; see [Multiple mappings](../configuration.md#multiple-mappings). |
 | Channel mode | `snowflake_connection.channel_mode` | `SNOWFLAKE_CHANNEL_MODE` | `named`; `named`, `elastic` | Named mode preserves partition channels and offset tokens. Elastic mode uses the custom pipe's implicit channel and at-least-once delivery. |
 | Acknowledgement timeout | `snowflake_connection.ack_timeout_seconds` | `SNOWFLAKE_ACK_TIMEOUT_SECONDS` | `60`; positive integer | Elastic mode: seconds for one wait on a submitted batch. A timed-out Future stays pending; another attempt observes the same append. |
 | Close timeout | `snowflake_connection.close_timeout_seconds` | `SNOWFLAKE_CLOSE_TIMEOUT_SECONDS` | `60`; positive integer | Elastic mode: adapter budget for pending acknowledgements and SDK client close, not the entire consumer/pipeline shutdown. An unresolved close does not establish successful delivery. |
@@ -186,8 +186,8 @@ family per target table.
 |---------|----------|-----------------|--------------------------|-------|
 | Target database | `snowflake_configs.<KEY>.database` | `SNOWFLAKE_{N}_DATABASE` | required | Snowflake identifier. |
 | Target schema | `snowflake_configs.<KEY>.schema_name` | `SNOWFLAKE_{N}_SCHEMA` | required | `.env` target key uses `SCHEMA`, unlike connection `SNOWFLAKE_SCHEMA_NAME`. |
-| Target table | `snowflake_configs.<KEY>.table_name` | `SNOWFLAKE_{N}_TABLE` | required | Snowflake identifier. |
-| Batch size | `snowflake_configs.<KEY>.batch_size` | `SNOWFLAKE_{N}_BATCH` | `1000` | Records per batch. |
+| Target table | `snowflake_configs.<KEY>.table_name` | `SNOWFLAKE_{N}_TABLE` | required | Must match the configured pipe's destination. This setting does not redirect the pipe to another table. |
+| Batch size | `snowflake_configs.<KEY>.batch_size` | `SNOWFLAKE_{N}_BATCH` | `1000` | Records per processing batch. This controls batching for the mapped Event Hub; partial batches use a 300-second timeout. |
 | Retry attempts | `snowflake_configs.<KEY>.max_retry_attempts` | `SNOWFLAKE_{N}_MAX_RETRY_ATTEMPTS` | `3` | Integer. |
 | Retry delay | `snowflake_configs.<KEY>.retry_delay_seconds` | `SNOWFLAKE_{N}_RETRY_DELAY_SECONDS` | `5` | Seconds. |
 | Connection timeout | `snowflake_configs.<KEY>.connection_timeout_seconds` | `SNOWFLAKE_{N}_CONNECTION_TIMEOUT_SECONDS` | `30` | Seconds. |

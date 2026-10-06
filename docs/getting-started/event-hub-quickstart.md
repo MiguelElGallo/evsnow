@@ -8,8 +8,8 @@ Event Hub for the first run.
 You need Azure CLI access to a subscription where you can create resource
 groups, Event Hubs namespaces, Event Hubs, and role assignments.
 
-Run these commands from the EvSnow repo root after cloning the repo and running
-`uv sync`:
+[Install EvSnow](../tutorial/first-run.md#install) if you have not already done
+so. Run these commands from the repository root:
 
 ```bash
 az login
@@ -45,7 +45,13 @@ az eventhubs eventhub create \
   --retention-time 24
 ```
 
-Use these values in `config/evsnow.toml`:
+Create the runtime file if it does not exist:
+
+```bash
+[ -f config/evsnow.toml ] || cp config/evsnow.example.toml config/evsnow.toml
+```
+
+Use these values in `config/evsnow.toml`, preserving any Snowflake settings:
 
 ```toml
 eventhub_namespace = "<globally-unique-namespace>.servicebus.windows.net"
@@ -56,10 +62,10 @@ namespace = "<globally-unique-namespace>.servicebus.windows.net"
 consumer_group = "$Default"
 ```
 
-## Grant Local Smoke-Test Access
+## Grant Local Sender And Receiver Access
 
 The EvSnow consumer needs receive access. The included sender utility also
-needs send access when the same signed-in Azure CLI identity publishes test
+needs send access when the same signed-in Azure CLI identity publishes example
 messages.
 
 ```bash
@@ -123,15 +129,15 @@ uv run python tools/eventhub_sender/main.py \
   --count 1 \
   --batch-size 1 \
   --credential-mode azure_cli \
-  --payload '{"purpose":"eventhub-rbac-smoke"}'
+  --payload '{"purpose":"eventhub-access-check"}'
 ```
 
 If this fails with an authorization error, wait a few minutes for role
-propagation and retry. Continue only after the sender smoke succeeds. The
+propagation and retry. Continue only after the sender check succeeds. The
 receiver role is proven in [First run](../tutorial/first-run.md), when EvSnow
 connects and starts reading from the Event Hub.
 
-This message proves sender RBAC only. It is not the row-arrival proof. The
+This message proves sender RBAC only. It is not the row-arrival check. The
 First Run tutorial sends a separate batch with a unique `run_id`.
 
 After the Event Hub exists, continue with [Snowflake quickstart](snowflake-quickstart.md)
@@ -140,7 +146,7 @@ Snowflake is already ready.
 
 ## Clean Up Quickstart Resources
 
-If this was only a disposable smoke test, delete the resource group:
+If this was only a temporary setup, delete the resource group:
 
 ```bash
 az group delete --name "$RESOURCE_GROUP" --yes --no-wait

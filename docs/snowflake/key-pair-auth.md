@@ -51,7 +51,7 @@ For non-interactive ingestion users, prefer a Snowflake `SERVICE` user.
 The quickstart bootstrap in [Snowflake quickstart](../getting-started/snowflake-quickstart.md)
 creates `STREAMEV` as a service user and assigns the public key.
 
-## 4) Test authentication with Snowflake CLI
+## 4) Check authentication with Snowflake CLI
 
 ```bash
 PRIVATE_KEY_PASSPHRASE="<key-password>" \

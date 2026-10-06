@@ -15,7 +15,7 @@ configuration validation, and operational observability.
 ## Start With First Run
 
 Start here when you want one Event Hub, one Snowflake target, one checkpoint
-table, and a repeatable local smoke test.
+table, and a repeatable first run.
 
 Go to [First run](tutorial/first-run.md) to install EvSnow, configure one local
 pipeline, validate the settings, and run it.
@@ -32,7 +32,6 @@ pipeline, validate the settings, and run it.
 - Tune runtime settings: [Configuration](configuration.md)
 - Check every Snowflake object and grant: [Complete Snowflake setup](snowflake/complete-setup.md)
 - Inspect Iceberg data with DuckDB: [DuckDB Iceberg guide](how-to/query-iceberg-with-duckdb.md)
-- Run contributor checks: [Testing](development/testing.md)
 
 ## What EvSnow Connects
 
@@ -53,11 +52,11 @@ runs resume from saved checkpoints.
 
 ``` { .mermaid data-search-exclude }
 flowchart TD
-    start["Pick checkpoint backend"] --> smoke{"Local smoke test?"}
-    smoke -- yes --> standard["Snowflake standard control table\nlocal_single_consumer_smoke"]
-    smoke -- no --> multi{"Multiple consumers or failover?"}
-    multi -- yes --> hybrid["Snowflake Hybrid Table\ndurable ownership"]
-    multi -- no --> postgres["Postgres backend\npassword or Azure token auth"]
+    start["Pick checkpoint backend"] --> local{"One local consumer?"}
+    local -- yes --> standard["Snowflake standard control table\nlocal_single_consumer_smoke"]
+    local -- "production or failover" --> durable["Choose durable ownership"]
+    durable --> hybrid["Snowflake Hybrid Table"]
+    durable --> postgres["Postgres backend"]
 ```
 
 The local tutorial uses a Snowflake standard control table and
@@ -69,8 +68,3 @@ ownership with a Snowflake Hybrid Table or the Postgres control-table backend.
 Use the Snowflake setup pages when you need to create or audit account objects.
 Use the configuration reference when you are changing pipeline behavior. Use the
 how-to guides for operational tasks after the first pipeline works.
-
-## Documentation Provenance
-
-Parts of this documentation were drafted with assistance from Codex and
-GPT-5.5, then reviewed against the EvSnow project.

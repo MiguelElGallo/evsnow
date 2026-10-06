@@ -11,8 +11,8 @@ roles, warehouses, databases, schemas, tables, pipes, and grants. `ACCOUNTADMIN`
 is acceptable for a one-time bootstrap when your organization does not provide a
 narrower setup role.
 
-Run the local commands on this page from the EvSnow repo root after cloning the
-repo and running `uv sync`.
+[Install EvSnow](../tutorial/first-run.md#install) if you have not already done
+so. Run the local commands on this page from the repository root.
 
 !!! warning "Connection success is not DDL success"
 
@@ -171,10 +171,11 @@ Keep this checklist as the known-good proof before moving on:
 ## Configure EvSnow
 
 ```bash
-cp config/evsnow.example.toml config/evsnow.toml
+[ -f config/evsnow.toml ] || cp config/evsnow.example.toml config/evsnow.toml
 ```
 
-Set the Snowflake target in `config/evsnow.toml`:
+Keep any Event Hub settings from Azure setup. Set the Snowflake target in
+`config/evsnow.toml`:
 
 ```toml
 [snowflake_configs.SNOWFLAKE_1]
@@ -184,7 +185,8 @@ table_name = "EVENTS_TABLE1"
 batch_size = 100
 ```
 
-Create `.env` with only secrets and local credentials:
+Create or update `.env` with the Snowflake credentials below. Preserve any
+Event Hub connection string you already configured:
 
 ```bash
 SNOWFLAKE_ACCOUNT=<account_locator>
@@ -206,6 +208,11 @@ The full environment template remains in
 
 ## Verify EvSnow Configuration
 
+Before running this check, complete the
+[Event Hub quickstart](event-hub-quickstart.md) if needed and replace the
+namespace and Event Hub placeholders in `config/evsnow.toml` with your values.
+The command checks the combined configuration, not only Snowflake settings.
+
 ```bash
 uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
@@ -225,18 +232,3 @@ pipe grants exist.
 
 After validation passes without warnings, continue with
 [First run](../tutorial/first-run.md).
-
-## Maintainer Harness
-
-When setup SQL or Snowflake setup docs change, maintainers can run the same path
-in a scratch copy and keep the command log:
-
-```bash
-uv run python tools/quickstart_harness.py --connection <setup-connection>
-```
-
-The harness writes `summary.json` and `commands.jsonl` under
-`.quickstart-runs/`. A passing run reports `"status": "passed"` and includes
-`Snowflake control table verified/created successfully` in the validation
-output. It does not create Event Hubs or prove row arrival; use
-[First run](../tutorial/first-run.md) for that runtime proof.

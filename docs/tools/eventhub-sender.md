@@ -16,12 +16,12 @@ uv run python tools/eventhub_sender/main.py \
   --start-id 1 \
   --batch-size 50 \
   --credential-mode azure_cli \
-  --payload '{"kind":"test"}'
+  --payload '{"kind":"example"}'
 ```
 
 !!! warning "Connection strings are secrets"
 
-    Prefer `--credential-mode azure_cli` for local smoke tests. Use a
+    Prefer `--credential-mode azure_cli` for local runs. Use a
     connection string only when you intentionally bypass Entra ID auth, and keep
     it out of committed files.
 
@@ -50,7 +50,7 @@ Each message is a JSON object:
   "sent_at": "2025-12-04T12:34:56.789Z",
   "source": "evsnow-cli-sender",
   "trace_id": "<uuid>",
-  "payload": { "kind": "test" }
+  "payload": { "kind": "example" }
 }
 ```
 
@@ -58,11 +58,11 @@ Each message is a JSON object:
 
 ## End-to-End Arrival Check
 
-Use a unique `run_id` when you want to verify that a small test batch reached
+Use a unique `run_id` when you want to verify that a small example batch reached
 Snowflake.
 
 ```bash
-RUN_ID="evsnow-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_ID="evsnow-example-$(date -u +%Y%m%dT%H%M%SZ)"
 START_ID=$(date -u +%s)
 EVENTHUB_NAMESPACE="eventhub1.servicebus.windows.net"
 EVENTHUB_NAME="topic1"
@@ -114,7 +114,7 @@ snow sql -x \
       FROM proof;"
 ```
 
-For a 3-message smoke test, `rows_arrived` should be `3` and the
+For a 3-message example, `rows_arrived` should be `3` and the
 `missing_sequence_count` should be `0`.
 
 Use the Event Hub and target values from `config/evsnow.toml`. In the shell

@@ -1,9 +1,0 @@
-{
-  "name": "events",
-  "partitionCount": 2,
-  "retention": {
-    "cleanupPolicy": "Delete",
-    "retentionTimeInHours": 24
-  },
-  "status": "Active"
-}

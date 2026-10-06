@@ -41,31 +41,7 @@ nav = [
     "tools/index.md",
     "tools/eventhub-sender.md"
   ] },
-  { "Development" = [
-    "development/index.md",
-    "development/testing.md",
-    "development/integration-tests.md",
-    "development/live-test-results.md"
-  ] },
-  { "Project" = [
-    "project/index.md",
-    { "Release notes" = "release-notes/0.3.0.md" },
-    "project/workflows.md",
-    "project/copilot-instructions.md",
-    { "Archive" = [
-      "project/issue-creation-guide.md",
-      "python-pipeline-hardening-plan.md",
-      "archive/control-table-postgres-plan.md",
-      "archive/snowflake-setup-cli-plan.md",
-      "tools/snowflake-setup-cli.md",
-      "development/unit/orchestrator-tests.md",
-      "development/unit/streaming-tests.md",
-      "development/unit/streaming-coverage.md",
-      "development/unit/streaming-implementation-summary.md",
-      "development/unit/test-orchestrator-note.md"
-    ] },
-    { "GitHub" = "https://github.com/MiguelElGallo/evsnow" }
-  ] }
+  { "Release notes" = "release-notes/0.3.0.md" }
 ]
 
 [project.theme]
