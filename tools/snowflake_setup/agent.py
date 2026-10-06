@@ -6,11 +6,23 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from copilot import CopilotClient
-from copilot.types import UserInputRequest, UserInputResponse
+from copilot import (
+    CopilotClient,
+    PermissionNoResult,
+    PermissionRequest,
+    PermissionRequestResult,
+    UserInputRequest,
+    UserInputResponse,
+)
+from copilot.generated.rpc import (
+    PermissionDecisionApproveOnce,
+    PermissionDecisionReject,
+    PermissionDecisionUserNotAvailable,
+)
+from copilot.session import PermissionInvocation
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 
 # Handle imports for both module and direct execution
 sys.path.insert(0, str(Path(__file__).parent))
@@ -46,12 +58,48 @@ async def handle_user_input(
         for i, choice in enumerate(choices, 1):
             console.print(f"  {i}. {choice}")
 
-    answer = Prompt.ask("[bold cyan]Your answer[/bold cyan]")
+    answer = Prompt.ask(
+        "[bold cyan]Your answer[/bold cyan]",
+        choices=choices if choices and not allow_freeform else None,
+    )
 
     return UserInputResponse(
         answer=answer,
-        wasFreeform=allow_freeform,
+        wasFreeform=answer not in choices,
     )
+
+
+def handle_permission_request(
+    request: PermissionRequest, invocation: PermissionInvocation
+) -> PermissionRequestResult:
+    """Ask the operator to approve one operation without granting session access."""
+    if getattr(request, "managed_approval_required", False):
+        # A managed approval must be answered by its human-facing host.
+        return PermissionNoResult()
+    if not sys.stdin.isatty():
+        return PermissionDecisionUserNotAvailable()
+
+    console.print(f"\nAgent requests permission: {request.kind}", markup=False)
+    for name in (
+        "intention",
+        "full_command_text",
+        "path",
+        "file_name",
+        "diff",
+        "url",
+        "server_name",
+        "tool_name",
+        "tool_title",
+        "args",
+        "request_sandbox_bypass_reason",
+        "warning",
+    ):
+        detail = getattr(request, name, None)
+        if detail:
+            console.print(f"{name.replace('_', ' ')}: {detail}", markup=False)
+    if Confirm.ask("Allow this operation once?", default=False):
+        return PermissionDecisionApproveOnce(approved_interactively=True)
+    return PermissionDecisionReject(feedback="The operator declined this operation.")
 
 
 async def run_connection_agent(
@@ -82,13 +130,9 @@ async def run_connection_agent(
     # Create session with the agent - use minimal config to avoid API issues
     log_event("SESSION", "Creating agent session")
     session = await client.create_session(
-        {
-            "system_message": {
-                "mode": "append",
-                "content": system_prompt,
-            },
-            "on_user_input_request": handle_user_input,
-        }
+        system_message={"mode": "append", "content": system_prompt},
+        on_user_input_request=handle_user_input,
+        on_permission_request=handle_permission_request,
     )
 
     # Set up event handlers for streaming output with verbose logging
@@ -96,9 +140,10 @@ async def run_connection_agent(
     connection_success = False
     last_output = ""
     reasoning_buffer = ""
+    session_error: str | None = None
 
     def on_event(event: Any) -> None:
-        nonlocal connection_success, last_output, reasoning_buffer
+        nonlocal connection_success, last_output, reasoning_buffer, session_error
         event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
 
         if event_type == "assistant.message_delta":
@@ -150,6 +195,7 @@ async def run_connection_agent(
             error_msg = getattr(event.data, "message", None) or getattr(event.data, "error", None)
             error_code = getattr(event.data, "code", None)
             error_details = getattr(event.data, "details", None)
+            session_error = f"Copilot session failed ({error_code or 'unknown'}): {error_msg or 'Unknown error'}"
 
             console.print("\n[bold red]━━━ SESSION ERROR ━━━[/bold red]")
             if error_code:
@@ -205,13 +251,13 @@ If it failed, explain what went wrong and what the user needs to fix.
 """
 
     log_event("PROMPT", "Sending connection request to agent")
-    await session.send({"prompt": initial_prompt})
-
-    # Wait for completion
-    await done.wait()
-
-    # Cleanup session
-    await session.destroy()
+    try:
+        await session.send(initial_prompt)
+        await done.wait()
+        if session_error:
+            raise RuntimeError(session_error)
+    finally:
+        await session.disconnect()
 
     return connection_success
 
@@ -239,6 +285,7 @@ async def run_setup_agent(
 
     console.print(f"[dim]PAT token saved to: {token_file}[/dim]")
 
+    client: CopilotClient | None = None
     try:
         # Create Copilot client
         log_event("CLIENT", "Starting Copilot client")
@@ -264,7 +311,6 @@ async def run_setup_agent(
                     border_style="red",
                 )
             )
-            await client.stop()
             return
 
         console.print(
@@ -284,7 +330,6 @@ async def run_setup_agent(
 
         if proceed != "yes":
             console.print("[dim]Setup cancelled by user.[/dim]")
-            await client.stop()
             return
 
         # Phase 2: Full setup
@@ -302,8 +347,6 @@ async def run_setup_agent(
 
         await run_full_setup_agent(client, account, user, str(token_file))
 
-        await client.stop()
-
         console.print(
             Panel.fit(
                 "[bold green]✓ Setup process completed![/bold green]\n\n"
@@ -313,10 +356,13 @@ async def run_setup_agent(
         )
 
     finally:
-        # Clean up token file
-        if token_file.exists():
-            token_file.unlink()
-            log_event("CLEANUP", "Removed temporary token file")
+        try:
+            if client is not None:
+                await client.stop()
+        finally:
+            if token_file.exists():
+                token_file.unlink()
+                log_event("CLEANUP", "Removed temporary token file")
 
 
 async def run_full_setup_agent(
@@ -330,20 +376,17 @@ async def run_full_setup_agent(
 
     log_event("SESSION", "Creating full setup agent session")
     session = await client.create_session(
-        {
-            "system_message": {
-                "mode": "append",
-                "content": system_prompt,
-            },
-            "on_user_input_request": handle_user_input,
-        }
+        system_message={"mode": "append", "content": system_prompt},
+        on_user_input_request=handle_user_input,
+        on_permission_request=handle_permission_request,
     )
 
     done = asyncio.Event()
     reasoning_buffer = ""
+    session_error: str | None = None
 
     def on_event(event: Any) -> None:
-        nonlocal reasoning_buffer
+        nonlocal reasoning_buffer, session_error
         event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
 
         if event_type == "assistant.message_delta":
@@ -383,6 +426,7 @@ async def run_full_setup_agent(
             error_msg = getattr(event.data, "message", None) or getattr(event.data, "error", None)
             error_code = getattr(event.data, "code", None)
             error_details = getattr(event.data, "details", None)
+            session_error = f"Copilot session failed ({error_code or 'unknown'}): {error_msg or 'Unknown error'}"
 
             console.print("\n[bold red]━━━ SESSION ERROR ━━━[/bold red]")
             if error_code:
@@ -430,6 +474,10 @@ Then execute the setup steps from SNOWFLAKE_COMPLETE_SETUP.md.
 """
 
     log_event("PROMPT", "Sending setup request to agent")
-    await session.send({"prompt": initial_prompt})
-    await done.wait()
-    await session.destroy()
+    try:
+        await session.send(initial_prompt)
+        await done.wait()
+        if session_error:
+            raise RuntimeError(session_error)
+    finally:
+        await session.disconnect()

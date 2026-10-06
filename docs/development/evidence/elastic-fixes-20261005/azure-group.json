@@ -1,0 +1,9 @@
+{
+  "id": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-fixes-20261005-2043",
+  "location": "swedencentral",
+  "name": "rg-evsnow-elastic-fixes-20261005-2043",
+  "tags": {
+    "purpose": "evsnow-copilot-fix-proof",
+    "test_run": "elastic-fixes-20261005-2043"
+  }
+}

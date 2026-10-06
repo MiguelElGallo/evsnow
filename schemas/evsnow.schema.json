@@ -172,12 +172,6 @@
           "description": "Optional user-assigned managed identity client ID for DefaultAzureCredential.",
           "title": "Managed Identity Client Id"
         },
-        "use_connection_string": {
-          "default": false,
-          "description": "Use connection string instead of DefaultAzureCredential",
-          "title": "Use Connection String",
-          "type": "boolean"
-        },
         "checkpoint_interval_seconds": {
           "default": 300,
           "description": "Checkpoint interval (seconds)",
@@ -738,6 +732,30 @@
           "description": "PIPE object name for high-performance SDK (e.g., EVENTS_TABLE_PIPE)",
           "title": "Pipe Name",
           "type": "string"
+        },
+        "channel_mode": {
+          "default": "named",
+          "description": "Snowpipe Streaming channel mode; named preserves source offset tracking",
+          "enum": [
+            "named",
+            "elastic"
+          ],
+          "title": "Channel Mode",
+          "type": "string"
+        },
+        "ack_timeout_seconds": {
+          "default": 60,
+          "description": "Maximum wait for an Elastic append acknowledgement, in seconds",
+          "exclusiveMinimum": 0,
+          "title": "Ack Timeout Seconds",
+          "type": "integer"
+        },
+        "close_timeout_seconds": {
+          "default": 60,
+          "description": "Maximum wait for pending Elastic acknowledgements and client close",
+          "exclusiveMinimum": 0,
+          "title": "Close Timeout Seconds",
+          "type": "integer"
         }
       },
       "required": [

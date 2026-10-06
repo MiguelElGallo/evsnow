@@ -1,0 +1,238 @@
+{
+  "started_at": "2026-10-05T19:38:30.826189+00:00",
+  "run_id": "elastic-20261005-1931",
+  "events": 200000,
+  "channel_mode": "elastic",
+  "target": "EVSNOW_ELASTIC_261005_1931.PUBLIC.EVENTS",
+  "namespace": "evsnow-elastic-20261005-1931.servicebus.windows.net",
+  "event_hub": "events",
+  "versions": {
+    "snowpipe-streaming": "1.8.1",
+    "azure-eventhub": "5.15.1",
+    "evsnow": "0.2.1"
+  },
+  "python": "3.14.8",
+  "stages": [
+    {
+      "producer": {
+        "sent": 100000,
+        "seconds": 125.009,
+        "rate_limit": 800
+      },
+      "seconds": 137.153,
+      "first_messages": {
+        "1": {
+          "sequence_number": 0,
+          "event_id": 1
+        },
+        "0": {
+          "sequence_number": 0,
+          "event_id": 0
+        }
+      },
+      "mapping_stats": {
+        "mapping_key": "EVENTHUBNAME_1->SNOWFLAKE_1",
+        "destination_type": "Snowflake",
+        "started_at": "2026-10-05 19:38:35.475339+00:00",
+        "messages_processed": 100000,
+        "batches_processed": 50,
+        "last_activity": "2026-10-05 19:40:48.067051+00:00",
+        "errors": [],
+        "runtime_seconds": 137.154833,
+        "messages_per_second": 729.1029985068044
+      },
+      "streaming_stats": {
+        "channel_mode": "elastic",
+        "delivery_semantics": "at_least_once",
+        "acknowledgement_scope": "durable_buffer",
+        "client_created_at": "2026-10-05 19:38:35.474892+00:00",
+        "total_messages_sent": 100000,
+        "total_batches_sent": 93,
+        "append_requests": 93,
+        "acknowledgement_failures": 0,
+        "acknowledgement_timeouts": 0,
+        "channels_created": 1,
+        "last_ingestion": "2026-10-05 19:40:48.066904+00:00",
+        "last_error": null,
+        "close_failures": 0,
+        "pending_append": false,
+        "runtime_seconds": 137.155304,
+        "messages_per_second": 729.1004947209333
+      },
+      "consumer_stats": {
+        "consumer_id": "evsnow_00e2121d",
+        "messages_received": 100000,
+        "batches_processed": 50,
+        "last_checkpoint": {
+          "1": 49999
+        },
+        "start_time": "2026-10-05 19:38:38.971283+00:00",
+        "runtime_seconds": 133.658922,
+        "messages_per_second": 748.1730250674924
+      },
+      "checkpoints": [
+        {
+          "TS_INSERTED": "2026-10-05 12:40:44.497000-07:00",
+          "EVENTHUB_NAMESPACE": "evsnow-elastic-20261005-1931.servicebus.windows.net",
+          "EVENTHUB": "events",
+          "TARGET_DB": "EVSNOW_ELASTIC_261005_1931",
+          "TARGET_SCHEMA": "PUBLIC",
+          "TARGET_TABLE": "EVENTS",
+          "WATERLEVEL": 49999,
+          "PARTITION_ID": "0",
+          "METADATA": "{\n  \"consumer_group\": \"$Default\",\n  \"eventhub_name\": \"events\",\n  \"fully_qualified_namespace\": \"evsnow-elastic-20261005-1931.servicebus.windows.net\",\n  \"offset_string\": \"10397032\",\n  \"sequence_number\": 49999\n}"
+        },
+        {
+          "TS_INSERTED": "2026-10-05 12:40:48.175000-07:00",
+          "EVENTHUB_NAMESPACE": "evsnow-elastic-20261005-1931.servicebus.windows.net",
+          "EVENTHUB": "events",
+          "TARGET_DB": "EVSNOW_ELASTIC_261005_1931",
+          "TARGET_SCHEMA": "PUBLIC",
+          "TARGET_TABLE": "EVENTS",
+          "WATERLEVEL": 49999,
+          "PARTITION_ID": "1",
+          "METADATA": "{\n  \"consumer_group\": \"$Default\",\n  \"eventhub_name\": \"events\",\n  \"fully_qualified_namespace\": \"evsnow-elastic-20261005-1931.servicebus.windows.net\",\n  \"offset_string\": \"10397040\",\n  \"sequence_number\": 49999\n}"
+        }
+      ],
+      "verification": {
+        "RAW_ROWS": 100000,
+        "DISTINCT_IDS": 100000,
+        "INVALID_IDS": 0,
+        "INVALID_PAYLOADS": 0,
+        "INVALID_SOURCE_METADATA": 0,
+        "DISTINCT_SOURCE_IDS": 100000,
+        "MISSING_IDS": 0,
+        "DUPLICATE_ROWS": 0,
+        "PROCESSING_ERRORS": 0,
+        "ALL_TABLE_ROWS": 100000
+      }
+    },
+    {
+      "producer": {
+        "sent": 100000,
+        "seconds": 125.004,
+        "rate_limit": 800
+      },
+      "seconds": 139.187,
+      "first_messages": {
+        "0": {
+          "sequence_number": 50000,
+          "event_id": 100000
+        },
+        "1": {
+          "sequence_number": 50000,
+          "event_id": 100001
+        }
+      },
+      "mapping_stats": {
+        "mapping_key": "EVENTHUBNAME_1->SNOWFLAKE_1",
+        "destination_type": "Snowflake",
+        "started_at": "2026-10-05 19:41:00.969316+00:00",
+        "messages_processed": 100000,
+        "batches_processed": 50,
+        "last_activity": "2026-10-05 19:43:15.658214+00:00",
+        "errors": [],
+        "runtime_seconds": 139.187991,
+        "messages_per_second": 718.4527866344446
+      },
+      "streaming_stats": {
+        "channel_mode": "elastic",
+        "delivery_semantics": "at_least_once",
+        "acknowledgement_scope": "durable_buffer",
+        "client_created_at": "2026-10-05 19:41:00.969257+00:00",
+        "total_messages_sent": 100000,
+        "total_batches_sent": 93,
+        "append_requests": 93,
+        "acknowledgement_failures": 0,
+        "acknowledgement_timeouts": 0,
+        "channels_created": 1,
+        "last_ingestion": "2026-10-05 19:43:15.658182+00:00",
+        "last_error": null,
+        "close_failures": 0,
+        "pending_append": false,
+        "runtime_seconds": 139.188124,
+        "messages_per_second": 718.4521001231399
+      },
+      "consumer_stats": {
+        "consumer_id": "evsnow_850e69dc",
+        "messages_received": 100000,
+        "batches_processed": 50,
+        "last_checkpoint": {
+          "0": 99999
+        },
+        "start_time": "2026-10-05 19:41:01.479357+00:00",
+        "runtime_seconds": 138.678057,
+        "messages_per_second": 721.0946141248576
+      },
+      "checkpoints": [
+        {
+          "TS_INSERTED": "2026-10-05 12:43:15.773000-07:00",
+          "EVENTHUB_NAMESPACE": "evsnow-elastic-20261005-1931.servicebus.windows.net",
+          "EVENTHUB": "events",
+          "TARGET_DB": "EVSNOW_ELASTIC_261005_1931",
+          "TARGET_SCHEMA": "PUBLIC",
+          "TARGET_TABLE": "EVENTS",
+          "WATERLEVEL": 99999,
+          "PARTITION_ID": "0",
+          "METADATA": "{\n  \"consumer_group\": \"$Default\",\n  \"eventhub_name\": \"events\",\n  \"fully_qualified_namespace\": \"evsnow-elastic-20261005-1931.servicebus.windows.net\",\n  \"offset_string\": \"20797032\",\n  \"sequence_number\": 99999\n}"
+        },
+        {
+          "TS_INSERTED": "2026-10-05 12:43:08.593000-07:00",
+          "EVENTHUB_NAMESPACE": "evsnow-elastic-20261005-1931.servicebus.windows.net",
+          "EVENTHUB": "events",
+          "TARGET_DB": "EVSNOW_ELASTIC_261005_1931",
+          "TARGET_SCHEMA": "PUBLIC",
+          "TARGET_TABLE": "EVENTS",
+          "WATERLEVEL": 99999,
+          "PARTITION_ID": "1",
+          "METADATA": "{\n  \"consumer_group\": \"$Default\",\n  \"eventhub_name\": \"events\",\n  \"fully_qualified_namespace\": \"evsnow-elastic-20261005-1931.servicebus.windows.net\",\n  \"offset_string\": \"20797040\",\n  \"sequence_number\": 99999\n}"
+        }
+      ],
+      "verification": {
+        "RAW_ROWS": 200000,
+        "DISTINCT_IDS": 200000,
+        "INVALID_IDS": 0,
+        "INVALID_PAYLOADS": 0,
+        "INVALID_SOURCE_METADATA": 0,
+        "DISTINCT_SOURCE_IDS": 200000,
+        "MISSING_IDS": 0,
+        "DUPLICATE_ROWS": 0,
+        "PROCESSING_ERRORS": 0,
+        "ALL_TABLE_ROWS": 200000
+      }
+    }
+  ],
+  "before_replay": {
+    "RAW_ROWS": 200000,
+    "DISTINCT_IDS": 200000,
+    "INVALID_IDS": 0,
+    "INVALID_PAYLOADS": 0,
+    "INVALID_SOURCE_METADATA": 0,
+    "DISTINCT_SOURCE_IDS": 200000,
+    "MISSING_IDS": 0,
+    "DUPLICATE_ROWS": 0,
+    "PROCESSING_ERRORS": 0,
+    "ALL_TABLE_ROWS": 200000
+  },
+  "replay": {
+    "replayed_source_events": 40,
+    "source_starts_exclusive": {
+      "0": 99979,
+      "1": 99979
+    }
+  },
+  "after_replay": {
+    "RAW_ROWS": 200040,
+    "DISTINCT_IDS": 200000,
+    "INVALID_IDS": 0,
+    "INVALID_PAYLOADS": 0,
+    "INVALID_SOURCE_METADATA": 0,
+    "DISTINCT_SOURCE_IDS": 200000,
+    "MISSING_IDS": 0,
+    "DUPLICATE_ROWS": 40,
+    "PROCESSING_ERRORS": 0,
+    "ALL_TABLE_ROWS": 200040
+  },
+  "status": "passed",
+  "finished_at": "2026-10-05T19:43:44.687517+00:00"
+}

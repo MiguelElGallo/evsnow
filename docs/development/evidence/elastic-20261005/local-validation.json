@@ -1,0 +1,25 @@
+{
+  "recorded_at": "2026-10-05T19:50:15.652199+00:00",
+  "repository": "https://github.com/MiguelElGallo/evsnow.git",
+  "branch": "mpz/elastic-channels",
+  "base_commit": "d498c190b4bd6c8289c1e80e1f21dca39c676809",
+  "pytest": {
+    "command": "uv run pytest tests/ -q",
+    "passed": 501,
+    "warnings": 2,
+    "seconds": 24.56,
+    "after_version_bump": true
+  },
+  "ruff_check": "passed: src/ and tools/elastic_live_test.py",
+  "ruff_format": "passed: src/ and tools/elastic_live_test.py",
+  "ty": "passed: src/ and tools/elastic_live_test.py",
+  "zensical": "passed: build --clean --strict",
+  "peer_review": {
+    "plan": "approved with incorporated amendments",
+    "implementation": "approved with incorporated amendments"
+  },
+  "release_version": "0.3.0",
+  "installed_version": "0.3.0",
+  "live_test_package_metadata": "0.2.1; version bump requested after the live run started",
+  "cli_version_output": "EvSnow v0.3.0"
+}

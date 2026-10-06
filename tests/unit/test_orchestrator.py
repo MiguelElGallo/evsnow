@@ -982,6 +982,7 @@ class TestRunPipeline:
         # Arrange
         # Make run_async raise CancelledError immediately
         mock_orchestrator = mocker.MagicMock()
+        mock_orchestrator.shutdown_task = None
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=asyncio.CancelledError())
@@ -1011,6 +1012,7 @@ class TestRunPipeline:
         """Test that run_pipeline() handles CancelledError gracefully."""
         # Arrange
         mock_orchestrator = mocker.MagicMock()
+        mock_orchestrator.shutdown_task = None
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=asyncio.CancelledError())
@@ -1039,6 +1041,7 @@ class TestRunPipeline:
         """Test that run_pipeline() handles KeyboardInterrupt gracefully."""
         # Arrange
         mock_orchestrator = mocker.MagicMock()
+        mock_orchestrator.shutdown_task = None
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=KeyboardInterrupt())
@@ -1066,6 +1069,7 @@ class TestRunPipeline:
         """Test that run_pipeline() handles generic exceptions and cleans up."""
         # Arrange
         mock_orchestrator = mocker.MagicMock()
+        mock_orchestrator.shutdown_task = None
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=RuntimeError("Pipeline error"))
@@ -1092,6 +1096,7 @@ class TestRunPipeline:
         """Test that run_pipeline() always calls stop() in finally block."""
         # Arrange
         mock_orchestrator = mocker.MagicMock()
+        mock_orchestrator.shutdown_task = None
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=ValueError("Test error"))
@@ -1120,6 +1125,7 @@ class TestRunPipeline:
         mock_retry_manager = mocker.MagicMock()
 
         mock_orchestrator = mocker.MagicMock()
+        mock_orchestrator.shutdown_task = None
         mock_orchestrator.start = mocker.MagicMock()
         mock_orchestrator.setup_signal_handlers = mocker.MagicMock()
         mock_orchestrator.run_async = mocker.AsyncMock(side_effect=asyncio.CancelledError())

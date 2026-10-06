@@ -1539,6 +1539,9 @@ class TestEventHubAsyncConsumer:
         assert consumer.current_batch is failed_batch
         assert len(consumer.current_batch.messages) == 1
         assert consumer.running is False
+        assert consumer._receive_error is not None
+        assert consumer._receive_error_close_task is not None
+        await consumer._receive_error_close_task
         assert consumer.client is None
         mock_client.close.assert_called_once()
         mock_context.update_checkpoint.assert_not_called()

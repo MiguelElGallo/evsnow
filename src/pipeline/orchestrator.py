@@ -178,17 +178,22 @@ class PipelineMapping:
             await self.eventhub_consumer.start()
 
     async def stop(self) -> None:
-        """Stop the mapping components gracefully."""
+        """Close both components before reporting a shutdown failure."""
         if not self.running:
             return
 
         logger.info(f"🛑 Stopping mapping: {self.stats['mapping_key']}")
         self.running = False
+        shutdown_error: Exception | None = None
 
         # Stop EventHub consumer first (this will process remaining messages and save checkpoints)
         if self.eventhub_consumer:
             logger.info(f"📦 Finalizing EventHub consumer for {self.stats['mapping_key']}...")
-            await self.eventhub_consumer.stop()
+            try:
+                await self.eventhub_consumer.stop()
+            except Exception as error:
+                shutdown_error = error
+                logger.exception("EventHub consumer shutdown failed")
             # DON'T set to None yet - keep reference until Snowflake is closed
 
         # Stop Snowflake client and ensure flush completes
@@ -198,18 +203,27 @@ class PipelineMapping:
                 f"🔌 Flushing and closing Snowflake client for {self.stats['mapping_key']}..."
             )
             # Run synchronous stop() in executor to not block the event loop
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.snowflake_client.stop)
-            # Give extra time for flush to propagate through Snowflake infrastructure
-            logger.info("⏳ Waiting for Snowflake flush to complete...")
-            await asyncio.sleep(3)
-            logger.info(f"✅ Snowflake client flushed and closed for {self.stats['mapping_key']}")
-            self.snowflake_client = None
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, self.snowflake_client.stop)
+                # Give extra time for flush to propagate through Snowflake infrastructure
+                logger.info("⏳ Waiting for Snowflake flush to complete...")
+                await asyncio.sleep(3)
+                logger.info(
+                    f"✅ Snowflake client flushed and closed for {self.stats['mapping_key']}"
+                )
+            except Exception as error:
+                shutdown_error = shutdown_error or error
+                logger.exception("Snowflake client shutdown failed")
+            finally:
+                self.snowflake_client = None
 
         # Now safe to clear EventHub consumer reference
         if self.eventhub_consumer:
             self.eventhub_consumer = None
 
+        if shutdown_error is not None:
+            raise shutdown_error
         logger.info(f"✅ Mapping {self.stats['mapping_key']} stopped gracefully")
 
     def _process_messages(self, messages: list[EventHubMessage]) -> bool:
@@ -370,6 +384,8 @@ class PipelineOrchestrator:
         self.shutdown_requested = False  # Flag to track shutdown requests
         self.shutdown_task: asyncio.Task | None = None
         self.tasks: list[asyncio.Task] = []
+        self._stop_lock = asyncio.Lock()
+        self._shutdown_error: Exception | None = None
 
         # Statistics
         self.stats: dict[str, Any] = {
@@ -436,16 +452,9 @@ class PipelineOrchestrator:
             logger.info(f"All {len(self.tasks)} mapping tasks started")
 
             # Wait for all tasks (they should run indefinitely until stopped)
-            results = await asyncio.gather(*self.tasks, return_exceptions=True)
-            errors = [
-                result
-                for result in results
-                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError)
-            ]
-            if errors:
-                for error in errors:
-                    logger.error("Mapping task failed: %s", error)
-                raise errors[0]
+            # Propagate the first failure immediately; run_pipeline's cleanup
+            # stops healthy peers instead of waiting indefinitely for them.
+            await asyncio.gather(*self.tasks)
 
         except asyncio.CancelledError:
             logger.info("Pipeline execution cancelled")
@@ -455,7 +464,13 @@ class PipelineOrchestrator:
             raise
 
     async def stop(self) -> None:
-        """Stop the orchestrator and all mappings gracefully."""
+        """Finish cleanup of every mapping before propagating failure."""
+        async with self._stop_lock:
+            await self._stop_mappings()
+            if self._shutdown_error is not None:
+                raise self._shutdown_error
+
+    async def _stop_mappings(self) -> None:
         if not self.running:
             return
 
@@ -467,6 +482,7 @@ class PipelineOrchestrator:
             try:
                 await mapping.stop()
             except Exception as e:
+                self._shutdown_error = self._shutdown_error or e
                 logger.error(
                     f"Error stopping mapping {mapping.stats['mapping_key']}: {e}", exc_info=True
                 )
@@ -500,9 +516,11 @@ class PipelineOrchestrator:
                         logger.error("Mapping tasks did not cancel; forcing exit to avoid hang")
                         os._exit(1)
 
-        # Stop all mappings
-        for mapping in self.mappings:
-            await mapping.stop()
+        for task in self.tasks:
+            if task.done() and not task.cancelled():
+                error = task.exception()
+                if isinstance(error, Exception):
+                    self._shutdown_error = self._shutdown_error or error
 
         self.mappings.clear()
         self.tasks.clear()
@@ -515,6 +533,7 @@ class PipelineOrchestrator:
             logger.info("Cached Snowflake connections cleaned up")
         except Exception as e:
             logger.warning(f"Error cleaning up Snowflake connections: {e}")
+            self._shutdown_error = self._shutdown_error or e
 
         logger.info("Pipeline orchestrator stopped")
 
@@ -619,5 +638,10 @@ async def run_pipeline(config: EvSnowConfig, retry_manager: Any | None = None) -
         raise
     finally:
         # Always cleanup
-        await orchestrator.stop()
+        if orchestrator.shutdown_task is not None:
+            # Signal-driven cleanup runs in a separate task. Await its result
+            # so an incomplete drain/close cannot become a successful CLI exit.
+            await orchestrator.shutdown_task
+        else:
+            await orchestrator.stop()
         logger.info("Pipeline shutdown complete")

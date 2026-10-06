@@ -166,6 +166,16 @@ because that table is validated as a complete Snowflake connection model.
 | Session schema | `snowflake_connection.schema_name` | `SNOWFLAKE_SCHEMA_NAME` | derived when one mapped target has one database/schema | `.env` uses `SCHEMA_NAME`, not `SCHEMA`. |
 | Role | `snowflake_connection.role` | `SNOWFLAKE_ROLE` | unset | Optional runtime role. |
 | Pipe name | `snowflake_connection.pipe_name` | `SNOWFLAKE_PIPE_NAME` | required | Snowpipe Streaming pipe object name. |
+| Channel mode | `snowflake_connection.channel_mode` | `SNOWFLAKE_CHANNEL_MODE` | `named`; `named`, `elastic` | Named mode preserves partition channels and offset tokens. Elastic mode uses the custom pipe's implicit channel and at-least-once delivery. |
+| Acknowledgement timeout | `snowflake_connection.ack_timeout_seconds` | `SNOWFLAKE_ACK_TIMEOUT_SECONDS` | `60`; positive integer | Elastic mode: seconds for one wait on a submitted batch. A timed-out Future stays pending; another attempt observes the same append. |
+| Close timeout | `snowflake_connection.close_timeout_seconds` | `SNOWFLAKE_CLOSE_TIMEOUT_SECONDS` | `60`; positive integer | Elastic mode: adapter budget for pending acknowledgements and SDK client close, not the entire consumer/pipeline shutdown. An unresolved close does not establish successful delivery. |
+
+The three channel-mode settings follow the precedence described above. In the
+standard example, set them in `.env`; adding an incomplete
+`[snowflake_connection]` TOML table does not defer required connection fields to
+the environment. See [Enable Elastic Channels](../how-to/use-elastic-channels.md)
+for run commands and [Elastic acknowledgements and replay](../explanation/elastic-channels.md)
+for delivery semantics.
 
 ## Snowflake Target Settings
 
@@ -181,8 +191,8 @@ family per target table.
 | Retry attempts | `snowflake_configs.<KEY>.max_retry_attempts` | `SNOWFLAKE_{N}_MAX_RETRY_ATTEMPTS` | `3` | Integer. |
 | Retry delay | `snowflake_configs.<KEY>.retry_delay_seconds` | `SNOWFLAKE_{N}_RETRY_DELAY_SECONDS` | `5` | Seconds. |
 | Connection timeout | `snowflake_configs.<KEY>.connection_timeout_seconds` | `SNOWFLAKE_{N}_CONNECTION_TIMEOUT_SECONDS` | `30` | Seconds. |
-| Channel status interval | `snowflake_configs.<KEY>.channel_status_interval_seconds` | `SNOWFLAKE_{N}_CHANNEL_STATUS_INTERVAL_SECONDS` | `60`; `0` disables | Seconds between channel status checks. |
-| Client refresh interval | `snowflake_configs.<KEY>.client_refresh_interval_seconds` | `SNOWFLAKE_{N}_CLIENT_REFRESH_INTERVAL_SECONDS` | `0`; `0` disables | Seconds between proactive client recreation. |
+| Channel status interval | `snowflake_configs.<KEY>.channel_status_interval_seconds` | `SNOWFLAKE_{N}_CHANNEL_STATUS_INTERVAL_SECONDS` | `60`; `0` disables | Named mode: seconds between channel status checks. Elastic mode uses append outcomes and target/error-table verification. |
+| Client refresh interval | `snowflake_configs.<KEY>.client_refresh_interval_seconds` | `SNOWFLAKE_{N}_CLIENT_REFRESH_INTERVAL_SECONDS` | `0`; `0` disables | Named mode: seconds between proactive client recreation. Elastic mode keeps the client alive while acknowledgements are pending. |
 
 ## Event Hub To Snowflake Mappings
 
@@ -194,7 +204,7 @@ TOML supports explicit mappings. `.env` uses automatic numeric mappings:
 |---------|----------|-----------------|--------------------------|-------|
 | Event Hub key | `mappings[].event_hub_key` | automatic by `{N}` | required in TOML | Must reference a defined `EVENTHUBNAME_{N}` key. |
 | Snowflake key | `mappings[].snowflake_key` | automatic by `{N}` | required in TOML | Must reference a defined `SNOWFLAKE_{N}` key. |
-| Channel name pattern | `mappings[].channel_name_pattern` | automatic default | `{event_hub}-{env}-{region}-{client_id}` | Allowed placeholders are `{event_hub}`, `{env}`, `{region}`, and `{client_id}`. |
+| Channel name pattern | `mappings[].channel_name_pattern` | automatic default | `{event_hub}-{env}-{region}-{client_id}` | Allowed placeholders are `{event_hub}`, `{env}`, `{region}`, and `{client_id}`. Names Named channels; in Elastic mode the pattern remains local source/batch context. |
 
 ## Logfire Observability
 
@@ -219,7 +229,7 @@ only when the run command uses `--smart`.
 | Setting | TOML key | `.env` variable | Default / allowed values | Notes |
 |---------|----------|-----------------|--------------------------|-------|
 | Enabled flag | not supported | `SMART_RETRY_ENABLED` | `false` | Parsed by the settings model, but `uv run evsnow run --smart` is the runtime switch. |
-| LLM provider | not supported | `SMART_RETRY_LLM_PROVIDER` | `openai`; `openai`, `azure`, `anthropic`, `gemini`, `groq`, `cohere` | Case-normalized. |
+| LLM provider | not supported | `SMART_RETRY_LLM_PROVIDER` | `openai`; `openai`, `azure`, `anthropic`, `gemini`, `groq`, `cohere` | Case-normalized. OpenAI uses Chat Completions; `gemini` selects the Google provider. |
 | LLM model | not supported | `SMART_RETRY_LLM_MODEL` | `gpt-4o-mini` | For Azure, use your deployment name. |
 | API key | not supported | `SMART_RETRY_LLM_API_KEY` | required with `--smart` | Keep in `.env` or a secret store. |
 | Endpoint | not supported | `SMART_RETRY_LLM_ENDPOINT` | unset | Required for Azure OpenAI-style custom endpoints. |

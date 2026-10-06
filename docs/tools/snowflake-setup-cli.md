@@ -40,13 +40,19 @@ an AI-powered agent (GitHub Copilot SDK). It automates the process described in
 cd tools/snowflake_setup
 
 # Install dependencies with uv
-uv sync
+uv sync --locked
 
 # Or install in development mode
 uv pip install -e .
 ```
 
 ## Usage
+
+The helper has its own dependency lock, including GitHub Copilot SDK 1.0.16.
+It asks for permission before each agent operation and approves only that
+operation. A declined request is rejected; a run without an interactive terminal
+cannot approve operations. This experimental helper remains separate from the
+supported SQL quickstart.
 
 ### Interactive Setup
 

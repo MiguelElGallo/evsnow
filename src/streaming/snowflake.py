@@ -1,7 +1,7 @@
 """
 Snowflake streaming client facade (high-performance only).
 
-Re-exports the high-performance streaming factory and base class for use by the orchestrator.
+Re-exports the Named/Elastic streaming factory and base class for the orchestrator.
 """
 
 from streaming.base import SnowflakeStreamingClientBase as SnowflakeStreamingClient

@@ -1,0 +1,6 @@
+{
+  "id": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-fixes-20261005-2043/providers/Microsoft.EventHub/namespaces/evsnow-elastic-fixes-20261005-2043/eventhubs/events-small/providers/Microsoft.Authorization/roleAssignments/83fb8fe4-eab5-4349-93c7-3bc4c39d2702",
+  "principalType": "User",
+  "roleDefinitionId": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/providers/Microsoft.Authorization/roleDefinitions/f526a384-b230-433a-b45c-95f59c4a2dec",
+  "scope": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-fixes-20261005-2043/providers/Microsoft.EventHub/namespaces/evsnow-elastic-fixes-20261005-2043/eventhubs/events-small"
+}

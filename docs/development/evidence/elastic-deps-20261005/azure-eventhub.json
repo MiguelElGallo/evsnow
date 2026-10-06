@@ -1,0 +1,14 @@
+{
+  "id": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-20261005-2008/providers/Microsoft.EventHub/namespaces/evsnow-elastic-20261005-2008/eventhubs/events",
+  "name": "events",
+  "partitionCount": 2,
+  "partitionIds": [
+    "0",
+    "1"
+  ],
+  "retentionDescription": {
+    "cleanupPolicy": "Delete",
+    "retentionTimeInHours": 24
+  },
+  "status": "Active"
+}

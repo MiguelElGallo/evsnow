@@ -4,6 +4,7 @@ Separated from `utils.config` to keep the main configuration file smaller.
 """
 
 import os
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
@@ -38,6 +39,27 @@ class SnowflakeConnectionConfig(BaseSettings):
         ...,
         description="PIPE object name for high-performance SDK (e.g., EVENTS_TABLE_PIPE)",
     )
+
+    channel_mode: Literal["named", "elastic"] = Field(
+        default="named",
+        description="Snowpipe Streaming channel mode; named preserves source offset tracking",
+    )
+    ack_timeout_seconds: int = Field(
+        default=60,
+        gt=0,
+        description="Maximum wait for an Elastic append acknowledgement, in seconds",
+    )
+    close_timeout_seconds: int = Field(
+        default=60,
+        gt=0,
+        description="Maximum wait for pending Elastic acknowledgements and client close",
+    )
+
+    @field_validator("channel_mode", mode="before")
+    @classmethod
+    def normalize_channel_mode(cls, value: str) -> str:
+        """Accept case-insensitive mode names from environment and TOML settings."""
+        return value.strip().lower() if isinstance(value, str) else value
 
     @field_validator("private_key_file")
     @classmethod

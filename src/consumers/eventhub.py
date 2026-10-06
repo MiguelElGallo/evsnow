@@ -142,6 +142,9 @@ class EventHubAsyncConsumer:
         self._restored_detached_batch_ids: set[str] = set()
         self._receive_error: Exception | None = None
         self._receive_error_close_task: asyncio.Task[None] | None = None
+        self._stop_lock = asyncio.Lock()
+        self._shutdown_complete = False
+        self._shutdown_error: Exception | None = None
 
         # Statistics
         self.stats: dict[str, Any] = {
@@ -501,6 +504,9 @@ class EventHubAsyncConsumer:
             raise
         except Exception as close_error:
             logger.warning("Error closing EventHub client after receive error: %s", close_error)
+        else:
+            if self.client is client:
+                self.client = None
 
     def _raise_rbac_permission_error(
         self,
@@ -605,6 +611,10 @@ class EventHubAsyncConsumer:
         if self.running:
             logger.warning("Consumer is already running")
             return
+
+        self._receive_error = None
+        self._shutdown_complete = False
+        self._shutdown_error = None
 
         # Log the start event with key parameters
         logfire.info(
@@ -824,7 +834,6 @@ class EventHubAsyncConsumer:
 
             try:
                 # Determine starting position based on checkpoint existence
-                self._receive_error = None
                 receive_kwargs: dict[str, Any] = {
                     "on_event": self._on_event,
                     **self._eventhub_receive_options(),
@@ -845,6 +854,12 @@ class EventHubAsyncConsumer:
                 await self.client.receive(**receive_kwargs)
                 if self._receive_error is not None:
                     raise self._receive_error
+            except asyncio.CancelledError:
+                # SDK close may cancel receive instead of returning normally.
+                # A terminal callback failure must still reach the supervisor.
+                if self._receive_error is not None:
+                    raise self._receive_error from None
+                raise
             except Exception as receive_error:
                 handled = self._handle_receive_error(receive_error)
                 if not handled:
@@ -852,11 +867,22 @@ class EventHubAsyncConsumer:
 
         except Exception as e:
             logger.error(f"❌ Failed to start EventHub consumer: {e}", exc_info=True)
-            await self.stop()
+            try:
+                await self.stop()
+            except Exception:
+                logger.exception("Consumer cleanup also failed")
             raise
 
     async def stop(self) -> None:
-        """Stop the EventHub consumer gracefully."""
+        """Drain and close resources, then report any terminal failure."""
+        async with self._stop_lock:
+            if not self._shutdown_complete:
+                await self._stop_components()
+            if self._shutdown_error is not None:
+                raise self._shutdown_error
+
+    async def _stop_components(self) -> None:
+        self._shutdown_error = self._receive_error
         try:
             logger.info("🛑 Stopping EventHub consumer gracefully...")
             self.running = False
@@ -877,7 +903,7 @@ class EventHubAsyncConsumer:
             await self._restore_detached_batches_for_shutdown()
         except Exception as e:
             logger.error(f"❌ Error during initial shutdown steps: {e}", exc_info=True)
-            raise
+            self._shutdown_error = self._shutdown_error or e
 
         try:
             # Process any remaining messages in current batch BEFORE closing the client
@@ -905,49 +931,46 @@ class EventHubAsyncConsumer:
                             f"✅ {message_count} remaining messages processed and checkpoints updated"
                         )
                     else:
-                        logger.error(
-                            "❌ Remaining batch failed during shutdown; leaving it uncheckpointed"
+                        raise RuntimeError(
+                            "Remaining batch failed during shutdown; source remains uncheckpointed"
                         )
+                    if self.current_batch is batch_to_process:
+                        self.current_batch = None
                 except Exception as e:
                     logger.error(f"❌ Error processing remaining batch: {e}", exc_info=True)
+                    self._shutdown_error = self._shutdown_error or e
             else:
                 logger.info("✅ No remaining messages to process")
         except Exception as e:
             logger.error(f"❌ Error during batch processing: {e}", exc_info=True)
-            # Don't raise - continue with cleanup
+            self._shutdown_error = self._shutdown_error or e
+
+        if self._receive_error_close_task is not None:
+            await asyncio.gather(self._receive_error_close_task, return_exceptions=True)
+            self._receive_error_close_task = None
+
+        # Every cleanup step runs even when draining or another close fails.
+        for resource_name in ("client", "credential", "checkpoint_manager"):
+            resource = getattr(self, resource_name)
+            if resource is None:
+                continue
+            try:
+                result = resource.close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as e:
+                logger.error("Error closing %s: %s", resource_name, e, exc_info=True)
+                self._shutdown_error = self._shutdown_error or e
+            finally:
+                setattr(self, resource_name, None)
 
         try:
-            # Close EventHub client to stop receiving new messages
-            if self.client:
-                logger.info("🔌 Closing EventHub client...")
-                try:
-                    await self.client.close()
-                except Exception as e:
-                    logger.warning(f"Error closing EventHub client: {e}")
-                self.client = None
-
-            # Close Azure credential to prevent resource leak
-            if self.credential:
-                logger.info("🔐 Closing Azure credential...")
-                try:
-                    await self.credential.close()
-                except Exception as e:
-                    logger.warning(f"Error closing credential: {e}")
-                self.credential = None
-
-            # Close checkpoint manager
-            if self.checkpoint_manager:
-                logger.info("🗄️ Closing checkpoint manager...")
-                self.checkpoint_manager.close()
-                self.checkpoint_manager = None
-
-            # Flush captured messages (if enabled)
             await self._stop_capture_writer()
-
-            logger.info("✅ EventHub consumer stopped gracefully")
         except Exception as e:
-            logger.error(f"❌ Error during final cleanup: {e}", exc_info=True)
-            # Don't raise - we're shutting down anyway
+            logger.error("Error stopping capture writer: %s", e, exc_info=True)
+            self._shutdown_error = self._shutdown_error or e
+        self._shutdown_complete = True
+        logger.info("EventHub consumer cleanup complete")
 
     async def _on_event(self, partition_context: PartitionContext, event: EventData | None) -> None:
         """
@@ -1225,16 +1248,19 @@ class EventHubAsyncConsumer:
             self._detached_batches.clear()
 
     async def _stop_after_batch_failure(self) -> None:
+        if self._receive_error is None:
+            self._receive_error = RuntimeError(
+                "Batch processing failed; consumer stopped with source retained for replay"
+            )
         self.running = False
-        if not self.client:
-            return
-
-        try:
-            await self.client.close()
-        except Exception as exc:
-            logger.warning("Error closing EventHub client after batch failure: %s", exc)
-        finally:
-            self.client = None
+        # Closing in the callback can cancel that callback before it restores
+        # source state. Use the same out-of-band stop as receive failures.
+        if self.client is not None and (
+            self._receive_error_close_task is None or self._receive_error_close_task.done()
+        ):
+            self._receive_error_close_task = asyncio.create_task(
+                self._close_client_after_receive_error()
+            )
 
     async def _process_detached_batch(
         self,
