@@ -10,13 +10,13 @@ This keeps the file you review small, typed, and easy to validate.
 
 ## Start with TOML
 
-Create a structured config file:
+Create a structured config file if you do not already have one:
 
 ```bash
-cp config/evsnow.example.toml config/evsnow.toml
+[ -f config/evsnow.toml ] || cp config/evsnow.example.toml config/evsnow.toml
 ```
 
-Then edit `config/evsnow.toml`.
+This preserves existing settings. Then edit `config/evsnow.toml`.
 
 For one Event Hub and one Snowflake table, the important parts look like this:
 

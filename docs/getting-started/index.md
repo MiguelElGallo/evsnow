@@ -1,6 +1,9 @@
 # Setup
 
 Use these pages when a required cloud object does not exist yet.
+[Install EvSnow](../tutorial/first-run.md#install) first, then run setup commands
+from the repository root. If both services are new, complete Event Hub setup
+before Snowflake setup so the configuration checks have both source and target settings.
 
 ## Choose A Setup Path
 

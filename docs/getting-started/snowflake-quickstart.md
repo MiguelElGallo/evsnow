@@ -11,8 +11,8 @@ roles, warehouses, databases, schemas, tables, pipes, and grants. `ACCOUNTADMIN`
 is acceptable for a one-time bootstrap when your organization does not provide a
 narrower setup role.
 
-Run the local commands on this page from the EvSnow repo root after cloning the
-repo and running `uv sync`.
+[Install EvSnow](../tutorial/first-run.md#install) if you have not already done
+so. Run the local commands on this page from the repository root.
 
 !!! warning "Connection success is not DDL success"
 
@@ -207,6 +207,11 @@ The full environment template remains in
 [`.env.example`](https://github.com/MiguelElGallo/evsnow/blob/main/.env.example).
 
 ## Verify EvSnow Configuration
+
+Before running this check, complete the
+[Event Hub quickstart](event-hub-quickstart.md) if needed and replace the
+namespace and Event Hub placeholders in `config/evsnow.toml` with your values.
+The command checks the combined configuration, not only Snowflake settings.
 
 ```bash
 uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env

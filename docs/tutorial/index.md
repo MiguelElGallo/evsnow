@@ -4,10 +4,11 @@ Start here when you want to run EvSnow for the first time.
 
 ## Path
 
-1. Create or verify the Snowflake objects.
+1. [Install EvSnow](first-run.md#install).
 2. Create or verify the Event Hub objects.
-3. Run one Event Hub into one Snowflake target.
-4. Prove rows arrived with a unique `run_id`.
+3. Create or verify the Snowflake objects.
+4. Configure and run one Event Hub into one Snowflake target.
+5. Check that rows arrived with a unique `run_id`.
 
 ## First Run Complete
 

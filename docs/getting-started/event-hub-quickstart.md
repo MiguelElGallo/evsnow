@@ -8,8 +8,8 @@ Event Hub for the first run.
 You need Azure CLI access to a subscription where you can create resource
 groups, Event Hubs namespaces, Event Hubs, and role assignments.
 
-Run these commands from the EvSnow repo root after cloning the repo and running
-`uv sync`:
+[Install EvSnow](../tutorial/first-run.md#install) if you have not already done
+so. Run these commands from the repository root:
 
 ```bash
 az login

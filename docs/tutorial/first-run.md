@@ -8,9 +8,12 @@ table. It keeps pipeline shape in TOML and keeps secrets in `.env`.
 You need:
 
 - Python `3.13` or newer and `uv`.
-- Azure CLI logged in with access to the Event Hub namespace.
-- Snowflake CLI for the arrival check query.
-- The encrypted Snowflake private key generated during Snowflake setup.
+- Azure CLI and access to your Azure subscription.
+- Snowflake CLI and access to an active Snowflake account.
+
+The setup pages below create any missing cloud objects and generate the
+encrypted private key. If those objects already exist, have their names and the
+runtime user's private key available.
 
 ## Install
 
@@ -22,21 +25,18 @@ uv sync
 
 You now have the `evsnow` CLI available through `uv run`.
 
-Fresh Snowflake accounts should complete
-[Snowflake quickstart](../getting-started/snowflake-quickstart.md) first. This
-tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
-`INGESTION` database, target Iceberg table, and streaming pipe already exist.
-
 ## Choose Your Starting Point
 
-- If the Snowflake objects do not exist yet, run
-  [Snowflake quickstart](../getting-started/snowflake-quickstart.md), then come
-  back here.
-- If the Event Hub namespace or Event Hub does not exist yet, run
-  [Event Hub quickstart](../getting-started/event-hub-quickstart.md), then come
-  back here.
-- If the objects already exist, continue below and create only the runtime
-  files.
+Complete the missing setup steps in this order:
+
+1. If the namespace or Event Hub does not exist, follow
+   [Event Hub quickstart](../getting-started/event-hub-quickstart.md).
+2. If the Snowflake objects do not exist, follow
+   [Snowflake quickstart](../getting-started/snowflake-quickstart.md). It creates
+   the `STREAM` role, `STREAMEV` user, `CONTROL` and `INGESTION` databases,
+   target Iceberg table, streaming pipe, and encrypted private key.
+3. Return here to configure and run the pipeline. If both services are already
+   ready, continue below using their existing names and credentials.
 
 ## Create The Runtime Files
 
@@ -80,10 +80,11 @@ event_hub_key = "EVENTHUBNAME_1"
 snowflake_key = "SNOWFLAKE_1"
 ```
 
-Change only the namespace, Event Hub name, and Snowflake target values for the
-first run. For that run, read only new events: start the pipeline
-before sending the three example messages below. `batch_size = 3` then flushes that
-complete example batch without waiting for the default batch timeout.
+Keep your actual namespace, Event Hub name, and Snowflake target values.
+Set `batch_size = 3` and `starting_position_on_no_checkpoint = "@latest"` as shown,
+including when reusing a file from setup. Start the pipeline before sending the
+three example messages below. The complete batch then flushes without waiting
+for the default batch timeout.
 
 After the first run, raise `batch_size` for normal throughput. Change
 `starting_position_on_no_checkpoint` to `-1` only when you intentionally want to
