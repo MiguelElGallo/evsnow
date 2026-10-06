@@ -2,6 +2,7 @@
 
 import importlib.util
 import sys
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,10 +21,12 @@ CONFIGURATION = REPO_ROOT / "docs" / "configuration.md"
 ZENSICAL = REPO_ROOT / "zensical.toml"
 FIRST_RUN = REPO_ROOT / "docs" / "tutorial" / "first-run.md"
 EVENTHUB_SENDER = REPO_ROOT / "docs" / "tools" / "eventhub-sender.md"
-WORKFLOWS = REPO_ROOT / "docs" / "project" / "workflows.md"
 DOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docs.yml"
 GENERATE_KEYS = REPO_ROOT / "generate_snowflake_keys.sh"
-ARCHIVE_DOCS = [
+REMOVED_INTERNAL_DOCS = [
+    REPO_ROOT / "docs" / "project",
+    REPO_ROOT / "docs" / "development",
+    REPO_ROOT / "docs" / "archive",
     REPO_ROOT / "docs" / "project" / "issue-creation-guide.md",
     REPO_ROOT / "docs" / "python-pipeline-hardening-plan.md",
     REPO_ROOT / "docs" / "archive" / "control-table-postgres-plan.md",
@@ -155,19 +158,22 @@ def test_eventhub_quickstart_covers_creation_and_rbac():
     assert "AZ EVENTHUBS EVENTHUB CREATE" in docs
     assert "AZURE EVENT HUBS DATA RECEIVER" in docs
     assert "AZURE EVENT HUBS DATA SENDER" in docs
-    assert "EVENTHUB-RBAC-SMOKE" in docs
+    assert "--COUNT 1" in docs
+    assert "--PAYLOAD" in docs
     assert "--CREDENTIAL-MODE AZURE_CLI" in docs
     assert "FULLY QUALIFIED NAMESPACE" in docs
     assert "GETTING-STARTED/EVENT-HUB-QUICKSTART.MD" in config
 
 
-def test_readme_installs_before_repo_local_quickstarts():
-    docs = _normalized(README)
+def test_readme_links_to_tutorial_with_installation_before_setup():
+    readme = _normalized(README)
+    tutorial = _normalized(FIRST_RUN)
 
-    assert docs.index("GIT CLONE HTTPS://GITHUB.COM/MIGUELELGALLO/EVSNOW.GIT") < docs.index(
-        "EVENT HUB QUICKSTART"
+    assert "HTTPS://MIGUELELGALLO.GITHUB.IO/EVSNOW/TUTORIAL/FIRST-RUN/" in readme
+    assert tutorial.index("GIT CLONE HTTPS://GITHUB.COM/MIGUELELGALLO/EVSNOW.GIT") < (
+        tutorial.index("GETTING-STARTED/EVENT-HUB-QUICKSTART.MD")
     )
-    assert "SETUP PAGES ASSUME COMMANDS ARE RUN FROM THE REPO ROOT" in docs
+    assert tutorial.index("UV SYNC") < tutorial.index("GETTING-STARTED/SNOWFLAKE-QUICKSTART.MD")
 
 
 def test_env_example_keeps_first_run_shape_in_toml():
@@ -267,13 +273,13 @@ def test_eventhub_sender_env_only_docs_match_cli_defaults():
 
 def test_docs_workflow_deploys_built_artifact_once():
     workflow = DOCS_WORKFLOW.read_text(encoding="utf-8")
-    docs = _normalized(WORKFLOWS)
 
     assert "Upload GitHub Pages artifact" in workflow
     assert "if: github.event_name == 'push'" in workflow
     assert workflow.count("uv run zensical build --clean --strict") == 1
-    assert "DEPLOY JOB PUBLISHES THE ARTIFACT FROM THE BUILD JOB" in docs
-    assert "CODSPEED" in docs
+    assert "needs: build" in workflow
+    assert "actions/upload-pages-artifact@" in workflow
+    assert "actions/deploy-pages@" in workflow
 
 
 def test_quickstart_harness_fails_on_validation_warnings():
@@ -291,10 +297,11 @@ def test_quickstart_harness_fails_on_validation_warnings():
     assert "database/schema are derived from config/evsnow.toml" in harness
 
 
-def test_archive_pages_are_excluded_from_search():
-    for path in ARCHIVE_DOCS:
-        text = path.read_text(encoding="utf-8")
-        assert text.startswith("---\nsearch:\n  exclude: true\n---\n"), path
+def test_internal_docs_are_absent_from_site_source_and_navigation():
+    config = str(tomllib.loads(ZENSICAL.read_text(encoding="utf-8"))["project"]["nav"])
+    for path in REMOVED_INTERNAL_DOCS:
+        assert not path.exists(), path
+        assert path.relative_to(REPO_ROOT / "docs").as_posix() not in config
 
 
 def test_quickstart_harness_resolves_cli_default_connection():
