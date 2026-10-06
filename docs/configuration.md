@@ -157,7 +157,35 @@ of supported TOML keys, `.env` variables, defaults, and allowed values.
 
 ## Multiple mappings
 
-TOML makes repeated mappings easier to read than a long `.env`.
+Each mapping selects an Event Hub and a Snowflake target configuration. The
+streaming pipe determines which table receives the rows. Both channel modes use
+the shared `SNOWFLAKE_PIPE_NAME` in each target's database and schema; changing
+`table_name` alone does not select a different pipe or redirect its rows.
+
+To write to separate tables in one process, place their pipes in separate
+schemas or databases and give the pipes the same name. For example, prepare
+these objects and grant the runtime role access before using the configuration
+below:
+
+| Pipe | Destination table in the pipe's `COPY INTO` |
+|------|-------------------------------------------|
+| `INGESTION.SALES.EVENTS_TABLE_PIPE` | `INGESTION.SALES.ORDERS` |
+| `INGESTION.BILLING.EVENTS_TABLE_PIPE` | `INGESTION.BILLING.PAYMENTS` |
+
+Use the [Snowflake quickstart](getting-started/snowflake-quickstart.md) for the
+table shape and pipe/grant setup, adapting the schema and table names for each
+destination. The default setup creates only the `PUBLIC` destination.
+
+Set the shared pipe name and an explicit session context in `.env`, because
+these mappings span two schemas:
+
+```dotenv
+SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
+SNOWFLAKE_DATABASE=INGESTION
+SNOWFLAKE_SCHEMA_NAME=SALES
+```
+
+Add the sources, targets, and mappings to TOML:
 
 ```toml
 [event_hubs.EVENTHUBNAME_1]
@@ -172,12 +200,12 @@ consumer_group = "$Default"
 
 [snowflake_configs.SNOWFLAKE_1]
 database = "INGESTION"
-schema_name = "PUBLIC"
+schema_name = "SALES"
 table_name = "ORDERS"
 
 [snowflake_configs.SNOWFLAKE_2]
 database = "INGESTION"
-schema_name = "PUBLIC"
+schema_name = "BILLING"
 table_name = "PAYMENTS"
 
 [[mappings]]
@@ -189,11 +217,13 @@ event_hub_key = "EVENTHUBNAME_2"
 snowflake_key = "SNOWFLAKE_2"
 ```
 
-Each mapping connects one Event Hub key to one Snowflake target key.
+Keep each target's `table_name` aligned with its pipe's destination. Two
+mappings in the same database and schema use the same pipe and therefore write
+to the same destination table.
 
 ## Control tables
 
-For a local Snowflake trial smoke test:
+For a local Snowflake run:
 
 ```toml
 [control]

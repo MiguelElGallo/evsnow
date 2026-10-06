@@ -63,8 +63,7 @@ close timeout does not bound the entire consumer or pipeline shutdown.
 The SDK's memory buffer and EvSnow's pending-Future state do not survive process
 loss. A restart reads from the durable source checkpoint, so a previously
 accepted append may be replayed if its acknowledgement or checkpoint was lost.
-Event Hubs retention must cover the outage and replay period. Basic's one-day
-retention is suitable for the short disposable proof, not for a longer recovery
+Event Hubs retention must cover the outage and replay period. Choose an Event Hubs tier and retention period that cover your recovery
 requirement.
 [Elastic buffer limitations](https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-elastic-channels-limitations),
 [Azure retention limits](https://learn.microsoft.com/en-us/azure/event-hubs/compare-tiers).
@@ -92,8 +91,8 @@ query, or offset-token commit wait.
 
 ## Deduplicate according to event meaning
 
-Choose a deduplication key before relying on Elastic output. For the test
-producer, `(run_id, event_id)` identifies an immutable logical event. The
+Choose a deduplication key before relying on Elastic output. For a
+producer that includes a run ID and event ID, `(run_id, event_id)` identifies an immutable logical event. The
 following query produces one representative row per event from the quickstart
 target shape:
 
@@ -104,7 +103,7 @@ WITH events AS (
 )
 SELECT * EXCLUDE body
 FROM events
-WHERE body:run_id::STRING = 'elastic-proof-001'
+WHERE body:run_id::STRING = 'example-run-001'
 QUALIFY ROW_NUMBER() OVER (
     PARTITION BY body:run_id::STRING, body:event_id::NUMBER
     ORDER BY ENQUEUED_TIME, PARTITION_ID, SEQUENCE_NUMBER
@@ -134,4 +133,4 @@ does not remove source retention or downstream data-quality checks.
 [Snowflake channel choice](https://docs.snowflake.com/en/user-guide/snowpipe-streaming/snowpipe-streaming-elastic-channels-overview).
 
 Use [Enable Elastic Channels](../how-to/use-elastic-channels.md) for the settings,
-run commands, and disposable Azure test procedure.
+run commands, and operational checks.

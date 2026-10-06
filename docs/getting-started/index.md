@@ -19,10 +19,10 @@ Snowflake checks you need are green, return to
 
 Use this as the setup gate before returning to the tutorial:
 
-1. Snowflake setup passes with the quickstart harness or the manual object
+1. Snowflake setup passes the object
    checks in [Snowflake quickstart](snowflake-quickstart.md).
-2. Event Hub setup passes the sender RBAC smoke in
+2. Event Hub setup passes the sender access check in
    [Event Hub quickstart](event-hub-quickstart.md).
 
-The receiver startup and row-arrival proof happen in
+The receiver startup and row-arrival check happen in
 [First run](../tutorial/first-run.md).

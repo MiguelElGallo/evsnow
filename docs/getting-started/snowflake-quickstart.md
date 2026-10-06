@@ -171,10 +171,11 @@ Keep this checklist as the known-good proof before moving on:
 ## Configure EvSnow
 
 ```bash
-cp config/evsnow.example.toml config/evsnow.toml
+[ -f config/evsnow.toml ] || cp config/evsnow.example.toml config/evsnow.toml
 ```
 
-Set the Snowflake target in `config/evsnow.toml`:
+Keep any Event Hub settings from Azure setup. Set the Snowflake target in
+`config/evsnow.toml`:
 
 ```toml
 [snowflake_configs.SNOWFLAKE_1]
@@ -184,7 +185,8 @@ table_name = "EVENTS_TABLE1"
 batch_size = 100
 ```
 
-Create `.env` with only secrets and local credentials:
+Create or update `.env` with the Snowflake credentials below. Preserve any
+Event Hub connection string you already configured:
 
 ```bash
 SNOWFLAKE_ACCOUNT=<account_locator>
@@ -225,18 +227,3 @@ pipe grants exist.
 
 After validation passes without warnings, continue with
 [First run](../tutorial/first-run.md).
-
-## Maintainer Harness
-
-When setup SQL or Snowflake setup docs change, maintainers can run the same path
-in a scratch copy and keep the command log:
-
-```bash
-uv run python tools/quickstart_harness.py --connection <setup-connection>
-```
-
-The harness writes `summary.json` and `commands.jsonl` under
-`.quickstart-runs/`. A passing run reports `"status": "passed"` and includes
-`Snowflake control table verified/created successfully` in the validation
-output. It does not create Event Hubs or prove row arrival; use
-[First run](../tutorial/first-run.md) for that runtime proof.

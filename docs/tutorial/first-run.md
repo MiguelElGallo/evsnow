@@ -3,6 +3,25 @@
 This tutorial runs one Event Hub into one Snowflake target with one checkpoint
 table. It keeps pipeline shape in TOML and keeps secrets in `.env`.
 
+## Before You Start
+
+You need:
+
+- Python `3.13` or newer and `uv`.
+- Azure CLI logged in with access to the Event Hub namespace.
+- Snowflake CLI for the arrival check query.
+- The encrypted Snowflake private key generated during Snowflake setup.
+
+## Install
+
+```bash
+git clone https://github.com/MiguelElGallo/evsnow.git
+cd evsnow
+uv sync
+```
+
+You now have the `evsnow` CLI available through `uv run`.
+
 Fresh Snowflake accounts should complete
 [Snowflake quickstart](../getting-started/snowflake-quickstart.md) first. This
 tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
@@ -19,32 +38,14 @@ tutorial assumes the `STREAM` role, `STREAMEV` user, `CONTROL` database,
 - If the objects already exist, continue below and create only the runtime
   files.
 
-## Before You Start
-
-You need:
-
-- Python `3.13` or newer and `uv`.
-- Azure CLI logged in with access to the Event Hub namespace.
-- Snowflake CLI for the arrival proof query.
-- The encrypted Snowflake private key generated during Snowflake setup.
-
-## Install
-
-```bash
-git clone https://github.com/MiguelElGallo/evsnow.git
-cd evsnow
-uv sync
-```
-
-You now have the `evsnow` CLI available through `uv run`.
-
 ## Create The Runtime Files
 
 ```bash
-cp config/evsnow.example.toml config/evsnow.toml
+[ -f config/evsnow.toml ] || cp config/evsnow.example.toml config/evsnow.toml
 ```
 
-Edit `config/evsnow.toml` for your first Event Hub and Snowflake table:
+The command preserves an existing configuration from setup. Edit
+`config/evsnow.toml` for your first Event Hub and Snowflake table:
 
 ```toml
 eventhub_namespace = "eventhub1.servicebus.windows.net"
@@ -80,11 +81,11 @@ snowflake_key = "SNOWFLAKE_1"
 ```
 
 Change only the namespace, Event Hub name, and Snowflake target values for the
-first smoke test. For that smoke test, read only new events: start the pipeline
-before sending the three test messages below. `batch_size = 3` then flushes that
-complete test batch without waiting for the default batch timeout.
+first run. For that run, read only new events: start the pipeline
+before sending the three example messages below. `batch_size = 3` then flushes that
+complete example batch without waiting for the default batch timeout.
 
-After the smoke test, raise `batch_size` for normal throughput. Change
+After the first run, raise `batch_size` for normal throughput. Change
 `starting_position_on_no_checkpoint` to `-1` only when you intentionally want to
 backfill retained Event Hub messages. `EVENTHUBNAME_1` and `SNOWFLAKE_1` are
 local mapping keys.
@@ -95,10 +96,11 @@ Use the encrypted key created during Snowflake setup. You can start from the
 local template:
 
 ```bash
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 ```
 
-Then keep only the local credentials needed by the run:
+The command preserves any credentials you already configured. Keep only the
+local credentials needed by the run:
 
 ```bash
 SNOWFLAKE_ACCOUNT=aaaaaa-bbbbbbb
@@ -110,7 +112,7 @@ SNOWFLAKE_ROLE=STREAM
 SNOWFLAKE_PIPE_NAME=EVENTS_TABLE_PIPE
 ```
 
-If local Azure CLI auth is not the path you want to test, add the Event Hub
+If local Azure CLI auth is not the path you want to use, add the Event Hub
 connection string to `.env`:
 
 ```bash
@@ -133,6 +135,10 @@ database/schema from the target in `config/evsnow.toml`.
 az login
 uv run evsnow validate-config --config-file config/evsnow.toml --env-file .env
 ```
+
+Continue only when validation reports
+`Snowflake control table verified/created successfully` with no warnings.
+A warning can accompany exit status `0`; resolve it before starting the pipeline.
 
 The Azure identity needs `Azure Event Hubs Data Receiver`. If you use the
 included sender utility, it also needs `Azure Event Hubs Data Sender`. Use
@@ -160,11 +166,11 @@ When startup succeeds, logs show the Event Hub name, Snowflake target, and
 
 If the receiver fails with `Failed to invoke Azure CLI`, first confirm `az login`
 and `az account get-access-token --resource https://eventhubs.azure.net/` work
-in the same shell. For a quick local smoke test, use
+in the same shell. For a quick local run, use
 `AZURE_EVENTHUB_CONNECTION_STRING` in `.env`; for production, prefer
 `credential_mode = "default"` with a service principal or managed identity.
 
-Open terminal 2 and send test messages:
+Open terminal 2 and send example messages:
 
 ```bash
 RUN_ID="evsnow-first-run-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -223,7 +229,7 @@ snow sql -x \
 
     Snowpipe Streaming flush and consumer checkpoint timing are asynchronous.
     If the first query returns `rows_arrived = 0`, wait 15 seconds and rerun
-    the same query while the pipeline is still running. The required proof is
+    the same query while the pipeline is still running. The required result is
     `rows_arrived = 3` and `missing_sequence_count = 0`.
 
 Use [Event Hub sender](../tools/eventhub-sender.md) for the longer sender
@@ -239,7 +245,7 @@ sequenceDiagram
     participant Control as Control table
     participant Snowflake as Snowflake target
 
-    Sender->>EventHub: Publish test events
+    Sender->>EventHub: Publish example events
     EvSnow->>EventHub: Receive batches
     EvSnow->>Snowflake: Append through Snowpipe Streaming
     EvSnow->>Control: Save checkpoints

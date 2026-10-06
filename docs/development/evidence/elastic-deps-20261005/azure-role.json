@@ -1,6 +1,0 @@
-{
-  "id": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-20261005-2008/providers/Microsoft.EventHub/namespaces/evsnow-elastic-20261005-2008/eventhubs/events/providers/Microsoft.Authorization/roleAssignments/607704df-54ce-48ef-9826-c1aff29828c1",
-  "principalType": "User",
-  "roleDefinitionId": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/providers/Microsoft.Authorization/roleDefinitions/f526a384-b230-433a-b45c-95f59c4a2dec",
-  "scope": "/subscriptions/27589aed-1762-4e6a-a78d-a82226365c73/resourceGroups/rg-evsnow-elastic-20261005-2008/providers/Microsoft.EventHub/namespaces/evsnow-elastic-20261005-2008/eventhubs/events"
-}
