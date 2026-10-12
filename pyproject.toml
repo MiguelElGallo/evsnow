@@ -77,7 +77,7 @@ dev = [
     "pytest-codspeed>=5.0.3",
 ]
 docs = [
-    "zensical==0.0.68",
+    "zensical==0.0.69",
 ]
 
 [tool.pytest.ini_options]
